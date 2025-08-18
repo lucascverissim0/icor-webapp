@@ -1,0 +1,226 @@
+import os
+import glob
+import json
+import subprocess
+import pandas as pd
+import streamlit as st
+
+# === CONFIG ===
+PREFERRED_SCRIPT2 = "script2.py"
+
+# === PATHS (go up TWO levels from ui/pages/ to the repo root) ===
+HERE = os.path.dirname(__file__)
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+DATA_DIR = os.path.join(ROOT, "data")
+SCRIPTS_DIR = os.path.join(ROOT, "scripts")
+
+# === PAGE META + DARK THEME (same as app.py) ===
+st.set_page_config(page_title="ICOR – Model Researcher", layout="wide")
+st.markdown(
+    """
+    <style>
+      html, body, .block-container { background-color: #0E1117 !important; color: #E6E6E6 !important; }
+      .stDataFrame, .stMarkdown, .css-1v0mbdj, .css-10trblm { color: #E6E6E6 !important; }
+      .badges { display:flex; gap:10px; flex-wrap:wrap; margin: 6px 0 14px 0; }
+      .badge {
+        background:#161A22; border:1px solid #30363d; border-radius: 999px;
+        padding:6px 12px; font-size:13px; color:#E6E6E6;
+      }
+      .badge-strong { border-color:#3b82f6; }
+      .badge-warn { border-color:#f59e0b; }
+      .badge-soft { border-color:#52525b; }
+      .k { color:#A1A1AA; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+st.title("ICOR – Model Researcher")
+
+# === HELPERS ===
+def localize_bools(df: pd.DataFrame, prefer_cols=None, true_txt="VRAI", false_txt="FAUX") -> pd.DataFrame:
+    d = df.copy()
+    candidates = list(prefer_cols) if prefer_cols else list(d.columns)
+    for c in candidates:
+        if c not in d.columns:
+            continue
+        s = d[c]
+        if s.dtype == "bool":
+            d[c] = s.map({True: true_txt, False: false_txt})
+            continue
+        if s.dtype == "object":
+            vals = set(str(x).strip().lower() for x in s.dropna().unique())
+            if vals.issubset({"true", "false", "vrai", "faux", "1", "0"}):
+                d[c] = s.map(
+                    {
+                        True: true_txt, False: false_txt,
+                        "True": true_txt, "False": false_txt,
+                        "true": true_txt, "false": false_txt,
+                        "VRAI": true_txt, "FAUX": false_txt,
+                        "vrai": true_txt, "faux": false_txt,
+                        "1": true_txt, "0": false_txt,
+                    }
+                ).fillna(s)
+    return d
+
+def find_script2() -> str | None:
+    candidates = [
+        os.path.join(SCRIPTS_DIR, PREFERRED_SCRIPT2),
+        os.path.join(SCRIPTS_DIR, "car_sales_estimator_gen_autodetect_alias_icor.py"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    hits = sorted(glob.glob(os.path.join(SCRIPTS_DIR, "car_sales_estimator*.py")))
+    return hits[0] if hits else None
+
+def run_script2_silent(input_text: str):
+    """
+    Run script2 but DO NOT surface its stdout in the UI.
+    Return (exit_code, raw_stdout).
+    """
+    script_path = find_script2()
+    if not script_path:
+        files = ", ".join(sorted(os.listdir(SCRIPTS_DIR))) if os.path.exists(SCRIPTS_DIR) else "(missing)"
+        return 127, f"[ERROR] Script not found in {SCRIPTS_DIR}. Files here: {files}"
+    proc = subprocess.Popen(
+        ["python", script_path],
+        cwd=DATA_DIR,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    out, _ = proc.communicate(input_text)
+    return proc.returncode, out
+
+def load_latest_output():
+    matches = sorted(glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")))
+    if not matches:
+        return None
+    latest = max(matches, key=os.path.getmtime)
+    return latest
+
+def parse_seed_badges(xlsx_path: str):
+    """
+    Reads Summary + Seeds_Constraints and builds:
+    - confidence string
+    - EU/World seed badges: exact vs range + value and source
+    """
+    confidence = None
+    eu_badge = {"style":"badge-soft","text":"Europe seed: none"}
+    w_badge  = {"style":"badge-soft","text":"World seed: none"}
+
+    try:
+        summary = pd.read_excel(xlsx_path, sheet_name="Summary")
+        if "Confidence" in summary.columns and len(summary):
+            confidence = str(summary.loc[0, "Confidence"])
+    except Exception:
+        pass
+
+    seed_json, cons_json = None, None
+    try:
+        sc = pd.read_excel(xlsx_path, sheet_name="Seeds_Constraints")
+        for _, row in sc.iterrows():
+            kind = str(row.get("Seed_or_Constraint","")).strip().lower()
+            raw = row.get("JSON","")
+            if isinstance(raw, str) and raw.strip():
+                if kind == "seed":
+                    seed_json = json.loads(raw)
+                elif kind == "constraints":
+                    cons_json = json.loads(raw)
+    except Exception:
+        pass
+
+    # Europe
+    if isinstance(cons_json, dict) and "europe" in cons_json:
+        ce = cons_json.get("europe", {})
+        if "exact" in ce and ce["exact"]:
+            year, val = next(iter(ce["exact"].items()))
+            src = (seed_json or {}).get("europe", {}).get("source", "seed")
+            eu_badge = {"style":"badge-strong", "text": f"Europe {year}: exact {val:,}  ·  {src}"}
+        elif "range" in ce and ce["range"]:
+            year, pair = next(iter(ce["range"].items()))
+            lo, hi = pair
+            src = "EU-share prior"
+            eu_badge = {"style":"badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,}  ·  {src}"}
+    elif isinstance(seed_json, dict) and seed_json.get("europe"):
+        e = seed_json["europe"]
+        eu_badge = {"style":"badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value',0)):,}  ·  {e.get('source','seed')}"}
+
+    # World
+    if isinstance(cons_json, dict) and "world" in cons_json:
+        cw = cons_json.get("world", {})
+        if "exact" in cw and cw["exact"]:
+            year, val = next(iter(cw["exact"].items()))
+            src = (seed_json or {}).get("world", {}).get("source", "seed")
+            w_badge = {"style":"badge-strong", "text": f"World {year}: exact {val:,}  ·  {src}"}
+        elif "range" in cw and cw["range"]:
+            year, pair = next(iter(cw["range"].items()))
+            lo, hi = pair
+            src = "EU→World prior"
+            w_badge = {"style":"badge-warn", "text": f"World {year}: range {lo:,}–{hi:,}  ·  {src}"}
+    elif isinstance(seed_json, dict) and seed_json.get("world"):
+        w = seed_json["world"]
+        w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,}  ·  {w.get('source','seed')}"}
+
+    return confidence, eu_badge, w_badge
+
+def header_badges(confidence: str|None, eu_badge: dict, w_badge: dict):
+    conf_txt = f"Confidence: <strong>{confidence}</strong>" if confidence else "Confidence: <span class='k'>n/a</span>"
+    st.markdown(
+        f"""
+        <div class="badges">
+          <div class="badge">{conf_txt}</div>
+          <div class="badge {eu_badge['style']}">{eu_badge['text']}</div>
+          <div class="badge {w_badge['style']}">{w_badge['text']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# === UI (inputs + action) ===
+col1, col2, col3 = st.columns([2,1,1])
+with col1:
+    model = st.text_input("Car model", placeholder="Ford Fiesta")
+with col2:
+    generation = st.text_input("Generation (optional)", placeholder="Mk6")
+with col3:
+    start_year = st.number_input("Start year", min_value=1990, max_value=2035, value=2013, step=1)
+
+if st.button("Run Generation Estimator", type="primary"):
+    if not model:
+        st.error("Please enter a car model.")
+    else:
+        input_text = f"{model}\n{generation}\n{start_year}\n"
+        with st.status("Running Script 2…", expanded=False):
+            code, log = run_script2_silent(input_text)
+
+        if code != 0:
+            tail = "\n".join((log or "").splitlines()[-15:])
+            st.error("Script 2 failed. See brief diagnostic below.")
+            if tail.strip():
+                with st.expander("Diagnostic (last lines)"):
+                    st.code(tail)
+        else:
+            xlsx = load_latest_output()
+            if not xlsx:
+                st.warning("No output Excel found. (The estimator ran but didn’t produce a file.)")
+            else:
+                # Show compact header with confidence + seed exact/range info
+                confidence, eu_b, w_b = parse_seed_badges(xlsx)
+                header_badges(confidence, eu_b, w_b)
+
+                # Estimates table only
+                try:
+                    est = pd.read_excel(xlsx, sheet_name="Estimates")
+                    est = localize_bools(est, prefer_cols=["ICOR_Supported","Gen_Active"])
+                    st.dataframe(est, use_container_width=True)
+
+                    st.download_button(
+                        "Download estimates Excel",
+                        data=open(xlsx, "rb").read(),
+                        file_name=os.path.basename(xlsx),
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"Could not read Estimates sheet: {e}")
