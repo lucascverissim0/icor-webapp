@@ -1,1 +1,2 @@
 # icor-webapp
+.gitignore
