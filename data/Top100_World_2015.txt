@@ -1,0 +1,502 @@
+[
+  {
+    "model": "Toyota Corolla",
+    "generation": "E170",
+    "units_sold": 1339024
+  },
+  {
+    "model": "Volkswagen Golf",
+    "generation": "Mk7",
+    "units_sold": 1041279
+  },
+  {
+    "model": "Ford F-Series",
+    "generation": "13th gen",
+    "units_sold": 920172
+  },
+  {
+    "model": "Ford Focus",
+    "generation": "Mk3",
+    "units_sold": 826221
+  },
+  {
+    "model": "Toyota Camry",
+    "generation": "XV50",
+    "units_sold": 754154
+  },
+  {
+    "model": "Hyundai Elantra",
+    "generation": "MD / D",
+    "units_sold": 746924
+  },
+  {
+    "model": "Volkswagen Polo",
+    "generation": "Mk5 / C",
+    "units_sold": 698182
+  },
+  {
+    "model": "Honda CR-V",
+    "generation": "4th gen",
+    "units_sold": 696594
+  },
+  {
+    "model": "Chevrolet Silverado",
+    "generation": "3rd gen",
+    "units_sold": 669683
+  },
+  {
+    "model": "Toyota RAV4",
+    "generation": "XA40",
+    "units_sold": 664382
+  },
+  {
+    "model": "Wuling Hongguang",
+    "generation": "1st gen",
+    "units_sold": 655531
+  },
+  {
+    "model": "Volkswagen Passat",
+    "generation": "B8 / M",
+    "units_sold": 574420
+  },
+  {
+    "model": "Volkswagen Jetta",
+    "generation": "Mk6 / 1B",
+    "units_sold": 563986
+  },
+  {
+    "model": "Toyota Hilux",
+    "generation": "AN10",
+    "units_sold": 563673
+  },
+  {
+    "model": "Honda Accord",
+    "generation": "9th gen / C",
+    "units_sold": 560244
+  },
+  {
+    "model": "Chevrolet Cruze",
+    "generation": "1st gen",
+    "units_sold": 558815
+  },
+  {
+    "model": "Honda Civic",
+    "generation": "9th gen",
+    "units_sold": 548430
+  },
+  {
+    "model": "Ford Fiesta",
+    "generation": "Mk7",
+    "units_sold": 546348
+  },
+  {
+    "model": "Volkswagen Tiguan",
+    "generation": "Mk1",
+    "units_sold": 501042
+  },
+  {
+    "model": "Volkswagen Lavida",
+    "generation": "2nd gen",
+    "units_sold": 472841
+  },
+  {
+    "model": "Kia Sportage",
+    "generation": "L",
+    "units_sold": 451791
+  },
+  {
+    "model": "Hyundai Sonata",
+    "generation": "L",
+    "units_sold": 444169
+  },
+  {
+    "model": "Mazda3",
+    "generation": "M / BN",
+    "units_sold": 440189
+  },
+  {
+    "model": "Škoda Octavia",
+    "generation": "Mk3",
+    "units_sold": 425696
+  },
+  {
+    "model": "Renault Clio",
+    "generation": "IV",
+    "units_sold": 414845
+  },
+  {
+    "model": "Toyota Yaris",
+    "generation": "XP130",
+    "units_sold": 412934
+  },
+  {
+    "model": "Ford Escape",
+    "generation": "3rd gen",
+    "units_sold": 373351
+  },
+  {
+    "model": "Haval H6",
+    "generation": "1st gen",
+    "units_sold": 373229
+  },
+  {
+    "model": "Nissan X-Trail",
+    "generation": "T32",
+    "units_sold": 370566
+  },
+  {
+    "model": "Hyundai Santa Fe",
+    "generation": "DM",
+    "units_sold": 369169
+  },
+  {
+    "model": "Nissan Altima",
+    "generation": "L33",
+    "units_sold": 366534
+  },
+  {
+    "model": "Mercedes-Benz C-Class",
+    "generation": "W205",
+    "units_sold": 364668
+  },
+  {
+    "model": "Mazda CX-5",
+    "generation": "KE",
+    "units_sold": 357090
+  },
+  {
+    "model": "Audi A3",
+    "generation": "V",
+    "units_sold": 353572
+  },
+  {
+    "model": "Nissan Qashqai",
+    "generation": "J11",
+    "units_sold": 353499
+  },
+  {
+    "model": "Nissan Sylphy",
+    "generation": "B17",
+    "units_sold": 345334
+  },
+  {
+    "model": "Honda Fit",
+    "generation": "GK / GP",
+    "units_sold": 339144
+  },
+  {
+    "model": "Ford Fusion",
+    "generation": "2nd gen",
+    "units_sold": 331222
+  },
+  {
+    "model": "BMW 3 Series",
+    "generation": "F30 / F31",
+    "units_sold": 331013
+  },
+  {
+    "model": "Nissan Rogue",
+    "generation": "2nd gen",
+    "units_sold": 327162
+  },
+  {
+    "model": "Baojun 730",
+    "generation": "1st gen",
+    "units_sold": 321069
+  },
+  {
+    "model": "Chevrolet Malibu",
+    "generation": "8th gen",
+    "units_sold": 315117
+  },
+  {
+    "model": "Nissan Sentra",
+    "generation": "B17",
+    "units_sold": 306318
+  },
+  {
+    "model": "Jeep Cherokee",
+    "generation": "L",
+    "units_sold": 301286
+  },
+  {
+    "model": "Ford Explorer",
+    "generation": "5th gen",
+    "units_sold": 299652
+  },
+  {
+    "model": "Hyundai Tucson",
+    "generation": "L",
+    "units_sold": 298685
+  },
+  {
+    "model": "Peugeot 208",
+    "generation": "II",
+    "units_sold": 297678
+  },
+  {
+    "model": "Chevrolet Equinox",
+    "generation": "2nd gen",
+    "units_sold": 297557
+  },
+  {
+    "model": "Kia Rio",
+    "generation": "UB",
+    "units_sold": 296916
+  },
+  {
+    "model": "Buick Excelle GT",
+    "generation": "2nd gen",
+    "units_sold": 290213
+  },
+  {
+    "model": "GMC Sierra",
+    "generation": "3rd gen",
+    "units_sold": 288562
+  },
+  {
+    "model": "Opel Corsa",
+    "generation": "E",
+    "units_sold": 285792
+  },
+  {
+    "model": "Toyota Prius",
+    "generation": "XW30",
+    "units_sold": 280427
+  },
+  {
+    "model": "Volkswagen Sagitar",
+    "generation": "Mk6",
+    "units_sold": 279887
+  },
+  {
+    "model": "Jeep Grand Cherokee",
+    "generation": "WK2",
+    "units_sold": 278991
+  },
+  {
+    "model": "Subaru Forester",
+    "generation": "SJ",
+    "units_sold": 276222
+  },
+  {
+    "model": "Volkswagen Santana",
+    "generation": "New",
+    "units_sold": 276209
+  },
+  {
+    "model": "Honda City",
+    "generation": "GM6",
+    "units_sold": 275875
+  },
+  {
+    "model": "Hyundai i20",
+    "generation": "GB / I",
+    "units_sold": 274975
+  },
+  {
+    "model": "Kia Sorento",
+    "generation": "M",
+    "units_sold": 272271
+  },
+  {
+    "model": "Maruti Alto",
+    "generation": "Alto / K10",
+    "units_sold": 272096
+  },
+  {
+    "model": "Chevrolet Sail",
+    "generation": "2nd gen",
+    "units_sold": 269701
+  },
+  {
+    "model": "Ford Kuga",
+    "generation": "Mk2",
+    "units_sold": 264037
+  },
+  {
+    "model": "Isuzu D-Max",
+    "generation": "RT50 / 85",
+    "units_sold": 261729
+  },
+  {
+    "model": "Jeep Wrangler",
+    "generation": "JK",
+    "units_sold": 257941
+  },
+  {
+    "model": "Toyota Highlander",
+    "generation": "XU50",
+    "units_sold": 257924
+  },
+  {
+    "model": "Hyundai Verna",
+    "generation": "RB",
+    "units_sold": 257294
+  },
+  {
+    "model": "Hyundai Accent",
+    "generation": "RB",
+    "units_sold": 251748
+  },
+  {
+    "model": "Hyundai ix35",
+    "generation": "LM",
+    "units_sold": 246180
+  },
+  {
+    "model": "Nissan Versa",
+    "generation": "N17",
+    "units_sold": 244953
+  },
+  {
+    "model": "Ford EcoSport",
+    "generation": "BK",
+    "units_sold": 244248
+  },
+  {
+    "model": "Toyota Vios",
+    "generation": "XP150",
+    "units_sold": 240785
+  },
+  {
+    "model": "Peugeot 308",
+    "generation": "II",
+    "units_sold": 239956
+  },
+  {
+    "model": "Foton Light Truck",
+    "generation": "Aumark",
+    "units_sold": 239488
+  },
+  {
+    "model": "Maruti Dzire",
+    "generation": "2nd gen",
+    "units_sold": 236038
+  },
+  {
+    "model": "Ford Edge",
+    "generation": "2nd gen",
+    "units_sold": 232330
+  },
+  {
+    "model": "Wuling Mini-truck",
+    "generation": "1st gen",
+    "units_sold": 229661
+  },
+  {
+    "model": "Honda Odyssey",
+    "generation": "RL5 / C",
+    "units_sold": 222390
+  },
+  {
+    "model": "Ford Transit",
+    "generation": "V363",
+    "units_sold": 222120
+  },
+  {
+    "model": "Wuling Sunshine",
+    "generation": "1st gen",
+    "units_sold": 221769
+  },
+  {
+    "model": "Fiat 500",
+    "generation": "312",
+    "units_sold": 220637
+  },
+  {
+    "model": "Peugeot 2008",
+    "generation": "II",
+    "units_sold": 220244
+  },
+  {
+    "model": "Toyota Aqua",
+    "generation": "NHP10",
+    "units_sold": 215525
+  },
+  {
+    "model": "Ford Escort (China)",
+    "generation": "1st gen",
+    "units_sold": 214362
+  },
+  {
+    "model": "Kia Pride / Saipa Pride",
+    "generation": "B3",
+    "units_sold": 213234
+  },
+  {
+    "model": "Mazda6",
+    "generation": "GJ / L",
+    "units_sold": 211500
+  },
+  {
+    "model": "Mercedes-Benz E-Class",
+    "generation": "W212",
+    "units_sold": 208604
+  },
+  {
+    "model": "Renault Captur",
+    "generation": "I",
+    "units_sold": 208512
+  },
+  {
+    "model": "Geely EC7 (Emgrand)",
+    "generation": "1st gen",
+    "units_sold": 207623
+  },
+  {
+    "model": "Ford Mondeo",
+    "generation": "Mk5",
+    "units_sold": 206798
+  },
+  {
+    "model": "Maruti Swift",
+    "generation": "2nd gen",
+    "units_sold": 206662
+  },
+  {
+    "model": "Volkswagen Bora (China)",
+    "generation": "2nd gen / J2",
+    "units_sold": 204507
+  },
+  {
+    "model": "Kia K3 (Cerato/Forte)",
+    "generation": "1st gen",
+    "units_sold": 202348
+  },
+  {
+    "model": "Opel Astra",
+    "generation": "K",
+    "units_sold": 202200
+  },
+  {
+    "model": "Toyota Tacoma",
+    "generation": "3rd gen",
+    "units_sold": 200009
+  },
+  {
+    "model": "Honda HR-V",
+    "generation": "2nd gen / Vezel",
+    "units_sold": 198776
+  },
+  {
+    "model": "Honda Vezel",
+    "generation": "2nd gen",
+    "units_sold": 197859
+  },
+  {
+    "model": "Ford Ranger",
+    "generation": "T6",
+    "units_sold": 197232
+  },
+  {
+    "model": "Kia Soul",
+    "generation": "2nd gen",
+    "units_sold": 197160
+  },
+  {
+    "model": "JAC Refine S3",
+    "generation": "1st gen",
+    "units_sold": 196779
+  }
+]

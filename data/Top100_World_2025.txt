@@ -1,0 +1,702 @@
+[
+  {
+    "model": "Toyota RAV4 / Wildlander",
+    "generation": "X / Wildlander",
+    "units_sold": 1099162,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -7.4%"
+  },
+  {
+    "model": "Tesla Model Y",
+    "generation": "1st gen",
+    "units_sold": 866235,
+    "estimated": true,
+    "notes": "Applied Focus2Move H1 2025 YoY delta -26.9% to 2024 volume"
+  },
+  {
+    "model": "Honda CR-V / Breeze",
+    "generation": "6th gen",
+    "units_sold": 820694,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Toyota Corolla Cross / Frontlander",
+    "generation": "1st gen",
+    "units_sold": 786844,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -8.4%"
+  },
+  {
+    "model": "Toyota Corolla / Levin (Sedan)",
+    "generation": "E210",
+    "units_sold": 638452,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -8.4%"
+  },
+  {
+    "model": "Toyota Hilux",
+    "generation": "AN120 / 130",
+    "units_sold": 620085,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta +0.5%"
+  },
+  {
+    "model": "BYD Qin (Plus)",
+    "generation": "2nd gen / V",
+    "units_sold": 608424,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "Toyota Camry",
+    "generation": "XV / 26",
+    "units_sold": 607825,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta +2.5%"
+  },
+  {
+    "model": "Ford F-150 (F-Series)",
+    "generation": "P702",
+    "units_sold": 597975,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta +0.5%"
+  },
+  {
+    "model": "Nissan Sentra / Sylphy",
+    "generation": "B18 / B17",
+    "units_sold": 544214,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Tesla Model 3",
+    "generation": "1st gen",
+    "units_sold": 534240,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Nissan X-Trail / Rogue",
+    "generation": "T33",
+    "units_sold": 470388,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BYD Song Plus",
+    "generation": "1st gen / V",
+    "units_sold": 460895,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "Honda Civic / Integra (Sedan)",
+    "generation": "11th gen",
+    "units_sold": 459359,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BYD Yuan Plus / Atto 3",
+    "generation": "1st gen",
+    "units_sold": 443417,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "Honda Accord / Inspire",
+    "generation": "10th gen",
+    "units_sold": 432948,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Elantra / Avante",
+    "generation": "C",
+    "units_sold": 423193,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Tucson (LWB/EWB)",
+    "generation": "NX4",
+    "units_sold": 421884,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -3.1%"
+  },
+  {
+    "model": "BYD Dolphin",
+    "generation": "1st gen",
+    "units_sold": 384869,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "Mazda CX-5",
+    "generation": "KF",
+    "units_sold": 374329,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Ram 1500",
+    "generation": "D",
+    "units_sold": 370062,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Polo (HB)",
+    "generation": "Mk6",
+    "units_sold": 363455,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Jetta / Sagitar (Sedan)",
+    "generation": "A7 / Sagitar",
+    "units_sold": 361155,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Kia Seltos / KX3",
+    "generation": "I",
+    "units_sold": 351264,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Suzuki / Maruti Swift",
+    "generation": "3rd gen",
+    "units_sold": 350191,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Chevrolet Silverado 1500",
+    "generation": "4th gen",
+    "units_sold": 349553,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -14.3%"
+  },
+  {
+    "model": "Toyota Highlander / Kluger",
+    "generation": "XU50",
+    "units_sold": 346836,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Honda HR-V / XR-V / Vezel",
+    "generation": "3rd gen",
+    "units_sold": 342517,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Ford Ranger",
+    "generation": "T6",
+    "units_sold": 328977,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Tiguan Allspace",
+    "generation": "Mk2",
+    "units_sold": 327712,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Ford Escape / Kuga",
+    "generation": "3rd gen",
+    "units_sold": 326931,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen T-Roc",
+    "generation": "I",
+    "units_sold": 326545,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Nissan Qashqai / Rogue Sport",
+    "generation": "J12 / J11",
+    "units_sold": 321104,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Toyota Yaris Cross (XP210)",
+    "generation": "X",
+    "units_sold": 317187,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Dacia / Renault Sandero",
+    "generation": "I",
+    "units_sold": 315594,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Creta / ix25",
+    "generation": "2nd gen / ix25",
+    "units_sold": 309889,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Lavida",
+    "generation": "Lavida",
+    "units_sold": 309476,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen T-Cross / Tacqua / Taigun",
+    "generation": "I",
+    "units_sold": 306494,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Kia Sportage (LWB/EWB)",
+    "generation": "NQ5",
+    "units_sold": 302498,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -6.2%"
+  },
+  {
+    "model": "Renault Clio",
+    "generation": "IV",
+    "units_sold": 299237,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Toyota Yaris (Sedan/Vios)",
+    "generation": "X",
+    "units_sold": 296173,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Peugeot 208",
+    "generation": "II",
+    "units_sold": 295257,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BMW X3",
+    "generation": "G01",
+    "units_sold": 291857,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Ford Transit (global)",
+    "generation": "V363",
+    "units_sold": 285931,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Haval H6",
+    "generation": "3rd gen",
+    "units_sold": 284187,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Audi Q5",
+    "generation": "FY",
+    "units_sold": 279460,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Kona",
+    "generation": "OS",
+    "units_sold": 279229,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Toyota Yaris (XP210 hatch)",
+    "generation": "X",
+    "units_sold": 276408,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BYD Seagull",
+    "generation": "1st gen",
+    "units_sold": 275763,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "GAC Aion S",
+    "generation": "1st gen",
+    "units_sold": 272125,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "Isuzu D-Max",
+    "generation": "3rd gen",
+    "units_sold": 271062,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Santa Fe",
+    "generation": "MX",
+    "units_sold": 268196,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BYD Han",
+    "generation": "1st gen / DM",
+    "units_sold": 259409,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "Dacia / Renault Duster",
+    "generation": "I",
+    "units_sold": 258896,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Kia Sorento",
+    "generation": "M",
+    "units_sold": 256950,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Saipa Tiba",
+    "generation": "I",
+    "units_sold": 256662,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Changan CS75",
+    "generation": "1st gen",
+    "units_sold": 255198,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Toyota Tacoma",
+    "generation": "N300",
+    "units_sold": 253650,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BMW X5",
+    "generation": "G05",
+    "units_sold": 252984,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BMW 3 Series (Sedan)",
+    "generation": "G20 / G21",
+    "units_sold": 250914,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Subaru Crosstrek / XV",
+    "generation": "GU",
+    "units_sold": 250463,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Mercedes-Benz GLC",
+    "generation": "X253",
+    "units_sold": 250043,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Mercedes-Benz C-Class (Sedan)",
+    "generation": "W206",
+    "units_sold": 247153,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Chevrolet Equinox",
+    "generation": "3rd gen",
+    "units_sold": 245767,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "GAC Aion Y",
+    "generation": "1st gen",
+    "units_sold": 244188,
+    "estimated": true,
+    "notes": "Applied brand boost for strong H1 2025 growth"
+  },
+  {
+    "model": "GMC Sierra 1500",
+    "generation": "4th gen",
+    "units_sold": 241560,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Wuling Hongguang Mini EV",
+    "generation": "1st gen",
+    "units_sold": 239370,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Subaru Forester",
+    "generation": "SK",
+    "units_sold": 238276,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "BMW X1",
+    "generation": "U11",
+    "units_sold": 237541,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Jeep Compass",
+    "generation": "2nd gen",
+    "units_sold": 234494,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Ford Explorer",
+    "generation": "U625",
+    "units_sold": 232306,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Mercedes-Benz E-Class (Sedan)",
+    "generation": "W213",
+    "units_sold": 230030,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Golf (HB)",
+    "generation": "Mk7",
+    "units_sold": 229808,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Venue",
+    "generation": "1st gen",
+    "units_sold": 227139,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Chery Tiggo 8",
+    "generation": "1st gen",
+    "units_sold": 226692,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Hyundai Tucson (SWB)",
+    "generation": "L",
+    "units_sold": 225364,
+    "estimated": true,
+    "notes": "Applied F2M H1 2025 YoY delta -3.1%"
+  },
+  {
+    "model": "BMW 5 Series (Sedan)",
+    "generation": "G60",
+    "units_sold": 223398,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Taos / Tharu",
+    "generation": "I",
+    "units_sold": 222169,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volvo XC60",
+    "generation": "SPA",
+    "units_sold": 221913,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Nissan Kicks",
+    "generation": "1st gen",
+    "units_sold": 220969,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Suzuki Baleno",
+    "generation": "2nd gen / 2022-",
+    "units_sold": 220428,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Geely Xingyuan L / Geome",
+    "generation": "1st gen",
+    "units_sold": 220000,
+    "estimated": true,
+    "notes": "New 2025 China hit; estimated from H1 China volumes"
+  },
+  {
+    "model": "Nissan Altima",
+    "generation": "L",
+    "units_sold": 218299,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Opel / Vauxhall Corsa",
+    "generation": "F",
+    "units_sold": 218251,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Honda N-Box",
+    "generation": "JF3 / 4",
+    "units_sold": 217701,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Peugeot 2008",
+    "generation": "II",
+    "units_sold": 217264,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Toyota Sienna",
+    "generation": "I",
+    "units_sold": 211597,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Jeep Wrangler",
+    "generation": "L",
+    "units_sold": 211171,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Mazda CX-30",
+    "generation": "DM",
+    "units_sold": 210645,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Audi A6 (Sedan)",
+    "generation": "C8",
+    "units_sold": 208155,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen ID.4",
+    "generation": "1st gen",
+    "units_sold": 207936,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Lexus RX",
+    "generation": "AL20",
+    "units_sold": 205680,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Lexus NX",
+    "generation": "I",
+    "units_sold": 205285,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Subaru Outback",
+    "generation": "BT / BS",
+    "units_sold": 203998,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Mercedes-Benz Sprinter",
+    "generation": "I",
+    "units_sold": 202707,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Nissan Versa / Sunny",
+    "generation": "I",
+    "units_sold": 200167,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volkswagen Passat (China)",
+    "generation": "B8L",
+    "units_sold": 198621,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Volvo XC40",
+    "generation": "1st",
+    "units_sold": 195683,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Suzuki Wagon R (India)",
+    "generation": "I",
+    "units_sold": 195592,
+    "estimated": true,
+    "notes": ""
+  },
+  {
+    "model": "Suzuki Dzire",
+    "generation": "I",
+    "units_sold": 193704,
+    "estimated": true,
+    "notes": ""
+  }
+]

@@ -1,0 +1,602 @@
+[
+  {
+    "model": "Toyota Corolla",
+    "generation": "E210",
+    "units_sold": 1097556,
+    "estimated": false
+  },
+  {
+    "model": "Toyota RAV4",
+    "generation": "XA50",
+    "units_sold": 995762,
+    "estimated": false
+  },
+  {
+    "model": "Ford F-Series",
+    "generation": "P552",
+    "units_sold": 935000,
+    "estimated": true
+  },
+  {
+    "model": "Honda CR-V",
+    "generation": "RW / RT",
+    "units_sold": 736980,
+    "estimated": false
+  },
+  {
+    "model": "Nissan X-Trail / Rogue",
+    "generation": "T32",
+    "units_sold": 707848,
+    "estimated": true
+  },
+  {
+    "model": "Honda Civic",
+    "generation": "10th gen",
+    "units_sold": 687704,
+    "estimated": false
+  },
+  {
+    "model": "Chevrolet Silverado",
+    "generation": "4th gen",
+    "units_sold": 650000,
+    "estimated": true
+  },
+  {
+    "model": "Ram Pickup",
+    "generation": "4th gen / D",
+    "units_sold": 645000,
+    "estimated": true
+  },
+  {
+    "model": "Toyota Camry",
+    "generation": "XV70",
+    "units_sold": 609303,
+    "estimated": false
+  },
+  {
+    "model": "Volkswagen Polo",
+    "generation": "Mk6",
+    "units_sold": 601343,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Tiguan",
+    "generation": "Mk2",
+    "units_sold": 596898,
+    "estimated": false
+  },
+  {
+    "model": "Nissan Sylphy / Sentra",
+    "generation": "B18 / B17",
+    "units_sold": 546631,
+    "estimated": false
+  },
+  {
+    "model": "Hyundai Tucson",
+    "generation": "L",
+    "units_sold": 541263,
+    "estimated": true
+  },
+  {
+    "model": "Toyota Hilux",
+    "generation": "AN120 / 130",
+    "units_sold": 525279,
+    "estimated": true
+  },
+  {
+    "model": "Nissan Qashqai",
+    "generation": "J11",
+    "units_sold": 489403,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Golf",
+    "generation": "Mk8 / Mk7",
+    "units_sold": 475205,
+    "estimated": false
+  },
+  {
+    "model": "Hyundai Elantra / Avante",
+    "generation": "D",
+    "units_sold": 473189,
+    "estimated": true
+  },
+  {
+    "model": "Kia Sportage",
+    "generation": "L",
+    "units_sold": 468979,
+    "estimated": true
+  },
+  {
+    "model": "Toyota Yaris / Vitz",
+    "generation": "XP210 / XP150",
+    "units_sold": 458578,
+    "estimated": false
+  },
+  {
+    "model": "Honda Accord",
+    "generation": "10th gen",
+    "units_sold": 451261,
+    "estimated": false
+  },
+  {
+    "model": "Haval H6",
+    "generation": "2nd gen",
+    "units_sold": 432478,
+    "estimated": true
+  },
+  {
+    "model": "Nissan Rogue",
+    "generation": "2nd gen",
+    "units_sold": 432098,
+    "estimated": true
+  },
+  {
+    "model": "Mazda CX-5",
+    "generation": "KF",
+    "units_sold": 431191,
+    "estimated": true
+  },
+  {
+    "model": "Nissan X-Trail",
+    "generation": "T32",
+    "units_sold": 400700,
+    "estimated": true
+  },
+  {
+    "model": "Jeep Compass",
+    "generation": "2nd gen",
+    "units_sold": 387496,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Lavida",
+    "generation": "Lavida",
+    "units_sold": 384809,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Jetta (global family)",
+    "generation": "Mk6 / 1B; / Bora",
+    "units_sold": 375348,
+    "estimated": true
+  },
+  {
+    "model": "Nissan Sylphy / Sentra (CN)",
+    "generation": "B17 / 7th",
+    "units_sold": 371672,
+    "estimated": true
+  },
+  {
+    "model": "Tesla Model 3",
+    "generation": "1st gen",
+    "units_sold": 365240,
+    "estimated": false
+  },
+  {
+    "model": "Toyota Highlander / Kluger",
+    "generation": "XU70",
+    "units_sold": 354693,
+    "estimated": true
+  },
+  {
+    "model": "Mercedes-Benz C-Class",
+    "generation": "W205",
+    "units_sold": 351766,
+    "estimated": true
+  },
+  {
+    "model": "Mercedes-Benz GLC",
+    "generation": "X253",
+    "units_sold": 351440,
+    "estimated": true
+  },
+  {
+    "model": "Ford Focus",
+    "generation": "Mk4",
+    "units_sold": 345636,
+    "estimated": true
+  },
+  {
+    "model": "Wuling Hongguang",
+    "generation": "1st gen",
+    "units_sold": 343107,
+    "estimated": true
+  },
+  {
+    "model": "Chevrolet Equinox",
+    "generation": "3rd gen",
+    "units_sold": 336484,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Passat / Magotan",
+    "generation": "B8 / B8L",
+    "units_sold": 331597,
+    "estimated": true
+  },
+  {
+    "model": "Toyota C-HR",
+    "generation": "AX10 / AX50",
+    "units_sold": 324325,
+    "estimated": true
+  },
+  {
+    "model": "Mercedes-Benz E-Class",
+    "generation": "W213",
+    "units_sold": 305679,
+    "estimated": true
+  },
+  {
+    "model": "Isuzu D-Max",
+    "generation": "RT50 / 85",
+    "units_sold": 299550,
+    "estimated": true
+  },
+  {
+    "model": "Škoda Octavia",
+    "generation": "Mk3",
+    "units_sold": 297811,
+    "estimated": true
+  },
+  {
+    "model": "Renault Clio",
+    "generation": "IV",
+    "units_sold": 292171,
+    "estimated": true
+  },
+  {
+    "model": "Honda HR-V / Vezel / XR-V",
+    "generation": "2nd gen",
+    "units_sold": 291254,
+    "estimated": true
+  },
+  {
+    "model": "Ford Fiesta",
+    "generation": "Mk7",
+    "units_sold": 287111,
+    "estimated": true
+  },
+  {
+    "model": "Wuling Mini Truck",
+    "generation": "1st gen",
+    "units_sold": 286657,
+    "estimated": true
+  },
+  {
+    "model": "Jeep Cherokee",
+    "generation": "L",
+    "units_sold": 286509,
+    "estimated": true
+  },
+  {
+    "model": "BMW 5 Series",
+    "generation": "G30 / G31",
+    "units_sold": 285234,
+    "estimated": true
+  },
+  {
+    "model": "Audi Q5",
+    "generation": "FY",
+    "units_sold": 279141,
+    "estimated": true
+  },
+  {
+    "model": "Baojun 510",
+    "generation": "1st gen",
+    "units_sold": 275968,
+    "estimated": true
+  },
+  {
+    "model": "Mazda3 / Axela",
+    "generation": "M / BN",
+    "units_sold": 270617,
+    "estimated": true
+  },
+  {
+    "model": "Jeep Grand Cherokee",
+    "generation": "WK2",
+    "units_sold": 268814,
+    "estimated": true
+  },
+  {
+    "model": "GMC Sierra",
+    "generation": "3rd gen",
+    "units_sold": 268033,
+    "estimated": true
+  },
+  {
+    "model": "BMW 3 Series",
+    "generation": "G20 / G21",
+    "units_sold": 266453,
+    "estimated": true
+  },
+  {
+    "model": "BMW X1",
+    "generation": "F48",
+    "units_sold": 265975,
+    "estimated": true
+  },
+  {
+    "model": "Audi A4",
+    "generation": "B9",
+    "units_sold": 263381,
+    "estimated": true
+  },
+  {
+    "model": "Mitsubishi Outlander",
+    "generation": "GF",
+    "units_sold": 262460,
+    "estimated": true
+  },
+  {
+    "model": "Renault Captur",
+    "generation": "I",
+    "units_sold": 261930,
+    "estimated": true
+  },
+  {
+    "model": "Subaru Forester",
+    "generation": "SK",
+    "units_sold": 260233,
+    "estimated": true
+  },
+  {
+    "model": "Toyota Tacoma",
+    "generation": "3rd gen",
+    "units_sold": 256388,
+    "estimated": true
+  },
+  {
+    "model": "Ford Ranger",
+    "generation": "T6",
+    "units_sold": 254348,
+    "estimated": true
+  },
+  {
+    "model": "Ford Escape / Kuga",
+    "generation": "3rd gen",
+    "units_sold": 254275,
+    "estimated": true
+  },
+  {
+    "model": "Ford EcoSport",
+    "generation": "BK",
+    "units_sold": 253235,
+    "estimated": true
+  },
+  {
+    "model": "Jeep Wrangler",
+    "generation": "L",
+    "units_sold": 252686,
+    "estimated": true
+  },
+  {
+    "model": "Jeep Renegade",
+    "generation": "BU",
+    "units_sold": 250334,
+    "estimated": true
+  },
+  {
+    "model": "Geely Boyue",
+    "generation": "L",
+    "units_sold": 242552,
+    "estimated": true
+  },
+  {
+    "model": "Kia Sorento",
+    "generation": "M",
+    "units_sold": 239522,
+    "estimated": true
+  },
+  {
+    "model": "Ford Explorer",
+    "generation": "U502",
+    "units_sold": 238525,
+    "estimated": true
+  },
+  {
+    "model": "GAC Trumpchi GS4",
+    "generation": "1st gen",
+    "units_sold": 237724,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Sagitar (CN Jetta)",
+    "generation": "Mk6",
+    "units_sold": 236641,
+    "estimated": true
+  },
+  {
+    "model": "Chevrolet Malibu",
+    "generation": "9th gen",
+    "units_sold": 233027,
+    "estimated": true
+  },
+  {
+    "model": "Peugeot 3008",
+    "generation": "II",
+    "units_sold": 228840,
+    "estimated": true
+  },
+  {
+    "model": "Hyundai Santa Fe",
+    "generation": "DM",
+    "units_sold": 228529,
+    "estimated": true
+  },
+  {
+    "model": "Honda Fit / Jazz",
+    "generation": "GK / GP",
+    "units_sold": 226136,
+    "estimated": true
+  },
+  {
+    "model": "Foton Light Truck (Aumark/Aumark S)",
+    "generation": "various",
+    "units_sold": 224398,
+    "estimated": true
+  },
+  {
+    "model": "Nissan Sentra",
+    "generation": "B18 / MX",
+    "units_sold": 223646,
+    "estimated": true
+  },
+  {
+    "model": "Ford Transit (global)",
+    "generation": "V363",
+    "units_sold": 221114,
+    "estimated": true
+  },
+  {
+    "model": "Peugeot 208",
+    "generation": "II",
+    "units_sold": 219736,
+    "estimated": true
+  },
+  {
+    "model": "Audi A3",
+    "generation": "V",
+    "units_sold": 219003,
+    "estimated": true
+  },
+  {
+    "model": "Honda N-Box",
+    "generation": "JF3 / 4",
+    "units_sold": 215264,
+    "estimated": true
+  },
+  {
+    "model": "Roewe RX5",
+    "generation": "1st gen",
+    "units_sold": 213263,
+    "estimated": true
+  },
+  {
+    "model": "Kia Rio / Pride / K2",
+    "generation": "UB",
+    "units_sold": 208169,
+    "estimated": true
+  },
+  {
+    "model": "Hyundai Creta / ix25",
+    "generation": "2nd gen / 1st gen",
+    "units_sold": 203710,
+    "estimated": true
+  },
+  {
+    "model": "Maruti Alto",
+    "generation": "Alto / K10",
+    "units_sold": 202146,
+    "estimated": true
+  },
+  {
+    "model": "Maruti Dzire",
+    "generation": "3rd gen",
+    "units_sold": 202058,
+    "estimated": true
+  },
+  {
+    "model": "Buick Excelle GT (CN)",
+    "generation": "2nd gen",
+    "units_sold": 200002,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Santana (China)",
+    "generation": "New",
+    "units_sold": 199087,
+    "estimated": true
+  },
+  {
+    "model": "Hyundai i20",
+    "generation": "BC3 / GB",
+    "units_sold": 196289,
+    "estimated": true
+  },
+  {
+    "model": "Chevrolet Onix",
+    "generation": "1st gen / M",
+    "units_sold": 195599,
+    "estimated": true
+  },
+  {
+    "model": "Citroën C3",
+    "generation": "III",
+    "units_sold": 194341,
+    "estimated": true
+  },
+  {
+    "model": "Chevrolet Cavalier (China)",
+    "generation": "1st gen",
+    "units_sold": 193618,
+    "estimated": true
+  },
+  {
+    "model": "Audi A6",
+    "generation": "C8",
+    "units_sold": 190049,
+    "estimated": true
+  },
+  {
+    "model": "Geely Emgrand EC7",
+    "generation": "1st gen",
+    "units_sold": 189555,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Bora (China)",
+    "generation": "2nd gen",
+    "units_sold": 188002,
+    "estimated": true
+  },
+  {
+    "model": "Chevrolet Cruze",
+    "generation": "2nd gen",
+    "units_sold": 183074,
+    "estimated": true
+  },
+  {
+    "model": "Buick Envision",
+    "generation": "1st gen",
+    "units_sold": 179615,
+    "estimated": true
+  },
+  {
+    "model": "Toyota Prius",
+    "generation": "XW50",
+    "units_sold": 177124,
+    "estimated": true
+  },
+  {
+    "model": "Dacia Sandero",
+    "generation": "II",
+    "units_sold": 175873,
+    "estimated": true
+  },
+  {
+    "model": "Ford Edge",
+    "generation": "2nd gen",
+    "units_sold": 175721,
+    "estimated": true
+  },
+  {
+    "model": "Volkswagen Magotan (CN Passat)",
+    "generation": "B8L",
+    "units_sold": 174857,
+    "estimated": true
+  },
+  {
+    "model": "Nissan Altima / Teana",
+    "generation": "L33",
+    "units_sold": 174736,
+    "estimated": true
+  },
+  {
+    "model": "Honda City",
+    "generation": "GM6",
+    "units_sold": 174573,
+    "estimated": true
+  }
+]
