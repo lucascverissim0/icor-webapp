@@ -2,8 +2,11 @@ import os
 import glob
 import json
 import subprocess
+import time
 import pandas as pd
 import streamlit as st
+import streamlit_authenticator as stauth
+import posthog
 
 # === CONFIG ===
 PREFERRED_SCRIPT2 = "script2.py"
@@ -34,6 +37,42 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# === AUTHENTICATION ===
+cfg = st.secrets
+authenticator = stauth.Authenticate(
+    credentials=cfg["credentials"],
+    cookie_name=cfg["cookie"]["name"],
+    key=cfg["cookie"]["key"],
+    cookie_expiry_days=cfg["cookie"]["expiry_days"],
+)
+
+name, auth_status, username = authenticator.login("Login", "main")
+
+if auth_status is False:
+    st.error("Invalid username or password.")
+    st.stop()
+elif auth_status is None:
+    st.info("Please log in to continue.")
+    st.stop()
+
+st.session_state["user_id"] = username
+st.session_state["user_name"] = name
+
+with st.sidebar:
+    authenticator.logout("Logout", "sidebar")
+
+# === POSTHOG (tracking) ===
+posthog.project_api_key = st.secrets.posthog.api_key
+posthog.host = st.secrets.posthog.host
+
+def track(event: str, props: dict | None = None):
+    uid = st.session_state.get("user_id", "anon")
+    posthog.capture(uid, event, properties=props or {})
+
+# Track page view
+track("page_view_model_researcher", {"page": "02_Generation_Estimator"})
+
 st.title("ICOR – Model Researcher")
 
 # === HELPERS ===
@@ -201,6 +240,13 @@ if st.button("Run Generation Estimator", type="primary"):
             if tail.strip():
                 with st.expander("Diagnostic (last lines)"):
                     st.code(tail)
+            track("run_script2", {
+                "model": model,
+                "generation": generation or "",
+                "start_year": int(start_year),
+                "status": "error",
+                "timestamp": int(time.time()),
+            })
         else:
             xlsx = load_latest_output()
             if not xlsx:
@@ -224,3 +270,12 @@ if st.button("Run Generation Estimator", type="primary"):
                     )
                 except Exception as e:
                     st.error(f"Could not read Estimates sheet: {e}")
+
+                track("run_script2", {
+                    "model": model,
+                    "generation": generation or "",
+                    "start_year": int(start_year),
+                    "status": "success",
+                    "timestamp": int(time.time()),
+                })
+
