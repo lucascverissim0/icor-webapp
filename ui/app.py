@@ -4,6 +4,9 @@ import re
 import subprocess
 import pandas as pd
 import streamlit as st
+import streamlit_authenticator as stauth
+import posthog
+import time
 
 # ────────────────────────── PATHS ──────────────────────────
 HERE = os.path.dirname(__file__)
@@ -12,7 +15,39 @@ SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"   # backend pipeline
 
-# ──────────────────────── PAGE META/STYLE ───────────────────
+# ───────────────────────── AUTH ─────────────────────────────
+cfg = st.secrets
+authenticator = stauth.Authenticate(
+    credentials=cfg["credentials"],
+    cookie_name=cfg["cookie"]["name"],
+    key=cfg["cookie"]["key"],
+    cookie_expiry_days=cfg["cookie"]["expiry_days"],
+)
+
+name, auth_status, username = authenticator.login("Login", "main")
+
+if auth_status is False:
+    st.error("Invalid username or password")
+    st.stop()
+elif auth_status is None:
+    st.info("Please log in to continue")
+    st.stop()
+
+st.session_state["user_id"] = username
+st.session_state["user_name"] = name
+
+with st.sidebar:
+    authenticator.logout("Logout", "sidebar")
+
+# ─────────────────────── POSTHOG SETUP ───────────────────────
+posthog.project_api_key = st.secrets.posthog.api_key
+posthog.host = st.secrets.posthog.host
+
+def track(event: str, props: dict | None = None):
+    uid = st.session_state.get("user_id", "anon")
+    posthog.capture(uid, event, properties=props or {})
+
+# ─────────────────────── PAGE META/STYLE ───────────────────
 st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
 
 # Dark theme CSS
@@ -90,8 +125,10 @@ with st.sidebar:
         st.session_state["_script1_log"] = log
         if code != 0:
             st.error("Backend failed. See log below.")
+            track("run_script1", {"status": "error", "timestamp": int(time.time())})
         else:
             st.success("Backend finished. Reloading…")
+            track("run_script1", {"status": "success", "timestamp": int(time.time())})
             st.experimental_rerun()
 
     if os.path.exists(EXCEL_PATH):
