@@ -54,7 +54,7 @@ authenticator = stauth.Authenticate(
     auto_hash=True,   # will hash plaintext passwords on first use (needs mutable dict)
 )
 
-name, auth_status, username = authenticator.login(location="main", form_name="Login")
+name, auth_status, username = authenticator.login(location="main", name="Login")
 
 if auth_status is False:
     st.error("Invalid username or password")
