@@ -19,33 +19,17 @@ print("[CHECKPOINT] Paths resolved | DATA_DIR=", DATA_DIR, "| SCRIPTS_DIR=", SCR
 # ───────────────────────── AUTH ─────────────────────────────
 print("[CHECKPOINT] Authenticator initializing")
 
-def to_dict(obj):
-    """Convert st.secrets (Secrets object) into a pure Python dict recursively."""
-    if isinstance(obj, dict):
-        return {k: to_dict(v) for k, v in obj.items()}
-    return obj
+import json
 
-credentials = to_dict(st.secrets["credentials"])
+print("[CHECKPOINT] Authenticator initializing")
+
+# Convert st.secrets["credentials"] into a true Python dict
+credentials = json.loads(json.dumps(st.secrets["credentials"]))
 
 authenticator = stauth.Authenticate(
-    credentials=credentials,   # ✅ real dict copy (mutable)
+    credentials=credentials,   # <-- now mutable
     auto_hash=True
 )
-
-name, auth_status, username = authenticator.login("Login", "main")
-
-if auth_status is False:
-    st.error("Invalid username or password")
-    st.stop()
-elif auth_status is None:
-    st.info("Please log in to continue")
-    st.stop()
-
-st.session_state["user_id"] = username
-st.session_state["user_name"] = name
-
-with st.sidebar:
-    authenticator.logout("Logout", "sidebar")
 
 print("[CHECKPOINT] Authentication successful | user:", username)
 
