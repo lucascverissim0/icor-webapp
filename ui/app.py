@@ -1,5 +1,4 @@
 import os
-import glob
 import re
 import subprocess
 import pandas as pd
@@ -15,22 +14,11 @@ SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"   # backend pipeline
 
-print("[CHECKPOINT] Page config set")
-st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
-
 # ───────────────────────── AUTH ─────────────────────────────
-import json
-
-# Convert st.secrets into a plain dict safely
-cfg = json.loads(json.dumps(st.secrets))
-
-print("[CHECKPOINT] Authenticator initializing with plain dict")
+print("[CHECKPOINT] Initializing authenticator")
 
 authenticator = stauth.Authenticate(
-    credentials=cfg["credentials"],
-    cookie_name=cfg["cookie"]["name"],
-    cookie_key=cfg["cookie"]["key"],
-    cookie_expiry_days=cfg["cookie"]["expiry_days"],
+    credentials=st.secrets["credentials"]  # ✅ no cookies
 )
 
 name, auth_status, username = authenticator.login("Login", "main")
@@ -49,7 +37,6 @@ with st.sidebar:
     authenticator.logout("Logout", "sidebar")
 
 # ─────────────────────── POSTHOG SETUP ───────────────────────
-print("[CHECKPOINT] Posthog setup")
 posthog.project_api_key = st.secrets.posthog.api_key
 posthog.host = st.secrets.posthog.host
 
@@ -58,6 +45,10 @@ def track(event: str, props: dict | None = None):
     posthog.capture(uid, event, properties=props or {})
 
 # ─────────────────────── PAGE META/STYLE ───────────────────
+st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
+print("[CHECKPOINT] Page config set")
+
+# Dark theme CSS
 st.markdown(
     """
     <style>
@@ -155,7 +146,6 @@ if log:
 if not os.path.exists(EXCEL_PATH):
     st.warning("No workbook found. Click **Run backend (Script 1)** in the sidebar.")
 else:
-    # Toggle right above the table (Combined / EU / World)
     st.subheader("Strategic Opportunities")
     view = st.radio("View", ["Combined", "EU", "World"], horizontal=True)
     sheet_map = {"Combined": "ICOR_SO_All", "EU": "ICOR_SO_EU", "World": "ICOR_SO_World"}
