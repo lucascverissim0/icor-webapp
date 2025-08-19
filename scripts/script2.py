@@ -34,10 +34,19 @@ import requests
 import pandas as pd
 from tabulate import tabulate
 from collections import Counter
-import streamlit as st
 
-OPENAI_API_KEY = st.secrets["openai"]["api_key"]
-SERPAPI_KEY = st.secrets["serpapi"]["api_key"]
+
+# ───────── Secrets from environment only ─────────
+import os, sys
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SERPAPI_KEY    = os.getenv("SERPAPI_KEY")
+
+if not OPENAI_API_KEY:
+    print("⚠️  OPENAI_API_KEY not found in environment. OpenAI calls will fail.", file=sys.stderr)
+if not SERPAPI_KEY:
+    print("⚠️  SERPAPI_KEY not found in environment. Web seeding may be disabled.", file=sys.stderr)
+
 
 
 # ---------------- Config ----------------
