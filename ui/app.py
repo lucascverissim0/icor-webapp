@@ -7,6 +7,7 @@ import subprocess
 import pandas as pd
 import streamlit as st
 import posthog
+import sys  # for sys.executable
 
 # =============== PAGE META + THEME ===============
 st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
@@ -161,7 +162,7 @@ def run_script1():
         return 127, f"[ERROR] Script not found: {path}"
     print("[CHECKPOINT] Running Script 1…")
     proc = subprocess.Popen(
-        ["python", path],
+        [sys.executable, path],  # use same interpreter as Streamlit
         cwd=DATA_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
