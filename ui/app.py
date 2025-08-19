@@ -6,7 +6,6 @@ import streamlit as st
 import streamlit_authenticator as stauth
 import posthog
 import time
-import json
 
 # ────────────────────────── PATHS ──────────────────────────
 HERE = os.path.dirname(__file__)
@@ -15,15 +14,22 @@ SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"   # backend pipeline
 
-# ───────────────────────── AUTH ─────────────────────────────
-print("[CHECKPOINT] Initializing authenticator")
+print("[CHECKPOINT] Paths resolved | DATA_DIR=", DATA_DIR, "| SCRIPTS_DIR=", SCRIPTS_DIR)
 
-# 🔑 Make a mutable deep copy of credentials
-credentials = json.loads(json.dumps(st.secrets["credentials"]))
+# ───────────────────────── AUTH ─────────────────────────────
+print("[CHECKPOINT] Authenticator initializing")
+
+def to_dict(obj):
+    """Convert st.secrets (Secrets object) into a pure Python dict recursively."""
+    if isinstance(obj, dict):
+        return {k: to_dict(v) for k, v in obj.items()}
+    return obj
+
+credentials = to_dict(st.secrets["credentials"])
 
 authenticator = stauth.Authenticate(
-    credentials=credentials,   # ✅ mutable dict
-    auto_hash=True             # ensure plain-text gets hashed
+    credentials=credentials,   # ✅ real dict copy (mutable)
+    auto_hash=True
 )
 
 name, auth_status, username = authenticator.login("Login", "main")
@@ -41,17 +47,20 @@ st.session_state["user_name"] = name
 with st.sidebar:
     authenticator.logout("Logout", "sidebar")
 
+print("[CHECKPOINT] Authentication successful | user:", username)
+
 # ─────────────────────── POSTHOG SETUP ───────────────────────
-posthog.project_api_key = st.secrets["posthog"]["api_key"]
-posthog.host = st.secrets["posthog"]["host"]
+posthog.project_api_key = st.secrets.posthog.api_key
+posthog.host = st.secrets.posthog.host
 
 def track(event: str, props: dict | None = None):
     uid = st.session_state.get("user_id", "anon")
     posthog.capture(uid, event, properties=props or {})
 
+print("[CHECKPOINT] Posthog configured")
+
 # ─────────────────────── PAGE META/STYLE ───────────────────
 st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
-print("[CHECKPOINT] Page config set")
 
 # Dark theme CSS
 st.markdown(
@@ -151,6 +160,7 @@ if log:
 if not os.path.exists(EXCEL_PATH):
     st.warning("No workbook found. Click **Run backend (Script 1)** in the sidebar.")
 else:
+    # Toggle right above the table (Combined / EU / World)
     st.subheader("Strategic Opportunities")
     view = st.radio("View", ["Combined", "EU", "World"], horizontal=True)
     sheet_map = {"Combined": "ICOR_SO_All", "EU": "ICOR_SO_EU", "World": "ICOR_SO_World"}
