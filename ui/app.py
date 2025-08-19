@@ -8,6 +8,9 @@ import streamlit_authenticator as stauth
 import posthog
 import time
 
+# ─────────────────────── PAGE META FIRST! ───────────────────────
+st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
+
 # ────────────────────────── PATHS ──────────────────────────
 HERE = os.path.dirname(__file__)
 DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
@@ -17,6 +20,10 @@ SCRIPT1_FILENAME = "script1.py"   # backend pipeline
 
 # ───────────────────────── AUTH ─────────────────────────────
 cfg = st.secrets
+if "credentials" not in cfg or "cookie" not in cfg:
+    st.error("Secrets missing: please configure [credentials] and [cookie] sections in Streamlit Secrets.")
+    st.stop()
+
 authenticator = stauth.Authenticate(
     credentials=cfg["credentials"],
     cookie_name=cfg["cookie"]["name"],
@@ -40,17 +47,18 @@ with st.sidebar:
     authenticator.logout("Logout", "sidebar")
 
 # ─────────────────────── POSTHOG SETUP ───────────────────────
-posthog.project_api_key = st.secrets.posthog.api_key
-posthog.host = st.secrets.posthog.host
+POSTHOG_API_KEY = st.secrets.get("posthog", {}).get("api_key")
+POSTHOG_HOST = st.secrets.get("posthog", {}).get("host", "https://app.posthog.com")
+if POSTHOG_API_KEY:
+    posthog.project_api_key = POSTHOG_API_KEY
+    posthog.host = POSTHOG_HOST
 
 def track(event: str, props: dict | None = None):
-    uid = st.session_state.get("user_id", "anon")
-    posthog.capture(uid, event, properties=props or {})
+    if POSTHOG_API_KEY:
+        uid = st.session_state.get("user_id", "anon")
+        posthog.capture(uid, event, properties=props or {})
 
-# ─────────────────────── PAGE META/STYLE ───────────────────
-st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
-
-# Dark theme CSS
+# ─────────────────────── PAGE STYLE ───────────────────
 st.markdown(
     """
     <style>
@@ -148,7 +156,6 @@ if log:
 if not os.path.exists(EXCEL_PATH):
     st.warning("No workbook found. Click **Run backend (Script 1)** in the sidebar.")
 else:
-    # Toggle right above the table (Combined / EU / World)
     st.subheader("Strategic Opportunities")
     view = st.radio("View", ["Combined", "EU", "World"], horizontal=True)
     sheet_map = {"Combined": "ICOR_SO_All", "EU": "ICOR_SO_EU", "World": "ICOR_SO_World"}
