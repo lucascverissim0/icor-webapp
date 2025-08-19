@@ -10,8 +10,6 @@ import sys
 
 # ---------- MUST be the first Streamlit call ----------
 st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
-
-# Optional: show full error details in the browser
 st.set_option("client.showErrorDetails", True)
 
 # ---------- Styles ----------
@@ -34,22 +32,20 @@ st.markdown(
 def main():
     print("[CHECKPOINT] Page config set")
 
-    # ---------- PATHS ----------
+    # =============== PATHS ===============
     HERE = os.path.dirname(__file__)
     DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
     SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
     EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
     SCRIPT1_FILENAME = "script1.py"
 
-    # Sanity so a bad relative path doesn’t crash the server during import
-    for required in (DATA_DIR, SCRIPTS_DIR):
-        if not os.path.isdir(required):
-            st.error(f"Expected folder missing: {required}. Check repo layout.")
-            st.stop()
+    if not os.path.isdir(DATA_DIR) or not os.path.isdir(SCRIPTS_DIR):
+        st.error(f"Expected folders missing.\nDATA_DIR={DATA_DIR}\nSCRIPTS_DIR={SCRIPTS_DIR}")
+        st.stop()
 
     print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
 
-    # ---------- PostHog (optional) ----------
+    # =============== OPTIONAL: POSTHOG ===============
     def _safe_get(dict_like, dotted, default=None):
         try:
             cur = dict_like
@@ -77,7 +73,7 @@ def main():
         except Exception:
             pass
 
-    # ---------- Auth ----------
+    # =============== AUTH (CUSTOM LOGIN) ===============
     USERS = st.secrets.get("users", {})
     print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
@@ -86,7 +82,7 @@ def main():
             return False
         if stored_password.startswith(("$2a$", "$2b$", "$2y$")):
             try:
-                import bcrypt  # must be in requirements
+                import bcrypt
             except Exception:
                 st.error("bcrypt not installed but hashed password found. Add 'bcrypt' to requirements.txt or use plaintext in secrets.")
                 return False
@@ -126,7 +122,6 @@ def main():
                 return False
         return False
 
-    # Gate
     if "user_id" not in st.session_state:
         login_form()
         st.stop()
@@ -143,7 +138,7 @@ def main():
                     del st.session_state[k]
             st.rerun()
 
-    # ---------- Helpers ----------
+    # =============== HELPERS ===============
     def run_script1():
         path = os.path.join(SCRIPTS_DIR, SCRIPT1_FILENAME)
         if not os.path.exists(path):
@@ -188,7 +183,7 @@ def main():
                 return s
         return None
 
-    # ---------- Sidebar ----------
+    # =============== SIDEBAR ===============
     with st.sidebar:
         st.header("Strategic Opportunities")
         st.caption(f"Logged in as **{st.session_state.get('user_name','')}**")
@@ -222,7 +217,7 @@ def main():
             with st.expander("Backend run log", expanded=False):
                 st.code(log)
 
-    # ---------- Landing: Strategic table ----------
+    # =============== LANDING: STRATEGIC TABLE ===============
     if not os.path.exists(EXCEL_PATH):
         st.warning("No workbook found. Click **Run backend (Script 1)** in the sidebar.")
     else:
@@ -244,7 +239,7 @@ def main():
             except Exception as e:
                 st.error(f"Could not read {chosen_sheet}: {e}")
 
-    # ---------- Explore more ----------
+    # =============== NAV CARDS ===============
     st.markdown(" ")
     st.markdown("### Explore more")
     col1, col2, col3 = st.columns(3)
@@ -280,7 +275,7 @@ def main():
 
     section = st.session_state.get("section")
 
-    # ---------- Sections ----------
+    # =============== SECTION: FLEET ===============
     if section == "fleet":
         st.markdown("---")
         st.subheader("Fleet by Model / Year")
@@ -295,6 +290,7 @@ def main():
             except Exception as e:
                 st.error(f"Could not read {sheet_name}: {e}")
 
+    # =============== SECTION: REPLACEMENTS ===============
     elif section == "repl":
         st.markdown("---")
         st.subheader("Windshield Replacements by Year")
@@ -309,6 +305,7 @@ def main():
             except Exception as e:
                 st.error(f"Could not read {sheet_name}: {e}")
 
+    # =============== SECTION: HISTORY ===============
     elif section == "history":
         st.markdown("---")
         st.subheader("Historical Sales (Top 100)")
@@ -330,7 +327,5 @@ def main():
 try:
     main()
 except Exception as e:
-    # This keeps the server alive and shows a full traceback in the UI,
-    # which will unblock the "Oh no" screen and the health check.
     st.error("The app crashed during startup. Here’s the traceback:")
     st.exception(e)
