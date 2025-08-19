@@ -19,13 +19,14 @@ print("[CHECKPOINT] Page config set")
 st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
 
 # ───────────────────────── AUTH ─────────────────────────────
-cfg = st.secrets
-print("[CHECKPOINT] Authenticator initializing")
+import copy
+
+cfg = copy.deepcopy(st.secrets)  # 🔹 make a deep copy so authenticator can mutate safely
 
 authenticator = stauth.Authenticate(
     credentials=cfg["credentials"],
     cookie_name=cfg["cookie"]["name"],
-    cookie_key=cfg["cookie"]["key"],   # ✅ fixed (was key=)
+    cookie_key=cfg["cookie"]["key"],
     cookie_expiry_days=cfg["cookie"]["expiry_days"],
 )
 
