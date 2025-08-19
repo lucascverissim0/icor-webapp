@@ -34,11 +34,17 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 from openai import OpenAI
+import streamlit as st
 
-# ─────────────────────────── API key ───────────────────────────
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "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")
+# ───────────── API key from Streamlit Secrets ─────────────
+try:
+    OPENAI_API_KEY = st.secrets["openai"]["api_key"]
+except Exception:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # fallback for local dev
+
 if not OPENAI_API_KEY:
-    print("⚠️  OPENAI_API_KEY not set; BEV counterpart lookups will likely fail.")
+    print("⚠️ OPENAI_API_KEY not set; BEV counterpart lookups will likely fail.")
+
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 # ─────────────────────────── Constants ─────────────────────────
