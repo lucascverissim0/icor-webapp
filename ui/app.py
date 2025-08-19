@@ -6,6 +6,7 @@ import streamlit as st
 import streamlit_authenticator as stauth
 import posthog
 import time
+import json
 
 # ────────────────────────── PATHS ──────────────────────────
 HERE = os.path.dirname(__file__)
@@ -17,8 +18,12 @@ SCRIPT1_FILENAME = "script1.py"   # backend pipeline
 # ───────────────────────── AUTH ─────────────────────────────
 print("[CHECKPOINT] Initializing authenticator")
 
+# 🔑 Make a mutable deep copy of credentials
+credentials = json.loads(json.dumps(st.secrets["credentials"]))
+
 authenticator = stauth.Authenticate(
-    credentials=st.secrets["credentials"]  # ✅ no cookies
+    credentials=credentials,   # ✅ mutable dict
+    auto_hash=True             # ensure plain-text gets hashed
 )
 
 name, auth_status, username = authenticator.login("Login", "main")
@@ -37,8 +42,8 @@ with st.sidebar:
     authenticator.logout("Logout", "sidebar")
 
 # ─────────────────────── POSTHOG SETUP ───────────────────────
-posthog.project_api_key = st.secrets.posthog.api_key
-posthog.host = st.secrets.posthog.host
+posthog.project_api_key = st.secrets["posthog"]["api_key"]
+posthog.host = st.secrets["posthog"]["host"]
 
 def track(event: str, props: dict | None = None):
     uid = st.session_state.get("user_id", "anon")
