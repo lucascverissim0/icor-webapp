@@ -37,30 +37,17 @@ import pandas as pd
 from tabulate import tabulate
 from collections import Counter
 
-# ─────────────────────────── Secrets / Env (Streamlit‑agnostic) ───────────────────────────
-# Try to read from st.secrets if available; otherwise fall back to env vars.
-try:
-    import streamlit as st  # noqa: F401
-    def _safe_secret(path: str, default: Optional[str] = None) -> Optional[str]:
-        try:
-            cur = st.secrets
-            for part in path.split("."):
-                cur = cur[part]
-            return cur
-        except Exception:
-            return default
-except Exception:
-    def _safe_secret(path: str, default: Optional[str] = None) -> Optional[str]:
-        # Map dotted path to ENV_VAR style
-        return os.getenv(path.upper().replace(".", "_"), default)
+# ───────── Secrets from environment only ─────────
+import os, sys
 
-OPENAI_API_KEY = _safe_secret("openai.api_key", os.getenv("OPENAI_API_KEY"))
-SERPAPI_KEY    = _safe_secret("serpapi.api_key", os.getenv("SERPAPI_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SERPAPI_KEY    = os.getenv("SERPAPI_KEY")
 
 if not OPENAI_API_KEY:
-    print("⚠️  OPENAI_API_KEY not found in secrets or env. OpenAI calls will fail.", file=sys.stderr)
+    print("⚠️  OPENAI_API_KEY not found in environment. OpenAI calls will fail.", file=sys.stderr)
 if not SERPAPI_KEY:
-    print("⚠️  SERPAPI_KEY not found in secrets or env. Web seeding may be disabled.", file=sys.stderr)
+    print("⚠️  SERPAPI_KEY not found in environment. Web seeding may be disabled.", file=sys.stderr)
+
 
 # ---------------- Config ----------------
 MODEL_NAME            = "gpt-4o-mini"   # set to an available model
