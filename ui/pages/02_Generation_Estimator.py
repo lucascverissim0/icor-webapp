@@ -1,11 +1,12 @@
+#!/usr/bin/env python3
 import os
 import glob
 import json
 import subprocess
+import sys
 import time
 import pandas as pd
 import streamlit as st
-import streamlit_authenticator as stauth
 import posthog
 
 # === CONFIG ===
@@ -38,42 +39,48 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# === AUTHENTICATION ===
-cfg = st.secrets
-authenticator = stauth.Authenticate(
-    credentials=cfg["credentials"],
-    cookie_name=cfg["cookie"]["name"],
-    key=cfg["cookie"]["key"],
-    cookie_expiry_days=cfg["cookie"]["expiry_days"],
-)
-
-name, auth_status, username = authenticator.login("Login", "main")
-
-if auth_status is False:
-    st.error("Invalid username or password.")
-    st.stop()
-elif auth_status is None:
-    st.info("Please log in to continue.")
+# === AUTH GATE (reuse session from app.py) ===
+if "user_id" not in st.session_state:
+    st.error("Please log in on the main page.")
     st.stop()
 
-st.session_state["user_id"] = username
-st.session_state["user_name"] = name
+st.title("ICOR – Model Researcher")
+st.caption(f"Logged in as **{st.session_state.get('user_name','')}**")
 
+# Optional: lightweight logout (matches app.py behavior)
 with st.sidebar:
-    authenticator.logout("Logout", "sidebar")
+    if st.button("Logout"):
+        for k in ("user_id", "user_name"):
+            st.session_state.pop(k, None)
+        st.rerun()
 
-# === POSTHOG (tracking) ===
-posthog.project_api_key = st.secrets.posthog.api_key
-posthog.host = st.secrets.posthog.host
+# === SAFE SECRET ACCESS + POSTHOG ===
+def _safe_get(dict_like, dotted, default=None):
+    try:
+        cur = dict_like
+        for part in dotted.split("."):
+            cur = cur[part]
+        return cur
+    except Exception:
+        return default
+
+PH_KEY = _safe_get(st.secrets, "posthog.api_key")
+PH_HOST = _safe_get(st.secrets, "posthog.host", "https://app.posthog.com")
+if PH_KEY:
+    posthog.project_api_key = PH_KEY
+    posthog.host = PH_HOST
 
 def track(event: str, props: dict | None = None):
+    if not PH_KEY:
+        return
     uid = st.session_state.get("user_id", "anon")
-    posthog.capture(uid, event, properties=props or {})
+    try:
+        posthog.capture(uid, event, properties=props or {})
+    except Exception:
+        pass
 
 # Track page view
 track("page_view_model_researcher", {"page": "02_Generation_Estimator"})
-
-st.title("ICOR – Model Researcher")
 
 # === HELPERS ===
 def localize_bools(df: pd.DataFrame, prefer_cols=None, true_txt="VRAI", false_txt="FAUX") -> pd.DataFrame:
@@ -116,18 +123,26 @@ def run_script2_silent(input_text: str):
     """
     Run script2 but DO NOT surface its stdout in the UI.
     Return (exit_code, raw_stdout).
+    Uses sys.executable so we run in the same venv as Streamlit.
     """
     script_path = find_script2()
     if not script_path:
         files = ", ".join(sorted(os.listdir(SCRIPTS_DIR))) if os.path.exists(SCRIPTS_DIR) else "(missing)"
         return 127, f"[ERROR] Script not found in {SCRIPTS_DIR}. Files here: {files}"
+
+    # Pass through useful secrets as env vars (in case script2 reads env)
+    env = os.environ.copy()
+    env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
+    env["SERPAPI_KEY"] = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
+
     proc = subprocess.Popen(
-        ["python", script_path],
+        [sys.executable, script_path],
         cwd=DATA_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env=env,
     )
     out, _ = proc.communicate(input_text)
     return proc.returncode, out
@@ -146,8 +161,8 @@ def parse_seed_badges(xlsx_path: str):
     - EU/World seed badges: exact vs range + value and source
     """
     confidence = None
-    eu_badge = {"style":"badge-soft","text":"Europe seed: none"}
-    w_badge  = {"style":"badge-soft","text":"World seed: none"}
+    eu_badge = {"style": "badge-soft", "text": "Europe seed: none"}
+    w_badge  = {"style": "badge-soft", "text": "World seed: none"}
 
     try:
         summary = pd.read_excel(xlsx_path, sheet_name="Summary")
@@ -160,8 +175,8 @@ def parse_seed_badges(xlsx_path: str):
     try:
         sc = pd.read_excel(xlsx_path, sheet_name="Seeds_Constraints")
         for _, row in sc.iterrows():
-            kind = str(row.get("Seed_or_Constraint","")).strip().lower()
-            raw = row.get("JSON","")
+            kind = str(row.get("Seed_or_Constraint", "")).strip().lower()
+            raw = row.get("JSON", "")
             if isinstance(raw, str) and raw.strip():
                 if kind == "seed":
                     seed_json = json.loads(raw)
@@ -176,15 +191,15 @@ def parse_seed_badges(xlsx_path: str):
         if "exact" in ce and ce["exact"]:
             year, val = next(iter(ce["exact"].items()))
             src = (seed_json or {}).get("europe", {}).get("source", "seed")
-            eu_badge = {"style":"badge-strong", "text": f"Europe {year}: exact {val:,}  ·  {src}"}
+            eu_badge = {"style": "badge-strong", "text": f"Europe {year}: exact {val:,}  ·  {src}"}
         elif "range" in ce and ce["range"]:
             year, pair = next(iter(ce["range"].items()))
             lo, hi = pair
             src = "EU-share prior"
-            eu_badge = {"style":"badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,}  ·  {src}"}
+            eu_badge = {"style": "badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,}  ·  {src}"}
     elif isinstance(seed_json, dict) and seed_json.get("europe"):
         e = seed_json["europe"]
-        eu_badge = {"style":"badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value',0)):,}  ·  {e.get('source','seed')}"}
+        eu_badge = {"style": "badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value', 0)):,}  ·  {e.get('source', 'seed')}"}
 
     # World
     if isinstance(cons_json, dict) and "world" in cons_json:
@@ -192,19 +207,19 @@ def parse_seed_badges(xlsx_path: str):
         if "exact" in cw and cw["exact"]:
             year, val = next(iter(cw["exact"].items()))
             src = (seed_json or {}).get("world", {}).get("source", "seed")
-            w_badge = {"style":"badge-strong", "text": f"World {year}: exact {val:,}  ·  {src}"}
+            w_badge = {"style": "badge-strong", "text": f"World {year}: exact {val:,}  ·  {src}"}
         elif "range" in cw and cw["range"]:
             year, pair = next(iter(cw["range"].items()))
             lo, hi = pair
             src = "EU→World prior"
-            w_badge = {"style":"badge-warn", "text": f"World {year}: range {lo:,}–{hi:,}  ·  {src}"}
+            w_badge = {"style": "badge-warn", "text": f"World {year}: range {lo:,}–{hi:,}  ·  {src}"}
     elif isinstance(seed_json, dict) and seed_json.get("world"):
         w = seed_json["world"]
-        w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,}  ·  {w.get('source','seed')}"}
+        w_badge = {"style": "badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value', 0)):,}  ·  {e.get('source', 'seed')}"}
 
     return confidence, eu_badge, w_badge
 
-def header_badges(confidence: str|None, eu_badge: dict, w_badge: dict):
+def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict):
     conf_txt = f"Confidence: <strong>{confidence}</strong>" if confidence else "Confidence: <span class='k'>n/a</span>"
     st.markdown(
         f"""
@@ -218,7 +233,7 @@ def header_badges(confidence: str|None, eu_badge: dict, w_badge: dict):
     )
 
 # === UI (inputs + action) ===
-col1, col2, col3 = st.columns([2,1,1])
+col1, col2, col3 = st.columns([2, 1, 1])
 with col1:
     model = st.text_input("Car model", placeholder="Ford Fiesta")
 with col2:
@@ -259,7 +274,7 @@ if st.button("Run Generation Estimator", type="primary"):
                 # Estimates table only
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
-                    est = localize_bools(est, prefer_cols=["ICOR_Supported","Gen_Active"])
+                    est = localize_bools(est, prefer_cols=["ICOR_Supported", "Gen_Active"])
                     st.dataframe(est, use_container_width=True)
 
                     st.download_button(
@@ -278,4 +293,3 @@ if st.button("Run Generation Estimator", type="primary"):
                     "status": "success",
                     "timestamp": int(time.time()),
                 })
-
