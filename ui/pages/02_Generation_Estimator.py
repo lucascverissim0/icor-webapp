@@ -29,14 +29,17 @@ SCRIPTS_DIR = os.path.join(ROOT, "scripts")
 st.markdown(
     """
     <style>
-    html, body, .block-container { background-color: #0E1117 !important; color: #E6E6E6 !important; }
-    .stDataFrame, .stMarkdown { color: #E6E6E6 !important; }
-    .badges { display:flex; gap:10px; flex-wrap:wrap; margin: 6px 0 14px 0; }
-    .badge { background:#161A22; border:1px solid #30363d; border-radius: 999px; padding:6px 12px; font-size:13px; color:#E6E6E6; }
-    .badge-strong { border-color:#3b82f6; }
-    .badge-warn { border-color:#f59e0b; }
-    .badge-soft { border-color:#52525b; }
-    .k { color:#A1A1AA; }
+      html, body, .block-container { background-color: #0E1117 !important; color: #E6E6E6 !important; }
+      .stDataFrame, .stMarkdown { color: #E6E6E6 !important; }
+      .badges { display:flex; gap:10px; flex-wrap:wrap; margin: 6px 0 14px 0; }
+      .badge {
+        background:#161A22; border:1px solid #30363d; border-radius: 999px;
+        padding:6px 12px; font-size:13px; color:#E6E6E6;
+      }
+      .badge-strong { border-color:#3b82f6; }
+      .badge-warn { border-color:#f59e0b; }
+      .badge-soft { border-color:#52525b; }
+      .k { color:#A1A1AA; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -47,6 +50,7 @@ def ensure_auth():
     """Use streamlit_authenticator if credentials+cookie exist; else rely on session set by app.py."""
     creds = st.secrets.get("credentials")
     cookie = st.secrets.get("cookie")
+
     if creds and cookie and HAS_AUTH_LIB:
         try:
             authenticator = stauth.Authenticate(
@@ -60,6 +64,7 @@ def ensure_auth():
             st.stop()
 
         name, auth_status, username = authenticator.login("Login", "main")
+
         if auth_status is False:
             st.error("Invalid username or password.")
             st.stop()
@@ -69,6 +74,7 @@ def ensure_auth():
 
         st.session_state["user_id"] = username
         st.session_state["user_name"] = name
+
         with st.sidebar:
             authenticator.logout("Logout", "sidebar")
         return True
@@ -147,7 +153,7 @@ def load_latest_output():
 def parse_seed_badges(xlsx_path: str):
     confidence = None
     eu_badge = {"style": "badge-soft", "text": "Europe seed: none"}
-    w_badge = {"style": "badge-soft", "text": "World seed: none"}
+    w_badge  = {"style": "badge-soft", "text": "World seed: none"}
 
     try:
         summary = pd.read_excel(xlsx_path, sheet_name="Summary")
@@ -175,30 +181,30 @@ def parse_seed_badges(xlsx_path: str):
         if "exact" in ce and ce["exact"]:
             year, val = next(iter(ce["exact"].items()))
             src = (seed_json or {}).get("europe", {}).get("source", "seed")
-            eu_badge = {"style":"badge-strong", "text": f"Europe {year}: exact {val:,} · {src}"}
+            eu_badge = {"style":"badge-strong", "text": f"Europe {year}: exact {val:,}  ·  {src}"}
         elif "range" in ce and ce["range"]:
             year, pair = next(iter(ce["range"].items()))
             lo, hi = pair
             src = "EU-share prior"
-            eu_badge = {"style":"badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,} · {src}"}
+            eu_badge = {"style":"badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,}  ·  {src}"}
     elif isinstance(seed_json, dict) and seed_json.get("europe"):
         e = seed_json["europe"]
-        eu_badge = {"style":"badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value',0)):,} · {e.get('source','seed')}"}
+        eu_badge = {"style":"badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value',0)):,}  ·  {e.get('source','seed')}"}
 
     if isinstance(cons_json, dict) and "world" in cons_json:
         cw = cons_json.get("world", {})
         if "exact" in cw and cw["exact"]:
             year, val = next(iter(cw["exact"].items()))
             src = (seed_json or {}).get("world", {}).get("source", "seed")
-            w_badge = {"style":"badge-strong", "text": f"World {year}: exact {val:,} · {src}"}
+            w_badge = {"style":"badge-strong", "text": f"World {year}: exact {val:,}  ·  {src}"}
         elif "range" in cw and cw["range"]:
             year, pair = next(iter(cw["range"].items()))
             lo, hi = pair
             src = "EU→World prior"
-            w_badge = {"style":"badge-warn", "text": f"World {year}: range {lo:,}–{hi:,} · {src}"}
+            w_badge = {"style":"badge-warn", "text": f"World {year}: range {lo:,}–{hi:,}  ·  {src}"}
     elif isinstance(seed_json, dict) and seed_json.get("world"):
         w = seed_json["world"]
-        w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,} · {w.get('source','seed')}"}
+        w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,}  ·  {w.get('source','seed')}"}
 
     return confidence, eu_badge, w_badge
 
@@ -207,9 +213,9 @@ def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict):
     st.markdown(
         f"""
         <div class="badges">
-            <div class="badge">{conf_txt}</div>
-            <div class="badge {eu_badge['style']}">{eu_badge['text']}</div>
-            <div class="badge {w_badge['style']}">{w_badge['text']}</div>
+          <div class="badge">{conf_txt}</div>
+          <div class="badge {eu_badge['style']}">{eu_badge['text']}</div>
+          <div class="badge {w_badge['style']}">{w_badge['text']}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -224,6 +230,7 @@ with st.form("gen_estimator_form", clear_on_submit=False):
         generation = st.text_input("Generation (optional)", placeholder="Mk6")
     with col3:
         start_year = st.number_input("Start year", min_value=1990, max_value=2035, value=2013, step=1)
+
     submitted = st.form_submit_button("Run Generation Estimator", type="primary")
 
 def _safe_get(dict_like, dotted, default=None):
@@ -235,9 +242,6 @@ def _safe_get(dict_like, dotted, default=None):
     except Exception:
         return default
 
-# ---- CHANGE HERE: use current interpreter via sys.executable ----
-import sys
-
 def run_script2_with_env(input_text: str):
     script_path = find_script2()
     if not script_path:
@@ -246,10 +250,10 @@ def run_script2_with_env(input_text: str):
 
     env = os.environ.copy()
     env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
-    env["SERPAPI_KEY"] = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
+    env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
 
     proc = subprocess.Popen(
-        [sys.executable, script_path],     # ← key fix
+        ["python", script_path],
         cwd=DATA_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -265,7 +269,6 @@ def run_script2_with_env(input_text: str):
         out = "[ERROR] Script 2 timed out."
         code = 124
     return code, out
-# ----------------------------------------------------------------
 
 if submitted:
     if not model:
@@ -274,6 +277,7 @@ if submitted:
         input_text = f"{model}\n{generation}\n{start_year}\n"
         with st.status("Running Script 2…", expanded=False):
             code, out = run_script2_with_env(input_text)
+
         if code != 0:
             tail = "\n".join((out or "").splitlines()[-25:])
             st.error("Script 2 failed. See brief diagnostic below.")
@@ -294,10 +298,12 @@ if submitted:
             else:
                 confidence, eu_b, w_b = parse_seed_badges(xlsx)
                 header_badges(confidence, eu_b, w_b)
+
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
                     est = localize_bools(est, prefer_cols=["ICOR_Supported", "Gen_Active"])
                     st.dataframe(est, use_container_width=True)
+
                     st.download_button(
                         "Download estimates Excel",
                         data=open(xlsx, "rb").read(),
@@ -307,10 +313,10 @@ if submitted:
                 except Exception as e:
                     st.error(f"Could not read Estimates sheet: {e}")
 
-            track("run_script2", {
-                "model": model,
-                "generation": generation or "",
-                "start_year": int(start_year),
-                "status": "success",
-                "timestamp": int(time.time()),
-            })
+                track("run_script2", {
+                    "model": model,
+                    "generation": generation or "",
+                    "start_year": int(start_year),
+                    "status": "success",
+                    "timestamp": int(time.time()),
+                })
