@@ -1,11 +1,20 @@
 import os
 import re
+import time
 import subprocess
 import pandas as pd
 import streamlit as st
 import streamlit_authenticator as stauth
-import posthog
-import time
+
+# Optional analytics; handled defensively
+try:
+    import posthog
+except Exception:
+    posthog = None
+
+# ───────────────────── PAGE META (first Streamlit call) ─────────────────────
+st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
+print("[CHECKPOINT] Page config set")
 
 # ────────────────────────── PATHS ──────────────────────────
 HERE = os.path.dirname(__file__)
@@ -13,40 +22,79 @@ DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
 SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"   # backend pipeline
+print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
 
-print("[CHECKPOINT] Paths resolved | DATA_DIR=", DATA_DIR, "| SCRIPTS_DIR=", SCRIPTS_DIR)
+# ───────────────────── helpers: thaw secrets → plain dict ────────────────────
+from collections.abc import Mapping, Sequence
+
+def thaw(obj):
+    """Recursively convert Streamlit Secrets mappings into plain Python types (dict/list)."""
+    if isinstance(obj, Mapping):
+        return {k: thaw(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [thaw(v) for v in obj]
+    return obj
 
 # ───────────────────────── AUTH ─────────────────────────────
 print("[CHECKPOINT] Authenticator initializing")
 
-import json
+# Ensure required secrets exist
+try:
+    raw_credentials = st.secrets["credentials"]
+except Exception:
+    st.error("Secrets missing: please provide a [credentials] section in Secrets.")
+    st.stop()
 
-print("[CHECKPOINT] Authenticator initializing")
+# Convert to a mutable dict for streamlit-authenticator (it mutates credentials)
+credentials = thaw(raw_credentials)
 
-# Convert st.secrets["credentials"] into a true Python dict
-credentials = json.loads(json.dumps(st.secrets["credentials"]))
-
+# Instantiate authenticator (cookies handled internally by the lib)
 authenticator = stauth.Authenticate(
-    credentials=credentials,   # <-- now mutable
-    auto_hash=True
+    credentials=credentials,
+    auto_hash=True,   # will hash plaintext passwords on first use (needs mutable dict)
 )
 
-print("[CHECKPOINT] Authentication successful | user:", username)
+name, auth_status, username = authenticator.login("Login", "main")
 
-# ─────────────────────── POSTHOG SETUP ───────────────────────
-posthog.project_api_key = st.secrets.posthog.api_key
-posthog.host = st.secrets.posthog.host
+if auth_status is False:
+    st.error("Invalid username or password")
+    st.stop()
+elif auth_status is None:
+    st.info("Please log in to continue")
+    st.stop()
+
+st.session_state["user_id"] = username
+st.session_state["user_name"] = name
+
+with st.sidebar:
+    authenticator.logout("Logout", "sidebar")
+
+print(f"[CHECKPOINT] Authentication successful | user={username}")
+
+# ─────────────────────── POSTHOG SETUP (optional) ───────────────────────
+PH_ENABLED = False
+if posthog is not None:
+    try:
+        ph_api_key = st.secrets["posthog"]["api_key"]
+        ph_host = st.secrets["posthog"].get("host", "https://app.posthog.com")
+        if ph_api_key:
+            posthog.project_api_key = ph_api_key
+            posthog.host = ph_host
+            PH_ENABLED = True
+            print("[CHECKPOINT] PostHog configured")
+    except Exception:
+        print("[CHECKPOINT] PostHog not configured (missing or invalid secrets)")
 
 def track(event: str, props: dict | None = None):
-    uid = st.session_state.get("user_id", "anon")
-    posthog.capture(uid, event, properties=props or {})
+    if not PH_ENABLED:
+        return
+    try:
+        uid = st.session_state.get("user_id", "anon")
+        posthog.capture(uid, event, properties=props or {})
+    except Exception:
+        pass
 
-print("[CHECKPOINT] Posthog configured")
-
-# ─────────────────────── PAGE META/STYLE ───────────────────
-st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
-
-# Dark theme CSS
+# ─────────────────────── DARK THEME CSS ───────────────────
 st.markdown(
     """
     <style>
@@ -144,7 +192,6 @@ if log:
 if not os.path.exists(EXCEL_PATH):
     st.warning("No workbook found. Click **Run backend (Script 1)** in the sidebar.")
 else:
-    # Toggle right above the table (Combined / EU / World)
     st.subheader("Strategic Opportunities")
     view = st.radio("View", ["Combined", "EU", "World"], horizontal=True)
     sheet_map = {"Combined": "ICOR_SO_All", "EU": "ICOR_SO_EU", "World": "ICOR_SO_World"}
