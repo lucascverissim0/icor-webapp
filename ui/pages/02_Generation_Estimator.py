@@ -3,6 +3,7 @@ import glob
 import json
 import subprocess
 import time
+import sys  # <<< use the same interpreter as Streamlit
 import pandas as pd
 import streamlit as st
 import posthog
@@ -22,6 +23,7 @@ HERE = os.path.dirname(__file__)
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DATA_DIR = os.path.join(ROOT, "data")
 SCRIPTS_DIR = os.path.join(ROOT, "scripts")
+os.makedirs(DATA_DIR, exist_ok=True)  # ensure working dir exists
 
 # IMPORTANT: Do NOT call st.set_page_config() here (keep it in app.py only)
 
@@ -253,7 +255,7 @@ def run_script2_with_env(input_text: str):
     env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
 
     proc = subprocess.Popen(
-        ["python", script_path],
+        [sys.executable, script_path],   # <<< use the same interpreter
         cwd=DATA_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
