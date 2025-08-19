@@ -5,8 +5,14 @@ import subprocess
 import time
 import pandas as pd
 import streamlit as st
-import streamlit_authenticator as stauth
 import posthog
+
+# Optional import; only used if credentials are present in secrets
+try:
+    import streamlit_authenticator as stauth  # noqa: F401
+    HAS_AUTH_LIB = True
+except Exception:
+    HAS_AUTH_LIB = False
 
 # === CONFIG ===
 PREFERRED_SCRIPT2 = "script2.py"  # preferred filename in /scripts
@@ -19,12 +25,12 @@ SCRIPTS_DIR = os.path.join(ROOT, "scripts")
 
 # IMPORTANT: Do NOT call st.set_page_config() here (keep it in app.py only)
 
-# === DARK THEME (visuals only, safe to keep in page) ===
+# === DARK THEME (visuals only) ===
 st.markdown(
     """
     <style>
       html, body, .block-container { background-color: #0E1117 !important; color: #E6E6E6 !important; }
-      .stDataFrame, .stMarkdown, .css-1v0mbdj, .css-10trblm { color: #E6E6E6 !important; }
+      .stDataFrame, .stMarkdown { color: #E6E6E6 !important; }
       .badges { display:flex; gap:10px; flex-wrap:wrap; margin: 6px 0 14px 0; }
       .badge {
         background:#161A22; border:1px solid #30363d; border-radius: 999px;
@@ -40,40 +46,47 @@ st.markdown(
 )
 
 # === AUTHENTICATION ===
-# Expects in secrets:
-# [credentials]
-#   usernames = ["user1"]
-#   passwords = ["$2b$..."]  (or use the dict format supported by streamlit_authenticator)
-# [cookie]
-#   name = "icor_auth"
-#   key = "a-very-secret-key"
-#   expiry_days = 7
-try:
-    cfg = st.secrets
-    authenticator = stauth.Authenticate(
-        credentials=cfg["credentials"],
-        cookie_name=cfg["cookie"]["name"],
-        key=cfg["cookie"]["key"],
-        cookie_expiry_days=cfg["cookie"]["expiry_days"],
-    )
-except Exception as e:
-    st.error(f"Authentication configuration error: {e}")
+def ensure_auth():
+    """Use streamlit_authenticator if credentials+cookie exist; else rely on session set by app.py."""
+    creds = st.secrets.get("credentials")
+    cookie = st.secrets.get("cookie")
+
+    if creds and cookie and HAS_AUTH_LIB:
+        try:
+            authenticator = stauth.Authenticate(
+                credentials=creds,
+                cookie_name=cookie["name"],
+                key=cookie["key"],
+                cookie_expiry_days=cookie["expiry_days"],
+            )
+        except Exception as e:
+            st.error(f"Authentication configuration error: {e}")
+            st.stop()
+
+        name, auth_status, username = authenticator.login("Login", "main")
+
+        if auth_status is False:
+            st.error("Invalid username or password.")
+            st.stop()
+        elif auth_status is None:
+            st.info("Please log in to continue.")
+            st.stop()
+
+        st.session_state["user_id"] = username
+        st.session_state["user_name"] = name
+
+        with st.sidebar:
+            authenticator.logout("Logout", "sidebar")
+        return True
+
+    # Fallback: trust session created by app.py's custom login
+    if "user_id" in st.session_state:
+        return True
+
+    st.info("Please open the **app** page and log in first.")
     st.stop()
 
-name, auth_status, username = authenticator.login("Login", "main")
-
-if auth_status is False:
-    st.error("Invalid username or password.")
-    st.stop()
-elif auth_status is None:
-    st.info("Please log in to continue.")
-    st.stop()
-
-st.session_state["user_id"] = username
-st.session_state["user_name"] = name
-
-with st.sidebar:
-    authenticator.logout("Logout", "sidebar")
+ensure_auth()
 
 # === POSTHOG (tracking) ===
 try:
@@ -89,7 +102,6 @@ def track(event: str, props: dict | None = None):
     except Exception:
         pass
 
-# Track page view
 track("page_view_model_researcher", {"page": "02_Generation_Estimator"})
 
 st.title("ICOR – Model Researcher")
@@ -139,11 +151,6 @@ def load_latest_output():
     return latest
 
 def parse_seed_badges(xlsx_path: str):
-    """
-    Reads Summary + Seeds_Constraints and builds:
-    - confidence string
-    - EU/World seed badges: exact vs range + value and source
-    """
     confidence = None
     eu_badge = {"style": "badge-soft", "text": "Europe seed: none"}
     w_badge  = {"style": "badge-soft", "text": "World seed: none"}
@@ -169,7 +176,6 @@ def parse_seed_badges(xlsx_path: str):
     except Exception:
         pass
 
-    # Europe
     if isinstance(cons_json, dict) and "europe" in cons_json:
         ce = cons_json.get("europe", {})
         if "exact" in ce and ce["exact"]:
@@ -185,7 +191,6 @@ def parse_seed_badges(xlsx_path: str):
         e = seed_json["europe"]
         eu_badge = {"style":"badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value',0)):,}  ·  {e.get('source','seed')}"}
 
-    # World
     if isinstance(cons_json, dict) and "world" in cons_json:
         cw = cons_json.get("world", {})
         if "exact" in cw and cw["exact"]:
@@ -228,58 +233,52 @@ with st.form("gen_estimator_form", clear_on_submit=False):
 
     submitted = st.form_submit_button("Run Generation Estimator", type="primary")
 
+def _safe_get(dict_like, dotted, default=None):
+    try:
+        cur = dict_like
+        for part in dotted.split("."):
+            cur = cur[part]
+        return cur
+    except Exception:
+        return default
+
+def run_script2_with_env(input_text: str):
+    script_path = find_script2()
+    if not script_path:
+        files = ", ".join(sorted(os.listdir(SCRIPTS_DIR))) if os.path.exists(SCRIPTS_DIR) else "(missing)"
+        return 127, f"[ERROR] Script not found in {SCRIPTS_DIR}. Files here: {files}"
+
+    env = os.environ.copy()
+    env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
+    env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
+
+    proc = subprocess.Popen(
+        ["python", script_path],
+        cwd=DATA_DIR,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+    try:
+        out, _ = proc.communicate(input_text, timeout=240)  # 4‑minute guard
+        code = proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out = "[ERROR] Script 2 timed out."
+        code = 124
+    return code, out
+
 if submitted:
     if not model:
         st.error("Please enter a car model.")
     else:
         input_text = f"{model}\n{generation}\n{start_year}\n"
         with st.status("Running Script 2…", expanded=False):
-            script_path = find_script2()
-            if not script_path:
-                files = ", ".join(sorted(os.listdir(SCRIPTS_DIR))) if os.path.exists(SCRIPTS_DIR) else "(missing)"
-                st.error(f"Script not found in {SCRIPTS_DIR}. Files here: {files}")
-                track("run_script2", {
-                    "model": model,
-                    "generation": generation or "",
-                    "start_year": int(start_year),
-                    "status": "missing_script",
-                    "timestamp": int(time.time()),
-                })
-            else:
-                # Prepare environment for the subprocess (secrets -> env)
-                env = os.environ.copy()
+            code, out = run_script2_with_env(input_text)
 
-                def _safe_get(dict_like, dotted, default=None):
-                    try:
-                        cur = dict_like
-                        for part in dotted.split("."):
-                            cur = cur[part]
-                        return cur
-                    except Exception:
-                        return default
-
-                env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
-                env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
-
-                # Launch the estimator as a plain Python script (NOT streamlit run)
-                proc = subprocess.Popen(
-                    ["python", script_path],
-                    cwd=DATA_DIR,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    env=env,
-                )
-                try:
-                    out, _ = proc.communicate(input_text, timeout=240)  # 4‑minute guard
-                    code = proc.returncode
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    out = "[ERROR] Script 2 timed out."
-                    code = 124
-
-        if script_path and code != 0:
+        if code != 0:
             tail = "\n".join((out or "").splitlines()[-25:])
             st.error("Script 2 failed. See brief diagnostic below.")
             if tail.strip():
@@ -292,16 +291,14 @@ if submitted:
                 "status": "error",
                 "timestamp": int(time.time()),
             })
-        elif script_path:
+        else:
             xlsx = load_latest_output()
             if not xlsx:
                 st.warning("No output Excel found. (The estimator ran but didn’t produce a file.)")
             else:
-                # Show compact header with confidence + seed exact/range info
                 confidence, eu_b, w_b = parse_seed_badges(xlsx)
                 header_badges(confidence, eu_b, w_b)
 
-                # Estimates table only
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
                     est = localize_bools(est, prefer_cols=["ICOR_Supported", "Gen_Active"])
