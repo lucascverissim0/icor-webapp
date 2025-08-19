@@ -6,6 +6,7 @@ import time
 import pandas as pd
 import streamlit as st
 import posthog
+import sys
 
 # Optional import; only used if credentials are present in secrets
 try:
@@ -252,8 +253,9 @@ def run_script2_with_env(input_text: str):
     env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
     env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
 
+    # 👇 use the same interpreter Streamlit is running
     proc = subprocess.Popen(
-        ["python", script_path],
+        [sys.executable, script_path],
         cwd=DATA_DIR,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -261,6 +263,7 @@ def run_script2_with_env(input_text: str):
         text=True,
         env=env,
     )
+
     try:
         out, _ = proc.communicate(input_text, timeout=240)  # 4‑minute guard
         code = proc.returncode
