@@ -34,10 +34,11 @@ import requests
 import pandas as pd
 from tabulate import tabulate
 from collections import Counter
+import streamlit as st
 
-# ---------------- Keys (kept inline as requested) ----------------
-OPENAI_API_KEY = "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"
-SERPAPI_KEY    = "6f8c46bfd0d35569ebb8d51e9e6591012a104c023f606e054bd233193510b837"
+OPENAI_API_KEY = st.secrets["openai"]["api_key"]
+SERPAPI_KEY = st.secrets["serpapi"]["api_key"]
+
 
 # ---------------- Config ----------------
 MODEL_NAME            = "gpt-5"
