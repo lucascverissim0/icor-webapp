@@ -19,9 +19,12 @@ print("[CHECKPOINT] Page config set")
 st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
 
 # ───────────────────────── AUTH ─────────────────────────────
-import copy
+import json
 
-cfg = copy.deepcopy(st.secrets)  # 🔹 make a deep copy so authenticator can mutate safely
+# Convert st.secrets into a plain dict safely
+cfg = json.loads(json.dumps(st.secrets))
+
+print("[CHECKPOINT] Authenticator initializing with plain dict")
 
 authenticator = stauth.Authenticate(
     credentials=cfg["credentials"],
