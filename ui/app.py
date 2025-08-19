@@ -126,7 +126,7 @@ def login_form():
             st.session_state["user_id"] = username
             st.session_state["user_name"] = name
             track("login_success", {"user": username})
-            st.experimental_rerun()
+            st.rerun()  # updated
             return True
         else:
             st.error("Invalid username or password.")
@@ -149,7 +149,7 @@ with colB:
         for k in ("user_id", "user_name"):
             if k in st.session_state:
                 del st.session_state[k]
-        st.experimental_rerun()
+        st.rerun()  # updated
 
 # =============== HELPERS ===============
 def run_script1():
@@ -214,7 +214,7 @@ with st.sidebar:
             st.error("Backend failed. See log below.")
         else:
             st.success("Backend finished. Reloading…")
-            st.experimental_rerun()
+            st.rerun()  # updated
 
     if os.path.exists(EXCEL_PATH):
         try:
