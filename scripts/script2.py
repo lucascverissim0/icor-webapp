@@ -1147,84 +1147,74 @@ def ask_user_inputs() -> Dict[str, Any]:
         print(f"Starting year must be between 1990 and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
     return {"car_model": model, "generation": generation, "start_year": year}
 
-def autodetect_generation(db_eu, db_world, icor_map, model, start_year, user_gen) -> Tuple[str, Tuple[int,int], str, str]:
+def autodetect_generation(db_eu, db_world, _icor_map_unused, model, start_year, user_gen) -> Tuple[str, Tuple[int,int], str, str]:
     """
+    ICOR-free generation detection.
     Returns: (gen_label, window(start,end), basis, note)
-    basis ∈ {"user_input","web_serp","local_top100","icor_txt","future_top100","default_8yr"}
-    Uses EU+World local data for fallbacks/confirmation.
+    basis ∈ {"user_input","web_serp","local_top100","future_top100","default_8yr"}
     """
+    def _window_from_local_for_label(gen_label: str) -> Optional[Tuple[int,int]]:
+        # Build window from EU+World Top100 for this label only
+        det_norm = normalize_generation(gen_label)
+        years = []
+        mk = find_best_model_key(db_eu, db_world, user_model=model)
+        if mk:
+            for db in (db_eu, db_world):
+                for y, rec in db.get(mk, {}).items():
+                    if normalize_generation(rec.get("generation")) == det_norm:
+                        years.append(y)
+        return (min(years), max(years)) if years else None
+
+    def _enforce_overlap(window: Tuple[int,int], basis: str) -> Tuple[Tuple[int,int], str]:
+        # If the window ends before start_year, force a default 8-year window starting at start_year
+        gs, ge = window
+        if ge < start_year:
+            return (start_year, min(start_year + 8, DEADLINE_YEAR)), basis + "_no_overlap→default"
+        # Clip to horizon
+        return (max(gs, start_year), min(ge, DEADLINE_YEAR)), basis
+
+    # 1) User provided generation
     if user_gen:
         gen_label = user_gen
-        # Build EU+World local window for this label
-        eu_hist = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_europe", [])
-        w_hist  = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_world", [])
-        win_local_eu = window_from_local_history(eu_hist)
-        win_local_w  = window_from_local_history(w_hist)
-        win_local = None
-        if win_local_eu and win_local_w:
-            win_local = (min(win_local_eu[0], win_local_w[0]), max(win_local_eu[1], win_local_w[1]))
-        else:
-            win_local = win_local_eu or win_local_w
-        win_icor  = generation_window_from_icor(icor_map, model, gen_label, start_year, DEADLINE_YEAR)
-        window, _ = combine_windows(win_local, win_icor, start_year, DEADLINE_YEAR)
-        return gen_label, window, "user_input", "Generation provided by user."
+        win_local = _window_from_local_for_label(gen_label)
+        window = win_local if win_local else (start_year, min(start_year+8, DEADLINE_YEAR))
+        window, basis = _enforce_overlap(window, "user_input")
+        return gen_label, window, basis, "Generation provided by user."
 
     mk = find_best_model_key(db_eu, db_world, user_model=model)
 
+    # 2) Web SERP (preferred when blank)
     web_gen, win_serp, _blob = detect_generation_via_web(model, start_year)
     if PREFER_WEB_FOR_GEN and web_gen:
         gen_label = web_gen
-        # Confirm/extend with local EU+World
-        det_norm = normalize_generation(gen_label)
-        def _hist_for(db):
-            hist = []
-            if mk and mk in db:
-                for y, rec in db[mk].items():
-                    if normalize_generation(rec.get("generation")) == det_norm:
-                        hist.append({"year": y, "units": rec.get("units_europe", rec.get("units_world", 0))})
-            return hist
-        eu_hist = _hist_for(db_eu)
-        w_hist  = _hist_for(db_world)
-        win_local_eu = window_from_local_history(eu_hist)
-        win_local_w  = window_from_local_history(w_hist)
-        win_local = None
-        if win_local_eu and win_local_w:
-            win_local = (min(win_local_eu[0], win_local_w[0]), max(win_local_eu[1], win_local_w[1]))
+        win_local = _window_from_local_for_label(gen_label)
+        # Merge SERP window (if present) with local window; otherwise default from start_year
+        if win_serp and win_local:
+            lo = min(win_serp[0], win_local[0]); hi = max(win_serp[1], win_local[1])
+            window = (lo, hi)
+            note = "Detected from web SERP; window merged with local Top100."
+        elif win_serp:
+            window = win_serp
+            note = "Detected from web SERP; window from snippet."
+        elif win_local:
+            window = win_local
+            note = "Detected from web SERP; window from local Top100."
         else:
-            win_local = win_local_eu or win_local_w
-        win_icor_agree = generation_window_from_icor(icor_map, model, gen_label, start_year, DEADLINE_YEAR)
+            window = (start_year, min(start_year+8, DEADLINE_YEAR))
+            note = "Detected from web SERP; default window used."
+        window, basis = _enforce_overlap(window, "web_serp")
+        return gen_label, window, basis, note
 
-        base_start, base_end = (win_serp if win_serp else (start_year, min(start_year+8, DEADLINE_YEAR)))
-        lo, hi = base_start, base_end
-        if win_local: lo, hi = min(lo, win_local[0]), max(hi, win_local[1])
-        if win_icor_agree: lo, hi = min(lo, win_icor_agree[0]), max(hi, win_icor_agree[1])
-        window = (max(lo, start_year), min(hi, DEADLINE_YEAR))
-
-        note_bits = ["Detected from web SERP"]
-        if win_serp: note_bits.append("window from snippet")
-        if win_local: note_bits.append("extended with Top100 EU+World (agreed)")
-        if win_icor_agree:  note_bits.append("extended with ICOR (agreed)")
-        return gen_label, window, "web_serp", "; ".join(note_bits) + "."
-
-    # Local Top100 exact at start-year (EU first, then World)
+    # 3) Local Top100 – exact at start year
     if mk:
         for db in (db_eu, db_world):
             if mk in db and start_year in db[mk] and db[mk][start_year].get("generation"):
                 gen_label = db[mk][start_year]["generation"]
-                eu_hist = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_europe", [])
-                w_hist  = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_world", [])
-                win_local_eu = window_from_local_history(eu_hist)
-                win_local_w  = window_from_local_history(w_hist)
-                win_local = None
-                if win_local_eu and win_local_w:
-                    win_local = (min(win_local_eu[0], win_local_w[0]), max(win_local_eu[1], win_local_w[1]))
-                else:
-                    win_local = win_local_eu or win_local_w
-                win_icor  = generation_window_from_icor(icor_map, model, gen_label, start_year, DEADLINE_YEAR)
-                window, _ = combine_windows(win_local, win_icor, start_year, DEADLINE_YEAR)
-                return gen_label, window, "local_top100", "Detected from Top100 at the start year."
+                win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
+                window, basis = _enforce_overlap(win_local, "local_top100")
+                return gen_label, window, basis, "Detected from Top100 at the start year."
 
-    # Nearest previous year with gen
+    # 4) Local Top100 – nearest previous ≤ start year
     if mk:
         years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
         prev_years = [y for y in years if y <= start_year and (
@@ -1234,36 +1224,11 @@ def autodetect_generation(db_eu, db_world, icor_map, model, start_year, user_gen
         if prev_years:
             y0 = prev_years[-1]
             gen_label = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
-            eu_hist = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_europe", [])
-            w_hist  = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_world", [])
-            win_local_eu = window_from_local_history(eu_hist)
-            win_local_w  = window_from_local_history(w_hist)
-            win_local = None
-            if win_local_eu and win_local_w:
-                win_local = (min(win_local_eu[0], win_local_w[0]), max(win_local_eu[1], win_local_w[1]))
-            else:
-                win_local = win_local_eu or win_local_w
-            win_icor  = generation_window_from_icor(icor_map, model, gen_label, start_year, DEADLINE_YEAR)
-            window, _ = combine_windows(win_local, win_icor, start_year, DEADLINE_YEAR)
-            return gen_label, window, "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
+            win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
+            window, basis = _enforce_overlap(win_local, "local_top100")
+            return gen_label, window, basis, f"Detected from Top100 nearest ≤ year ({y0})."
 
-    # ICOR-only
-    if icor_map:
-        norm_model = normalize_name(model)
-        if norm_model in icor_map:
-            years = sorted(icor_map[norm_model].keys())
-            yr = None
-            for y in years:
-                if y <= start_year:
-                    yr = y
-            if yr is None:
-                yr = years[0]
-            gen_label = icor_map[norm_model][yr]
-            win_icor  = generation_window_from_icor(icor_map, model, gen_label, start_year, DEADLINE_YEAR)
-            window, _ = combine_windows(None, win_icor, start_year, DEADLINE_YEAR)
-            return gen_label, window, "icor_txt", f"Detected from ICOR map (year {yr})."
-
-    # Nearest future (≤ 1y)
+    # 5) Local Top100 – nearest future (≤ 1y)
     if mk:
         years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
         next_years = [y for y in years if y >= start_year and (
@@ -1273,20 +1238,15 @@ def autodetect_generation(db_eu, db_world, icor_map, model, start_year, user_gen
         if next_years and (next_years[0] - start_year) <= MAX_FUTURE_GAP:
             y1 = next_years[0]
             gen_label = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
-            eu_hist = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_europe", [])
-            w_hist  = local_seed_for_generation(db_eu, db_world, model, gen_label, start_year).get("history_world", [])
-            win_local_eu = window_from_local_history(eu_hist)
-            win_local_w  = window_from_local_history(w_hist)
-            win_local = None
-            if win_local_eu and win_local_w:
-                win_local = (min(win_local_eu[0], win_local_w[0]), max(win_local_eu[1], win_local_w[1]))
-            else:
-                win_local = win_local_eu or win_local_w
-            win_icor  = generation_window_from_icor(icor_map, model, gen_label, start_year, DEADLINE_YEAR)
-            window, _ = combine_windows(win_local, win_icor, start_year, DEADLINE_YEAR)
-            return gen_label, window, "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
+            win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
+            window, basis = _enforce_overlap(win_local, "future_top100")
+            return gen_label, window, basis, f"Detected from Top100 nearest ≥ year ({y1})."
 
-    return "GEN", (start_year, min(start_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
+    # 6) Absolute fallback
+    gen_label = "GEN"
+    window, basis = _enforce_overlap((start_year, min(start_year+8, DEADLINE_YEAR)), "default_8yr")
+    return gen_label, window, basis, "Fallback default 8-year window."
+
 
 def main():
     user = ask_user_inputs()
