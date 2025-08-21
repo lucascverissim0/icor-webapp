@@ -1,3 +1,4 @@
+# ui/pages/02_Generation_Estimator.py
 import os
 import glob
 import json
@@ -155,14 +156,25 @@ def parse_seed_badges(xlsx_path: str):
     confidence = None
     eu_badge = {"style": "badge-soft", "text": "Europe seed: none"}
     w_badge  = {"style": "badge-soft", "text": "World seed: none"}
+    plaus_badge = None  # NEW
 
+    # 1) Confidence + plausibility from Summary
     try:
         summary = pd.read_excel(xlsx_path, sheet_name="Summary")
         if "Confidence" in summary.columns and len(summary):
             confidence = str(summary.loc[0, "Confidence"])
+        # NEW: Plausibility fields (written by Script 2)
+        if "Plausibility_Flag" in summary.columns:
+            flag = bool(summary.loc[0, "Plausibility_Flag"])
+            reason = str(summary.loc[0, "Plausibility_Reason"] or "").strip()
+            if flag:
+                plaus_badge = {"style": "badge-warn", "text": f"Plausibility: check · {reason[:110]}"}
+            else:
+                plaus_badge = {"style": "badge", "text": "Plausibility: OK"}
     except Exception:
         pass
 
+    # 2) Seeds / constraints from Seeds_Constraints
     seed_json, cons_json = None, None
     try:
         sc = pd.read_excel(xlsx_path, sheet_name="Seeds_Constraints")
@@ -183,11 +195,10 @@ def parse_seed_badges(xlsx_path: str):
             year, val = next(iter(ce["exact"].items()))
             src = (seed_json or {}).get("europe", {}).get("source", "seed")
             eu_badge = {"style":"badge-strong", "text": f"Europe {year}: exact {val:,}  ·  {src}"}
-        elif "range" in ce and ce["range"]:
+        elif "range" in ce and ce["range"] and seed_json:
             year, pair = next(iter(ce["range"].items()))
             lo, hi = pair
-            src = "EU-share prior"
-            eu_badge = {"style":"badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,}  ·  {src}"}
+            eu_badge = {"style":"badge-warn", "text": f"Europe {year}: range {lo:,}–{hi:,}  ·  EU-share prior"}
     elif isinstance(seed_json, dict) and seed_json.get("europe"):
         e = seed_json["europe"]
         eu_badge = {"style":"badge-strong", "text": f"Europe {seed_json.get('year')}: {int(e.get('value',0)):,}  ·  {e.get('source','seed')}"}
@@ -201,22 +212,23 @@ def parse_seed_badges(xlsx_path: str):
         elif "range" in cw and cw["range"]:
             year, pair = next(iter(cw["range"].items()))
             lo, hi = pair
-            src = "EU→World prior"
-            w_badge = {"style":"badge-warn", "text": f"World {year}: range {lo:,}–{hi:,}  ·  {src}"}
+            w_badge = {"style":"badge-warn", "text": f"World {year}: range {lo:,}–{hi:,}  ·  EU→World prior"}
     elif isinstance(seed_json, dict) and seed_json.get("world"):
         w = seed_json["world"]
         w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,}  ·  {w.get('source','seed')}"}
 
-    return confidence, eu_badge, w_badge
+    return confidence, eu_badge, w_badge, plaus_badge
 
-def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict):
+def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict, plaus_badge: dict | None = None):
     conf_txt = f"Confidence: <strong>{confidence}</strong>" if confidence else "Confidence: <span class='k'>n/a</span>"
+    plaus_html = f"<div class='badge {plaus_badge['style']}'>{plaus_badge['text']}</div>" if plaus_badge else ""
     st.markdown(
         f"""
         <div class="badges">
           <div class="badge">{conf_txt}</div>
           <div class="badge {eu_badge['style']}">{eu_badge['text']}</div>
           <div class="badge {w_badge['style']}">{w_badge['text']}</div>
+          {plaus_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -244,6 +256,10 @@ def _safe_get(dict_like, dotted, default=None):
         return default
 
 def run_script2_with_env(input_text: str):
+    """
+    Launch Script 2 as a child process, piping stdin with the 3 lines:
+    <model>\n<generation or blank>\n<start_year>\n
+    """
     script_path = find_script2()
     if not script_path:
         files = ", ".join(sorted(os.listdir(SCRIPTS_DIR))) if os.path.exists(SCRIPTS_DIR) else "(missing)"
@@ -299,8 +315,8 @@ if submitted:
             if not xlsx:
                 st.warning("No output Excel found. (The estimator ran but didn’t produce a file.)")
             else:
-                confidence, eu_b, w_b = parse_seed_badges(xlsx)
-                header_badges(confidence, eu_b, w_b)
+                confidence, eu_b, w_b, plaus_b = parse_seed_badges(xlsx)
+                header_badges(confidence, eu_b, w_b, plaus_b)
 
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
