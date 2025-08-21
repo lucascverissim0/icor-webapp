@@ -1,32 +1,19 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-car_sales_estimator_gen_autodetect_alias_icor.py  (EU + World local data)
+Generation‑specific sales estimator (EU + World)
+Authoritative sources: Top100_YYYY.txt (EU) and Top100_World_YYYY.txt (World).
+Fallback: SerpAPI web seeding when local data has no model/year coverage.
 
-Enhancements:
-  • Loads EU Top100_YYYY.txt AND World Top100_World_YYYY.txt.
-  • Uses World local data for the same purposes as EU:
-      - model matching, gen window confirmation/extension, start-year seed, history, presence/rank diagnostics.
-  • SerpAPI remains the fallback when the model is not present in either EU or World local data
-    (and still used for gen autodetect if preferred).
-  • Alias inference for the detected generation considers EU+World labels inside the window.
-  • World start-year handling:
-      - If World local seed exists → set exact World constraint.
-      - Else if EU exists → build EU→World range (same logic as before).
-  • Outputs unchanged (CSV, Excel with Estimates/Fleet_Repairs/Summary/Seeds_Constraints).
-
-Run:
-  pip install openai requests tabulate pandas openpyxl
-  python car_sales_estimator_gen_autodetect_alias_icor.py
+Key behaviors:
+- Generation detection is LOCAL-FIRST (EU+World); web is used only if local has no labels.
+- Start-year window ALWAYS overlaps start_year (else default 8y window).
+- Web seeds get plausibility checks vs. prior-generation EU average and model-level EU total.
+- Implausible EU seeds are floored and flagged; coherent seeds are accepted but labeled as web.
+- Exports Estimates, Fleet_Repairs, Summary, Seeds_Constraints with plausibility fields.
 """
 
-import os
-import re
-import csv
-import json
-import glob
-import time
-import math
-import sys
+import os, re, csv, json, glob, time, math, sys
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import difflib
@@ -35,36 +22,23 @@ import pandas as pd
 from tabulate import tabulate
 from collections import Counter
 
-
-# ───────── Secrets from environment only ─────────
-import os, sys
-
+# ------------------ Secrets (env) ------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SERPAPI_KEY    = os.getenv("SERPAPI_KEY")
+if not OPENAI_API_KEY: print("⚠️  OPENAI_API_KEY not set", file=sys.stderr)
+if not SERPAPI_KEY:    print("⚠️  SERPAPI_KEY not set (web seeding disabled)", file=sys.stderr)
 
-if not OPENAI_API_KEY:
-    print("⚠️  OPENAI_API_KEY not found in environment. OpenAI calls will fail.", file=sys.stderr)
-if not SERPAPI_KEY:
-    print("⚠️  SERPAPI_KEY not found in environment. Web seeding may be disabled.", file=sys.stderr)
-
-
-
-# ---------------- Config ----------------
-MODEL_NAME            = "gpt-5"
-DEADLINE_YEAR         = 2035
-APPLY_SMOOTHING       = True
-SEARCH_TIMEOUT        = 20
-MAX_RESULTS_TO_SCAN   = 10
-DEBUG                 = False
-WORLD_MAX_CAP         = 3_000_000
-
-# Derived metrics
-DECAY_RATE            = 0.0556      # 5.56% annual decay starting N+2
-REPAIR_RATE           = 0.021       # 2.1% of fleet
-
-# Generation detection policy
-PREFER_WEB_FOR_GEN    = True        # web (SerpAPI) is authoritative when gen is blank
-MAX_FUTURE_GAP        = 1           # accept Top100 nearest ≥ if ≤ 1 year ahead (fallback only)
+# ------------------ Config -------------------------
+MODEL_NAME          = "gpt-5"
+DEADLINE_YEAR       = 2035
+APPLY_SMOOTHING     = True
+SEARCH_TIMEOUT      = 20
+MAX_RESULTS_TO_SCAN = 10
+WORLD_MAX_CAP       = 3_000_000
+DECAY_RATE          = 0.0556
+REPAIR_RATE         = 0.021
+PREFER_WEB_FOR_GEN  = True   # used only when local has no labels at all
+MAX_FUTURE_GAP      = 1
 
 SYSTEM_INSTRUCTIONS = (
     "You are an automotive market analyst. Use provided seed data and constraints as anchors. "
@@ -74,7 +48,7 @@ SYSTEM_INSTRUCTIONS = (
     "Explain key assumptions briefly."
 )
 
-# ---------------- Helpers: normalization ----------------
+# ------------------ Normalizers --------------------
 def normalize_name(s: str) -> str:
     s = s.lower()
     s = re.sub(r"[/\-]", " ", s)
@@ -83,378 +57,106 @@ def normalize_name(s: str) -> str:
     return s
 
 def normalize_generation(g: Optional[str]) -> str:
-    if not g:
-        return ""
-    g = str(g)
-    g = g.lower()
+    if not g: return ""
+    g = str(g).lower()
     g = re.sub(r"[\(\)\[\]{}]", " ", g)
-    g = re.sub(r"mk\s*", "mk", g)      # "Mk 6" -> "mk6"
+    g = re.sub(r"\bmk\s*", "mk", g)
     g = re.sub(r"\s+", " ", g).strip()
     return g
 
-# ---------------- Local DB loaders (EU & World) ----------------
+# ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
     try:
         return json.load(open(path, "r", encoding="utf-8"))
-    except Exception as e:
-        if DEBUG: print(f"[WARN] Failed to read {path}: {e}")
+    except Exception:
         return None
 
 def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
-    """
-    EU db: db_eu[normalized_model][year] = {
-        'model': str, 'generation': str|None, 'units_europe': int, 'estimated': bool
-    }
-    Reads Top100_*.txt
-    """
     db: Dict[str, Dict[int, Dict[str, Any]]] = {}
     for path in sorted(glob.glob(os.path.join(folder, "Top100_*.txt"))):
-        if "_World_" in os.path.basename(path):
-            continue
-        m = re.search(r"(\d{4})", os.path.basename(path))
-        if not m:
-            continue
+        if "_World_" in os.path.basename(path): continue
+        m = re.search(r"(\d{4})", os.path.basename(path)); 
+        if not m: continue
         year = int(m.group(1))
         arr = _load_json_array(path)
         if not arr: continue
         for rec in arr:
             model = rec.get("model") or rec.get("name") or ""
-            if not model:
-                continue
-            gen = rec.get("generation")
-            est = bool(rec.get("estimated", False))
+            if not model: continue
+            gen   = rec.get("generation")
             units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int):
-                continue
+            if not isinstance(units, int): continue
             key = normalize_name(model)
             db.setdefault(key, {})
             db[key][year] = {
-                "model": model,
-                "generation": gen,
-                "units_europe": units,
-                "estimated": est,
+                "model": model, "generation": gen,
+                "units_europe": int(units),
+                "estimated": bool(rec.get("estimated", False)),
             }
     return db
 
 def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
-    """
-    World db: db_world[normalized_model][year] = {
-        'model': str, 'generation': str|None, 'units_world': int, 'estimated': bool
-    }
-    Reads Top100_World_*.txt
-    """
     db: Dict[str, Dict[int, Dict[str, Any]]] = {}
     for path in sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt"))):
         m = re.search(r"(\d{4})", os.path.basename(path))
-        if not m:
-            continue
+        if not m: continue
         year = int(m.group(1))
         arr = _load_json_array(path)
         if not arr: continue
         for rec in arr:
             model = rec.get("model") or rec.get("name") or ""
-            if not model:
-                continue
-            gen = rec.get("generation")
-            est = bool(rec.get("estimated", False))
+            if not model: continue
+            gen   = rec.get("generation")
             units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int):
-                continue
+            if not isinstance(units, int): continue
             key = normalize_name(model)
             db.setdefault(key, {})
             db[key][year] = {
-                "model": model,
-                "generation": gen,
-                "units_world": units,
-                "estimated": est,
+                "model": model, "generation": gen,
+                "units_world": int(units),
+                "estimated": bool(rec.get("estimated", False)),
             }
     return db
 
-# ---------------- Shared lookups ----------------
+# ------------------ Shared lookups -----------------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
     key = normalize_name(user_model)
     for db in dbs:
-        if key in db:
-            return key
-    # fuzzy across union of keys
+        if key in db: return key
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
     cand = difflib.get_close_matches(key, all_keys, n=1, cutoff=0.7)
     return cand[0] if cand else None
 
-def model_presence_years(db: Dict[str, Dict[int, Dict[str, Any]]], model_key: str) -> int:
-    return len(db.get(model_key, {}))
-
-def get_year_rank_units(db: Dict[str, Dict[int, Dict[str, Any]]], year: int, units_field: str) -> Dict[str, int]:
-    rows = []
-    for mk, by_year in db.items():
-        if year in by_year:
-            rows.append((mk, by_year[year][units_field]))
-    rows.sort(key=lambda t: t[1], reverse=True)
-    return {mk: i + 1 for i, (mk, _) in enumerate(rows)}
-
-def get_year_rank(db: Dict[str, Dict[int, Dict[str, Any]]], model_key: str, year: int, units_field: str) -> Optional[int]:
-    rankmap = get_year_rank_units(db, year, units_field)
-    return rankmap.get(model_key)
-
-# ---------------- ICOR TXT parser (map style) ----------------
-def parse_icor_supported_txt(path: str) -> Optional[Dict[str, Dict[int, str]]]:
-    if not os.path.exists(path):
-        return None
-    try:
-        text = open(path, "r", encoding="utf-8").read()
-    except Exception as e:
-        print(f"[WARN] Cannot read ICOR TXT at {path}: {e}")
-        return None
-
-    i, n = 0, len(text)
-    mapping: Dict[str, Dict[int, str]] = {}
-    while i < n:
-        m = re.search(r'"([^"]+)"\s*:', text[i:])
-        if not m:
-            break
-        model = m.group(1)
-        start = i + m.end()
-        b = re.search(r'\{', text[start:])
-        if not b:
-            break
-        brace_start = start + b.start()
-        depth, j = 0, brace_start
-        while j < n:
-            if text[j] == '{': depth += 1
-            elif text[j] == '}':
-                depth -= 1
-                if depth == 0: break
-            j += 1
-        if j >= n: break
-        inner = text[brace_start+1:j]
-        for y, gen in re.findall(r'(\d{4})\s*:\s*"([^"]+)"', inner):
-            year = int(y)
-            mapping.setdefault(normalize_name(model), {})[year] = gen
-        i = j + 1
-    return mapping
-
-# ---------------- Simple list parser (fallback) ----------------
-def parse_icor_supported_list(path: str) -> Optional[set]:
-    if not os.path.exists(path):
-        return None
-    try:
-        text = open(path, "r", encoding="utf-8").read()
-    except Exception:
-        return None
-    models = set()
-    for ln in text.splitlines():
-        ln = ln.strip()
-        if not ln:
-            continue
-        mpart = ln.split("\t", 1)[0]
-        for m in re.split(r"[+/&]", mpart):
-            models.add(normalize_name(m.strip()))
-    return models or None
-
-# ---------------- Windows from local / ICOR ----------------
-def generation_window_from_icor(icor_map: Optional[Dict[str, Dict[int, str]]],
-                                model_name: str,
-                                target_gen: str,
-                                horizon_start: int,
-                                horizon_end: int) -> Optional[Tuple[int, int]]:
-    if not icor_map:
-        return None
-    key = normalize_name(model_name)
-    if key not in icor_map:
-        return None
-    pairs = sorted(icor_map[key].items())  # [(year, gen), ...]
-    tg = normalize_generation(target_gen)
-    start, end = None, None
-    for idx, (y, g) in enumerate(pairs):
-        if normalize_generation(g) == tg:
-            start = y
-            end = horizon_end
-            for yy, gg in pairs[idx+1:]:
-                if normalize_generation(gg) != tg:
-                    end = yy - 1
-                    break
-            break
-    if start is None:
-        return None
-    return (max(start, horizon_start), min(end, horizon_end))
-
 def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
-    if not hist:
-        return None
+    if not hist: return None
     years = [h["year"] for h in hist]
     return (min(years), max(years))
 
-def combine_windows(win_local: Optional[Tuple[int,int]],
-                    win_icor: Optional[Tuple[int,int]],
-                    default_from: int,
-                    default_to: int) -> Tuple[Tuple[int,int], str]:
-    if win_local and win_icor:
-        lo = min(win_local[0], win_icor[0]); hi = max(win_local[1], win_icor[1])
-        return ((max(lo, default_from), min(hi, default_to))), "union(local,icor_txt)"
-    if win_local:
-        return ((max(win_local[0], default_from), min(win_local[1], default_to))), "local_top100"
-    if win_icor:
-        return ((max(win_icor[0], default_from), min(win_icor[1], default_to))), "icor_txt"
-    return ((default_from, min(default_from + 8, default_to))), "default_8yr"
-
-# ---------------- Alias inference (EU+World window) ----------------
-def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int, int]) -> Optional[str]:
-    """
-    Look across EU+World inside the detected window. If a single local label (normalized)
-    dominates (≥70%) and differs from detected_gen, return it as alias.
-    """
-    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
-    if not mk:
-        return None
-    lo, hi = gen_window
-    det_norm = normalize_generation(detected_gen)
-
-    labels = []
-    for db, field in ((db_eu, "generation"), (db_world, "generation")):
-        by_year = db.get(mk, {})
-        for y, rec in by_year.items():
-            if lo <= y <= hi:
-                g = rec.get(field)
-                if g:
-                    labels.append(normalize_generation(g))
-
-    labels = [g for g in labels if g]
-    if not labels:
-        return None
-    c = Counter(labels)
-    if det_norm in c:
-        return None
-    top_label, top_count = c.most_common(1)[0]
-    total = sum(c.values())
-    if len(c) == 1 or (top_count / total) >= 0.70:
-        return top_label
-    return None
-
-# ---------------- Local seed/history for a specific generation (+alias) ----------------
-def local_seed_for_generation(
-    db_eu: Dict[str, Dict[int, Dict[str, Any]]],
-    db_world: Dict[str, Dict[int, Dict[str, Any]]],
-    user_model: str,
-    target_gen: str,
-    start_year: int,
-    accepted_alias: Optional[str] = None,
-    window: Optional[Tuple[int,int]] = None
-) -> Dict[str, Any]:
-    out = {
-        "found_model": False, "model_key": None, "display_model": None,
-        "eu": None, "world": None,
-        "history_europe": [], "history_world": [],
-        "rank_eu": None, "rank_world": None,
-        "presence_years_eu": 0, "presence_years_world": 0,
-    }
-
-    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
-    if not mk:
-        return out
-
-    out["found_model"] = True
-    out["model_key"] = mk
-
-    accepted = {normalize_generation(target_gen)}
-    if accepted_alias:
-        accepted.add(normalize_generation(accepted_alias))
-
-    def _hist_one(db: Dict[str, Dict[int, Dict[str, Any]]], units_field: str) -> List[Dict[str, Any]]:
-        hist = []
-        by_year = db.get(mk, {})
-        for y, rec in by_year.items():
-            if window and not (window[0] <= y <= window[1]):
-                continue
-            if normalize_generation(rec.get("generation")) in accepted:
-                hist.append({"year": y, "units": int(rec.get(units_field, 0)), "estimated": bool(rec.get("estimated", False))})
-        hist.sort(key=lambda r: r["year"])
-        return hist
-
-    eu_hist = _hist_one(db_eu, "units_europe")
-    w_hist  = _hist_one(db_world, "units_world")
-    out["history_europe"] = eu_hist
-    out["history_world"]  = w_hist
-
-    # Display model: prefer exact start-year name from EU or World, else latest seen
-    disp = None
-    for db in (db_eu, db_world):
-        if mk in db and start_year in db[mk]:
-            disp = db[mk][start_year]["model"]; break
-    if disp is None:
-        for db in (db_eu, db_world):
-            if mk in db and db[mk]:
-                last_year = sorted(db[mk].keys())[-1]
-                disp = db[mk][last_year]["model"]; break
-    out["display_model"] = disp
-
-    # Presence & rank (diagnostics)
-    out["presence_years_eu"] = model_presence_years(db_eu, mk)
-    out["presence_years_world"] = model_presence_years(db_world, mk)
-    out["rank_eu"] = get_year_rank(db_eu, mk, start_year, "units_europe")
-    out["rank_world"] = get_year_rank(db_world, mk, start_year, "units_world")
-
-    # Start-year seeds
-    eu_seed = None
-    if mk in db_eu and start_year in db_eu[mk]:
-        if normalize_generation(db_eu[mk][start_year].get("generation")) in accepted:
-            eu_seed = int(db_eu[mk][start_year]["units_europe"])
-    world_seed = None
-    if mk in db_world and start_year in db_world[mk]:
-        if normalize_generation(db_world[mk][start_year].get("generation")) in accepted:
-            world_seed = int(db_world[mk][start_year]["units_world"])
-
-    if eu_seed is not None:
-        out["eu"] = {"value": eu_seed, "source": "local-db (alias OK)" if accepted_alias else "local-db", "is_model_level": True}
-    if world_seed is not None:
-        out["world"] = {"value": world_seed, "source": "local-db (alias OK)" if accepted_alias else "local-db", "is_model_level": True}
-
-    return out
-
-# ---------------- SerpAPI helpers (unchanged core) ----------------
+# ------------------ Serp helpers -------------------
 SERP_ENDPOINT = "https://serpapi.com/search.json"
-CURRENCY_TOKENS = ["€", "$", "£"]
-PRICE_WORDS = ["price", "prices", "pricing", "msrp", "starting", "from", "cost", "lease", "per month"]
-SALES_WORDS = ["sales", "sold", "units", "registrations", "deliveries", "volume", "shipments"]
-UNIT_WORDS = r"(?:cars|units|vehicles|registrations|sales|deliveries)"
-
-NUM_PATTERN = re.compile(
-    rf"(?<![A-Z0-9])(\d{{1,3}}(?:[,\.\s]\d{{3}})+|\d{{4,}})(?=\s*(?:{UNIT_WORDS})?\b)",
-    flags=re.IGNORECASE
-)
-
-DOMAIN_WEIGHTS = {
-    "wikipedia.org": 5,
-    "en.wikipedia.org": 6,
-    "www.wikipedia.org": 5,
-    "ford.co.uk": 4, "www.ford.com": 5,
-    "caranddriver.com": 4, "autocar.co.uk": 4, "autoexpress.co.uk": 4, "topgear.com": 4,
-    "motor1.com": 3, "parkers.co.uk": 3, "whatcar.com": 3,
-}
-
+SALES_WORDS = ["sales","sold","units","registrations","deliveries","volume","shipments"]
+CURRENCY_TOKENS = ["€","$","£"]
 def looks_like_price(text: str) -> bool:
     t = text.lower()
-    if any(sym in text for sym in CURRENCY_TOKENS): return True
-    if any(w in t for w in PRICE_WORDS): return True
-    if re.search(r"[€$£]\s?\d{1,3}(?:[,\.\s]\d{3})+", text): return True
-    return False
+    return any(sym in text for sym in CURRENCY_TOKENS) or "msrp" in t or "price" in t
 
 def has_sales_context(text: str) -> bool:
     t = text.lower()
     return any(w in t for w in SALES_WORDS)
 
 def extract_candidate_numbers(text: str) -> List[int]:
-    def _to_int(num_str: str) -> Optional[int]:
-        s = re.sub(r"[,\.\s]", "", num_str)
+    NUM_PATTERN = re.compile(r"(?<![A-Z0-9])(\d{1,3}(?:[,\.\s]\d{3})+|\d{4,})(?![A-Z0-9])")
+    def _to_int(s: str):
+        s = re.sub(r"[,\.\s]", "", s)
         return int(s) if s.isdigit() else None
-    candidates = []
+    out = []
     for m in NUM_PATTERN.finditer(text or ""):
-        val = _to_int(m.group(1))
-        if val is not None:
-            candidates.append(val)
-    return [n for n in candidates if 10 <= n <= 5_000_000]
+        v = _to_int(m.group(1))
+        if v is not None: out.append(v)
+    return [n for n in out if 10 <= n <= 5_000_000]
 
 def serp_search(query: str) -> Dict[str, Any]:
-    params = {"engine": "google", "q": query, "api_key": SERPAPI_KEY, "hl": "en", "num": "10", "safe": "active"}
+    params = {"engine":"google","q":query,"api_key":SERPAPI_KEY,"hl":"en","num":"10","safe":"active"}
     try:
         r = requests.get(SERP_ENDPOINT, params=params, timeout=SEARCH_TIMEOUT)
         r.raise_for_status()
@@ -464,345 +166,360 @@ def serp_search(query: str) -> Dict[str, Any]:
 
 def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
     blobs = []
-    def add_blob(source: str, text: str, url: str):
+    def add(source, text, url):
         if not text: return
-        if looks_like_price(text):
-            if DEBUG: print("\n[DROP price-like]\n", text, "\nURL:", url)
-            return
+        if looks_like_price(text): return
         blobs.append({"source": source, "text": text, "url": url})
-
-    for key in ("answer_box", "knowledge_graph"):
+    for key in ("answer_box","knowledge_graph"):
         box = serp_json.get(key)
         if isinstance(box, dict):
             for _, v in box.items():
-                if isinstance(v, str):
-                    add_blob(key, v, serp_json.get("search_metadata", {}).get("google_url", ""))
-
+                if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        title = item.get("title") or ""
-        snippet = item.get("snippet") or ""
-        url = item.get("link") or ""
-        combined = f"{title}\n{snippet}".strip()
-        add_blob("organic", combined, url)
-
+        add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
     return blobs
 
-def contains_phrase(text: str, phrase: str) -> bool:
-    tokens = [re.escape(t) for t in phrase.split()]
-    pattern = r"\b" + r"\s+".join(tokens) + r"\b"
-    return re.search(pattern, text, flags=re.IGNORECASE) is not None
-
 def build_generation_aliases(gen: str) -> List[str]:
-    g = gen.strip()
-    aliases = {g}
+    g = (gen or "").strip()
+    if not g: return []
     gnorm = normalize_generation(g)
+    out = {g}
     if gnorm.startswith("mk"):
         n = gnorm[2:]
-        aliases.update({f"mk{n}", f"mk {n}", f"mark {n}"})
-        words = {
-            "1":"first","2":"second","3":"third","4":"fourth","5":"fifth","6":"sixth","7":"seventh",
-            "8":"eighth","9":"ninth","10":"tenth","11":"eleventh","12":"twelfth"
-        }
-        if n in words:
-            aliases.add(f"{words[n]} generation")
-            aliases.add(f"{words[n]}-gen")
-            aliases.add(f"{n}th generation")
-    return sorted(a for a in aliases if a)
+        out.update({f"mk{n}", f"mk {n}", f"mark {n}", f"{n}th generation"})
+    return sorted(a for a in out if a)
+
+def best_number_for_region(blobs: List[Dict[str,str]], region: str, model: str, gen: str, year: int) -> Optional[Dict[str,Any]]:
+    region_aliases = {
+        "europe": ["europe","eu","efta","european","eu27","eu28","eu+efta","eu/efta","eu+uk"],
+        "world":  ["world","global","worldwide"],
+    }
+    aliases = region_aliases["europe"] if region=="europe" else region_aliases["world"]
+    gen_aliases = [a.lower() for a in build_generation_aliases(gen)]
+    best, best_score = None, -1e9
+    for b in blobs:
+        text = (b.get("text") or "") + " " + (b.get("url") or "")
+        t = text.lower()
+        if not has_sales_context(t): continue
+        if region=="world" and not any(a in t for a in aliases): continue
+        if gen and not any(a in t for a in gen_aliases): continue
+        nums = extract_candidate_numbers(text)
+        if not nums: continue
+        is_model = normalize_name(model) in normalize_name(text)
+        # guards
+        is_country_only = bool(re.search(r"\b(uk|germany|france|italy|spain|poland|netherlands|sweden|norway)\b", t))
+        is_monthly = bool(re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|q[1-4]|month|monthly)\b", t))
+        has_year = str(year) in t
+        # scoring
+        region_bonus = 3 if any(a in t for a in aliases) else 0
+        model_bonus  = 4 if is_model else -2
+        gen_bonus    = 2 if (not gen or any(a in t for a in gen_aliases)) else -3
+        year_bonus   = 2 if has_year else -2
+        country_pen  = -5 if (region=="europe" and is_country_only) else 0
+        monthly_pen  = -5 if is_monthly else 0
+        candidate    = max(nums)
+        size_pen     = -6 if (region=="europe" and candidate < 20000 and not is_country_only) else 0
+        score = (region_bonus+model_bonus+gen_bonus+year_bonus+country_pen+monthly_pen+size_pen) * 10 + math.log10(candidate+1)
+        if score > best_score:
+            best_score = score
+            best = {"value": candidate, "url": b.get("url",""), "snippet": b.get("text",""), "is_model_level": is_model and not is_country_only and not is_monthly}
+    return best
 
 def build_search_queries(model: str, gen: str, year: int) -> List[str]:
-    gen_aliases = build_generation_aliases(gen) if gen else []
-    gen_part = " OR ".join(f'"{a}"' for a in gen_aliases) if gen_aliases else ""
+    gen_alias = " OR ".join(f'"{a}"' for a in build_generation_aliases(gen)) if gen else ""
     base = [
-        f'"{model}" {year} sales worldwide -price -prices -MSRP -€ -$',
-        f'"{model}" {year} global sales -price -prices -MSRP -€ -$',
-        f'"{model}" {year} worldwide deliveries -price -prices -MSRP -€ -$',
-        f'"{model}" {year} registrations Europe -price -prices -MSRP -€ -$',
-        f'"{model}" {year} sales Europe -price -prices -MSRP -€ -$',
+        f'"{model}" {year} sales europe -price -msrp -€ -$',
+        f'"{model}" {year} registrations europe -price -msrp -€ -$',
+        f'"{model}" {year} global sales -price -msrp -€ -$',
+        f'"{model}" {year} worldwide sales -price -msrp -€ -$',
     ]
-    if gen_part:
-        base = [
-            f'"{model}" ({gen_part}) {year} sales worldwide -price -prices -MSRP -€ -$',
-            f'"{model}" ({gen_part}) {year} global sales -price -prices -MSRP -€ -$',
-            f'"{model}" ({gen_part}) {year} worldwide deliveries -price -prices -MSRP -€ -$',
-            f'"{model}" ({gen_part}) {year} registrations Europe -price -prices -MSRP -€ -$',
-            f'"{model}" ({gen_part}) {year} sales Europe -price -prices -MSRP -€ -$',
-        ]
+    if gen_alias:
+        base = [q.replace(f'"{model}"', f'"{model}" ({gen_alias})') for q in base]
     preferred = [
-        f'site:carsalesbase.com "{model}" {year} sales' if not gen_part else f'site:carsalesbase.com "{model}" ({gen_part}) {year} sales',
-        f'site:acea.auto "{model}" {year} registrations' if not gen_part else f'site:acea.auto "{model}" ({gen_part}) {year} registrations',
-        f'site:marklines.com "{model}" {year} sales' if not gen_part else f'site:marklines.com "{model}" ({gen_part}) {year} sales',
+        f'site:carsalesbase.com "{model}" {year} sales',
+        f'site:acea.auto "{model}" {year} registrations',
+        f'site:marklines.com "{model}" {year} sales',
     ]
     return base + preferred
 
-def best_number_for_region(blobs: List[Dict[str, str]], region: str, model: str, gen: str, year: int) -> Optional[Dict[str, Any]]:
-    region_aliases = {"europe": ["europe", "eu", "efta", "uk", "european"], "world": ["world", "global", "worldwide"]}
-    aliases = region_aliases["europe"] if region == "europe" else region_aliases["world"]
-    y = str(year)
-    gen_aliases = build_generation_aliases(gen) if gen else []
-    best, best_score = None, -1e9
-    for b in blobs:
-        text = b.get("text") or ""
-        t = text.lower()
-        if not has_sales_context(t): continue
-        if region == "world" and not any(a in t for a in aliases): continue
-        if gen and not any(a.lower() in t for a in gen_aliases): continue
-        nums = extract_candidate_numbers(text)
-        if not nums: continue
-        is_model = contains_phrase(text + " " + (b.get("url") or ""), model)
-        has_gen = (not gen) or any(a.lower() in t for a in gen_aliases)
-        region_bonus = 2 if any(a in t for a in aliases) else 0
-        model_bonus  = 3 if is_model else -2
-        gen_bonus    = 2 if has_gen else -3
-        year_bonus   = 1 if y in t else 0
-        price_pen    = -3 if looks_like_price(text) else 0
-        candidate = max(nums)
-        domain = ""
-        try:
-            domain = re.sub(r"^https?://(www\.)?", "", (b.get("url") or "")).split("/")[0].lower()
-        except Exception:
-            pass
-        domain_w = DOMAIN_WEIGHTS.get(domain, 0)
-        score = (region_bonus + model_bonus + gen_bonus + year_bonus + price_pen + domain_w) * 10 + math.log10(candidate + 1)
-        if score > best_score:
-            best_score = score
-            best = {"value": candidate, "url": b.get("url") or "", "snippet": text, "is_model_level": is_model and has_gen}
-    return best
-
 def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
-    queries = build_search_queries(model, gen, year)
-    blobs_all: List[Dict[str, str]] = []
-    for q in queries:
+    blobs_all: List[Dict[str,str]] = []
+    for q in build_search_queries(model, gen, year):
         res = serp_search(q)
-        if "error" in res:
-            if DEBUG: print("[SERP error]", res["error"])
-            continue
-        blobs_all.extend(pull_text_blobs(res))
+        if "error" not in res: blobs_all.extend(pull_text_blobs(res))
         time.sleep(0.35)
     eu = best_number_for_region(blobs_all, "europe", model, gen, year)
     w  = best_number_for_region(blobs_all, "world",  model, gen, year)
-    return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w, "queries": queries}
+    return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w}
 
-# ----- Generation autodetect via web (when blank) & local fallbacks -----
-ROMAN_MAP = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
-ORDINAL_WORDS = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,"seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
-GEN_PATTERNS = [
-    re.compile(r'\b(?:mk|mark)\s?([ivx\d]{1,3})\b', re.I),
-    re.compile(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx\d]{1,3})\b', re.I),
-]
-ORDINAL_PATTERN = re.compile(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+generation\b', re.I)
-CODENAME_PATTERN = re.compile(r'\b(chassis|platform|internal|code(?:name)?)\s*(?:is|:)?\s*([A-Z]{1,2}\d{2,3})\b')
-YEAR_RANGE_PATTERN = re.compile(r'(20\d{2})\s?(?:–|-|to)\s?(20\d{2})')
-SINCE_PATTERN = re.compile(r'(?:since|from)\s+(20\d{2})')
+# ------------------ Local seeds/history -------------
+def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int,int]) -> Optional[str]:
+    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
+    if not mk: return None
+    lo, hi = gen_window
+    det_norm = normalize_generation(detected_gen)
+    labels = []
+    for db in (db_eu, db_world):
+        for y, rec in db.get(mk, {}).items():
+            if lo <= y <= hi:
+                g = rec.get("generation")
+                if g: labels.append(normalize_generation(g))
+    labels = [g for g in labels if g]
+    if not labels: return None
+    c = Counter(labels)
+    if det_norm in c: return None
+    top, cnt = c.most_common(1)[0]
+    if len(c)==1 or cnt/sum(c.values())>=0.7: return top
+    return None
 
-def roman_or_digit_to_int(s: str) -> Optional[int]:
-    s = s.strip().lower()
-    if s.isdigit():
-        return int(s)
-    return ROMAN_MAP.get(s)
+def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_year, accepted_alias=None, window=None) -> Dict[str,Any]:
+    out = {"found_model": False, "model_key": None, "display_model": None,
+           "eu": None, "world": None, "history_europe": [], "history_world": [],
+           "rank_eu": None, "rank_world": None, "presence_years_eu": 0, "presence_years_world": 0}
+    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
+    if not mk: return out
+    out["found_model"] = True; out["model_key"] = mk
+    accepted = {normalize_generation(target_gen)}
+    if accepted_alias: accepted.add(normalize_generation(accepted_alias))
+    def _hist(db, units_field):
+        hist = []
+        for y, rec in db.get(mk, {}).items():
+            if window and not (window[0] <= y <= window[1]): continue
+            if normalize_generation(rec.get("generation")) in accepted:
+                hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
+        return sorted(hist, key=lambda r: r["year"])
+    eu_hist = _hist(db_eu, "units_europe"); w_hist = _hist(db_world, "units_world")
+    out["history_europe"] = eu_hist; out["history_world"] = w_hist
+    # display model
+    disp = None
+    for db in (db_eu, db_world):
+        if mk in db and start_year in db[mk]:
+            disp = db[mk][start_year]["model"]; break
+    if disp is None:
+        for db in (db_eu, db_world):
+            if mk in db and db[mk]:
+                disp = db[mk][sorted(db[mk].keys())[-1]]["model"]; break
+    out["display_model"] = disp
+    # seeds at start year
+    if mk in db_eu and start_year in db_eu[mk]:
+        if normalize_generation(db_eu[mk][start_year].get("generation")) in accepted:
+            out["eu"] = {"value": int(db_eu[mk][start_year]["units_europe"]), "source": "local-db", "is_model_level": True}
+    if mk in db_world and start_year in db_world[mk]:
+        if normalize_generation(db_world[mk][start_year].get("generation")) in accepted:
+            out["world"] = {"value": int(db_world[mk][start_year]["units_world"]), "source": "local-db", "is_model_level": True}
+    return out
 
-def detect_generation_via_web(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
-    queries = [
-        f'"{model}" {year} generation',
-        f'"{model}" {year} mk',
-        f'"{model}" generation timeline',
-        f'site:wikipedia.org "{model}" generation',
-        f'"{model}" {year} facelift generation',
-    ]
-    best = None
-    best_score = -1e9
-    best_window = None
-    best_blob = None
+# ------------------ Local-first generation ----------
+def autodetect_generation(db_eu, db_world, _icor_unused, model, start_year, user_gen):
+    def _win_for_label(gen_label: str):
+        det = normalize_generation(gen_label)
+        mk = find_best_model_key(db_eu, db_world, user_model=model)
+        years = []
+        if mk:
+            for db in (db_eu, db_world):
+                for y, rec in db.get(mk, {}).items():
+                    if normalize_generation(rec.get("generation")) == det:
+                        years.append(y)
+        return (min(years), max(years)) if years else None
+    def _overlap(win, basis):
+        gs, ge = win
+        if ge < start_year:
+            return (start_year, min(start_year+8, DEADLINE_YEAR)), basis + "_no_overlap→default"
+        return (max(gs, start_year), min(ge, DEADLINE_YEAR)), basis
 
-    for q in queries:
-        res = serp_search(q)
-        if "error" in res:
+    if user_gen:
+        gen = user_gen
+        win = _win_for_label(gen) or (start_year, min(start_year+8, DEADLINE_YEAR))
+        return (*_overlap(win, "user_input"), "Generation provided by user.")
+
+    mk = find_best_model_key(db_eu, db_world, user_model=model)
+
+    if mk:
+        for db in (db_eu, db_world):
+            if mk in db and start_year in db[mk] and db[mk][start_year].get("generation"):
+                gen = db[mk][start_year]["generation"]
+                win = _win_for_label(gen) or (start_year, min(start_year+8, DEADLINE_YEAR))
+                return (*_overlap(win, "local_top100"), "Detected from Top100 at start year.")
+    if mk:
+        years = sorted(set(list(db_eu.get(mk,{}).keys()) + list(db_world.get(mk,{}).keys())))
+        prev = [y for y in years if y <= start_year and (
+            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
+            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
+        )]
+        if prev:
+            y0 = prev[-1]
+            gen = db_eu.get(mk,{}).get(y0, db_world.get(mk,{}).get(y0))["generation"]
+            win = _win_for_label(gen) or (start_year, min(start_year+8, DEADLINE_YEAR))
+            return (*_overlap(win, "local_top100"), f"Detected from Top100 nearest ≤ year ({y0}).")
+    if mk:
+        years = sorted(set(list(db_eu.get(mk,{}).keys()) + list(db_world.get(mk,{}).keys())))
+        nxt = [y for y in years if y >= start_year and (
+            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
+            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
+        )]
+        if nxt and (nxt[0] - start_year) <= MAX_FUTURE_GAP:
+            y1 = nxt[0]
+            gen = db_eu.get(mk,{}).get(y1, db_world.get(mk,{}).get(y1))["generation"]
+            win = _win_for_label(gen) or (start_year, min(start_year+8, DEADLINE_YEAR))
+            return (*_overlap(win, "future_top100"), f"Detected from Top100 nearest ≥ year ({y1}).")
+
+    web_gen, win_serp, _ = detect_generation_via_web(model, start_year)
+    if web_gen:
+        win = win_serp or (start_year, min(start_year+8, DEADLINE_YEAR))
+        return (*_overlap(win, "web_serp"), "Detected from web SERP.")
+    gen = "GEN"
+    win = (start_year, min(start_year+8, DEADLINE_YEAR))
+    return (*_overlap(win, "default_8yr"), "Fallback default 8‑year window.")
+
+# ------------------ Priors & constraints ------------
+def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
+    mk = find_best_model_key(db_eu, {}, user_model=user_model)
+    if not mk: return None
+    rec = db_eu.get(mk, {}).get(year)
+    return int(rec["units_europe"]) if rec and "units_europe" in rec else None
+
+def prior_generation_avg_eu(db_eu, user_model, detected_gen: str, start_year: int, lookback_years: int = 3) -> Optional[int]:
+    mk = find_best_model_key(db_eu, {}, user_model=user_model)
+    if not mk: return None
+    det_norm = normalize_generation(detected_gen)
+    vals = []
+    for y in range(start_year-1, max(1990, start_year - lookback_years) - 1, -1):
+        rec = db_eu.get(mk, {}).get(y)
+        if not rec: continue
+        if normalize_generation(rec.get("generation")) == det_norm:  # same-gen
             continue
-        blobs = pull_text_blobs(res)
-        for b in blobs:
-            text = (b.get("text") or "") + " " + (b.get("url") or "")
-            t = text.lower()
-            if not contains_phrase(text, model):
-                continue
+        units = rec.get("units_europe")
+        if isinstance(units, int): vals.append(units)
+    if not vals: return None
+    return int(sum(vals) / len(vals))
 
-            gen_label = None
-            for pat in GEN_PATTERNS:
-                m = pat.search(text)
-                if m:
-                    n = roman_or_digit_to_int(m.group(1))
-                    if n:
-                        gen_label = f"Mk{n}"
-                        break
-            if not gen_label:
-                m = ORDINAL_PATTERN.search(text)
-                if m:
-                    n = ORDINAL_WORDS.get(m.group(1).lower())
-                    if n:
-                        gen_label = f"Mk{n}"
-            if not gen_label:
-                m = CODENAME_PATTERN.search(text)
-                if m:
-                    gen_label = m.group(2)
-
-            if not gen_label:
-                continue
-
-            win = None
-            m = YEAR_RANGE_PATTERN.search(text)
-            if m:
-                y1, y2 = int(m.group(1)), int(m.group(2))
-                if 1990 <= y1 <= 2100 and 1990 <= y2 <= 2100 and y1 <= y2:
-                    win = (y1, y2)
-            else:
-                m2 = SINCE_PATTERN.search(text)
-                if m2:
-                    y1 = int(m2.group(1))
-                    if 1990 <= y1 <= 2100:
-                        win = (y1, DEADLINE_YEAR)
-
-            domain = ""
-            try:
-                domain = re.sub(r"^https?://(www\.)?", "", (b.get("url") or "")).split("/")[0].lower()
-            except Exception:
-                pass
-            dom_w = DOMAIN_WEIGHTS.get(domain, 0)
-            year_hit = 1 if str(year) in t else 0
-            score = 10*dom_w + 5*year_hit
-            if win: score += 8
-            if "wikipedia.org" in domain: score += 5
-
-            if score > best_score:
-                best_score = score
-                best = gen_label
-                best_window = win
-                best_blob = b
-
-        time.sleep(0.35)
-
-    return best, best_window, best_blob
-
-# ---------------- Dynamic EU-share prior (model-level from EU Top100) ----------------
-def infer_eu_share_bounds(db_eu: Dict[str, Dict[int, Dict[str, Any]]],
-                          model_key: Optional[str],
-                          start_year: int) -> Tuple[Tuple[float, float], Dict[str, Any]]:
-    """
-    Unchanged: the prior is based on EU Top100 presence & rank.
-    """
-    diag = {"basis": "presence+rank", "rank": None, "presence_years": 0, "bands": None}
+def infer_eu_share_bounds(db_eu, model_key: Optional[str], start_year: int) -> Tuple[Tuple[float,float], Dict[str,Any]]:
+    def presence_years(db, mk): return len(db.get(mk, {}))
+    def rank_for(db, mk, y, units_field):
+        rows = []
+        for _mk, by in db.items():
+            if y in by:
+                rows.append((_mk, by[y][units_field]))
+        rows.sort(key=lambda t: t[1], reverse=True)
+        m = {mk_: i+1 for i, (mk_, _) in enumerate(rows)}
+        return m.get(mk)
+    diag = {"basis":"presence+rank","rank":None,"presence_years":0,"bands":None}
     if not model_key:
-        diag["bands"] = "unknown_model"
-        return (0.01, 0.25), diag
-    presence = model_presence_years(db_eu, model_key)
-    rank = get_year_rank(db_eu, model_key, start_year, "units_europe")
-    diag["rank"] = rank; diag["presence_years"] = presence
+        diag["bands"] = "unknown_model"; return (0.01,0.25), diag
+    presence = presence_years(db_eu, model_key)
+    rank = rank_for(db_eu, model_key, start_year, "units_europe")
+    diag["rank"]=rank; diag["presence_years"]=presence
     if rank is None:
-        if presence >= 5: lo, hi = 0.08, 0.60; diag["bands"] = "freq_present_no_rank"
-        elif presence >= 1: lo, hi = 0.04, 0.40; diag["bands"] = "sporadic_present_no_rank"
-        else: lo, hi = 0.01, 0.25; diag["bands"] = "never_present"
-        return (lo, hi), diag
-    if rank <= 10:   lo, hi = 0.25, 0.85; diag["bands"] = "rank<=10"
-    elif rank <= 30: lo, hi = 0.15, 0.65; diag["bands"] = "rank<=30"
-    elif rank <= 60: lo, hi = 0.08, 0.50; diag["bands"] = "rank<=60"
-    else:            lo, hi = 0.03, 0.35; diag["bands"] = "rank<=100"
-    return (lo, hi), diag
+        if presence>=5: lo,hi=0.08,0.60; diag["bands"]="freq_present_no_rank"
+        elif presence>=1: lo,hi=0.04,0.40; diag["bands"]="sporadic_present_no_rank"
+        else: lo,hi=0.01,0.25; diag["bands"]="never_present"
+        return (lo,hi), diag
+    if rank<=10:   lo,hi=0.25,0.85; diag["bands"]="rank<=10"
+    elif rank<=30: lo,hi=0.15,0.65; diag["bands"]="rank<=30"
+    elif rank<=60: lo,hi=0.08,0.50; diag["bands"]="rank<=60"
+    else:          lo,hi=0.03,0.35; diag["bands"]="rank<=100"
+    return (lo,hi), diag
 
-# ---------------- Build constraints (gen-specific) ----------------
 def build_constraints(start_year: int, display_model: str, target_gen: str,
-                      gen_window: Tuple[int,int],
-                      db_eu: Dict[str, Dict[int, Dict[str, Any]]],
-                      local: Dict[str, Any],
-                      web: Optional[Dict[str, Any]]) -> Tuple[dict, dict]:
-    seed_for_prompt = {
+                      gen_window: Tuple[int,int], db_eu, local, web) -> Tuple[dict, dict, dict]:
+    seed = {
         "model": display_model,
         "generation": target_gen,
         "generation_window": {"start": gen_window[0], "end": gen_window[1]},
+        "generation_window_basis": None,
         "year": start_year,
         "europe": None,
         "world": None,
         "history_europe": local.get("history_europe", []),
         "history_world": local.get("history_world", []),
-        "notes": "Local Top100 EU/World used for start-year seeds when available (accepting local alias). "
-                 "If World seed missing, dynamic EU→World prior constrains World. "
-                 "Forecast is generation-specific; zero outside the window."
+        "notes": "Local Top100 EU/World are authoritative for generation. "
+                 "Web seeding is used only if local has no coverage."
     }
     constraints = {"world": {}, "europe": {}, "zero_years": []}
+    plaus = {"flag": False, "reason": "", "source_note": ""}
 
-    zero_years = list(range(1990, gen_window[0])) + list(range(gen_window[1] + 1, DEADLINE_YEAR + 1))
+    zero_years = list(range(1990, gen_window[0])) + list(range(gen_window[1]+1, DEADLINE_YEAR+1))
     constraints["zero_years"] = [y for y in zero_years if y >= start_year]
 
-    eu_val = None
+    eu_val = None; world_val = None
     if local.get("eu"):
         eu_val = int(local["eu"]["value"])
-        seed_for_prompt["europe"] = {"value": eu_val, "source": local["eu"]["source"], "is_model_level": True}
+        seed["europe"] = {"value": eu_val, "source": local["eu"]["source"], "is_model_level": True}
         constraints["europe"]["exact"] = {start_year: eu_val}
-
-    world_val = None
     if local.get("world"):
         world_val = int(local["world"]["value"])
-        seed_for_prompt["world"] = {"value": world_val, "source": local["world"]["source"], "is_model_level": True}
+        seed["world"] = {"value": world_val, "source": local["world"]["source"], "is_model_level": True}
         constraints["world"]["exact"] = {start_year: min(world_val, WORLD_MAX_CAP)}
 
-    # If World exact missing, build range from EU prior (if EU exists)
-    world_range = None
+    # If local misses seeds entirely → consider web
+    if (eu_val is None and world_val is None
+        and not seed["history_europe"] and not seed["history_world"]):
+        if web and web.get("europe"):
+            eu_val = int(web["europe"]["value"])
+            seed["europe"] = {"value": eu_val, "source": "web-serp", "is_model_level": bool(web["europe"].get("is_model_level"))}
+            constraints.setdefault("europe",{}).setdefault("exact",{})[start_year] = eu_val
+        if web and web.get("world"):
+            world_val = int(web["world"]["value"])
+            seed["world"] = {"value": world_val, "source": "web-serp", "is_model_level": bool(web["world"].get("is_model_level"))}
+            constraints.setdefault("world",{}).setdefault("exact",{})[start_year] = min(world_val, WORLD_MAX_CAP)
+
+    # Plausibility check for EU seed (if present and came from web)
+    if seed.get("europe") and str(seed["europe"].get("source","")).startswith("web"):
+        prior_avg  = prior_generation_avg_eu(db_eu, display_model, target_gen, start_year)
+        model_tot  = model_total_eu_for_year(db_eu, display_model, start_year)
+        floors, notes = [], []
+        if prior_avg:
+            floors.append(int(0.10 * prior_avg)); notes.append(f"10% prior-gen avg {prior_avg:,}")
+        if model_tot:
+            floors.append(int(0.05 * model_tot)); notes.append(f"5% model EU {model_tot:,}")
+        if floors:
+            floor_val = max(floors + [20_000])
+            if eu_val < floor_val:
+                plaus["flag"] = True
+                plaus["reason"] = f"EU seed {eu_val:,} is very small vs " + " & ".join(notes)
+                eu_val = floor_val
+                seed["europe"]["value"] = eu_val
+                constraints["europe"]["exact"][start_year] = eu_val
+        plaus["source_note"] = "EU seed derived from web; checked vs local history"
+    elif seed.get("europe") and str(seed["europe"].get("source","")).startswith("local"):
+        plaus["source_note"] = "EU seed from local Top100"
+
+    # If World exact missing but EU exists → build EU→World range
     if world_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, local.get("model_key"), start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
         world_max = int(min(WORLD_MAX_CAP, math.floor(eu_val / max(lo_share, 1e-6))))
-        world_range = (world_min, world_max)
-        seed_for_prompt["eu_share_prior"] = {"low": lo_share, "high": hi_share,
-                                             "rank": diag["rank"], "presence_years": diag["presence_years"]}
-        constraints["world"]["range"] = {start_year: world_range}
+        constraints["world"]["range"] = {start_year: (world_min, world_max)}
+        seed["eu_share_prior"] = {"low": lo_share, "high": hi_share,
+                                  "rank": diag["rank"], "presence_years": diag["presence_years"]}
 
-    # Web seeds as last resort only if the model was not present in either EU nor World (or for region missing)
-    # We treat "not present" as: no EU seed and no World seed and empty histories.
-    if (eu_val is None and world_val is None
-        and not seed_for_prompt["history_europe"] and not seed_for_prompt["history_world"]):
-        if web and web.get("europe") and web["europe"].get("is_model_level"):
-            eu_web = int(web["europe"]["value"])
-            seed_for_prompt["europe"] = {"value": eu_web, "source": "web-serp", "is_model_level": True}
-            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_web
-        if web and web.get("world") and web["world"].get("is_model_level"):
-            w_web = int(web["world"]["value"])
-            seed_for_prompt["world"] = {"value": w_web, "source": "web-serp", "is_model_level": True}
-            constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(w_web, WORLD_MAX_CAP)
-        elif web and web.get("world") and world_range:
-            # If web world exists but is outside range, keep range and note
-            seed_for_prompt["world"] = {"value": int(web["world"]["value"]), "source": "web-serp (bounded by EU prior)", "is_model_level": bool(web["world"].get("is_model_level"))}
+    return seed, constraints, plaus
 
-    return seed_for_prompt, constraints
-
-# ---------------- GPT interaction ----------------
-def build_messages(car_model: str, target_gen: str, start_year: int, seed_for_prompt: dict, constraints: dict) -> List[Dict[str, str]]:
-    seed_text = json.dumps(seed_for_prompt, ensure_ascii=False, indent=2)
-    constraints_text = json.dumps(constraints, ensure_ascii=False, indent=2)
+# ------------------ OpenAI call --------------------
+def build_messages(car_model: str, target_gen: str, start_year: int, seed: dict, constraints: dict) -> List[Dict[str,str]]:
+    seed_text = json.dumps(seed, ensure_ascii=False, indent=2)
+    cons_text = json.dumps(constraints, ensure_ascii=False, indent=2)
     user_prompt = (
         f"Model: {car_model}\n"
         f"Generation: {target_gen}\n"
-        f"Generation window (inclusive): {seed_for_prompt['generation_window']}\n"
-        f"Starting year for forecast: {start_year}\n\n"
+        f"Generation window (inclusive): {seed['generation_window']}\n"
+        f"Starting year: {start_year}\n\n"
         f"Seed & history (THIS GENERATION ONLY):\n{seed_text}\n\n"
-        f"HARD RULES:\n{constraints_text}\n"
-        f"- This is a GENERATION-ONLY forecast. Do not include sales from other generations.\n"
-        f"- For any year outside the generation window, set both Europe and World to 0.\n"
-        f"- If 'exact' is provided for Europe/World at start-year, set that exact number.\n"
-        f"- If a World (min,max) range is provided, your start-year World must lie within it.\n"
+        f"HARD RULES:\n{cons_text}\n"
+        f"- Generation-only forecast; zero outside window.\n"
+        f"- Apply exact/range constraints at start year.\n"
         f"- Ensure Europe ≤ World each year.\n\n"
-        f"Task: Estimate annual unit sales from {start_year} through {DEADLINE_YEAR} for this generation only, "
-        f"covering World total and Europe (EU+EFTA+UK). Return ONLY one JSON object with fields: "
-        f"model, generation_or_trim_context, start_year, end_year, assumptions[], methodology_summary, confidence, "
-        f"yearly_estimates:[{{year:int, world_sales_units:int, europe_sales_units:int, rationale:string}}], notes."
+        f"Task: Estimate annual unit sales from {start_year} through {DEADLINE_YEAR} for this generation only. "
+        f"Return ONE JSON object with fields: model, generation_or_trim_context, start_year, end_year, assumptions[], "
+        f"methodology_summary, confidence, yearly_estimates:[{{year:int, world_sales_units:int, europe_sales_units:int, rationale:string}}], notes."
     )
-    return [
-        {"role": "system", "content": SYSTEM_INSTRUCTIONS},
-        {"role": "user", "content": user_prompt},
-    ]
+    return [{"role":"system","content":SYSTEM_INSTRUCTIONS},{"role":"user","content":user_prompt}]
 
-def call_openai(messages: List[Dict[str, str]]) -> Dict[str, Any]:
+def call_openai(messages: List[Dict[str,str]]) -> Dict[str,Any]:
     from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
     completion = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=messages,
-        response_format={"type": "json_object"}
+        model=MODEL_NAME, messages=messages, response_format={"type":"json_object"}
     )
     content = completion.choices[0].message.content
     try:
@@ -813,44 +530,46 @@ def call_openai(messages: List[Dict[str, str]]) -> Dict[str, Any]:
             return json.loads(chunk)
         raise RuntimeError("Model did not return valid JSON.")
 
-# ---------------- Enforcement, zeroing & smoothing ----------------
+# ------------------ Enforcement & smoothing --------
 def enforce_constraints_and_zero(data: dict, constraints: dict, start_year: int) -> dict:
     rows = data.setdefault("yearly_estimates", [])
-    row = next((r for r in rows if r.get("year") == start_year), None)
+    row = next((r for r in rows if r.get("year")==start_year), None)
     if row is None:
-        row = {"year": start_year, "world_sales_units": 0, "europe_sales_units": 0, "rationale": ""}
-        rows.append(row)
+        row = {"year": start_year, "world_sales_units": 0, "europe_sales_units": 0, "rationale": ""}; rows.append(row)
 
-    def clamp(val, lo, hi): return max(lo, min(hi, val))
+    def clamp(v, lo, hi): return max(lo, min(hi, v))
 
     ce = constraints.get("europe", {})
-    if "exact" in ce:
+    if "exact" in ce: 
         row["europe_sales_units"] = int(ce["exact"][start_year])
-        row["rationale"] = (row.get("rationale","") + " Europe start fixed by local generation seed.").strip()
+        row["rationale"] = (row.get("rationale","") + " Europe start fixed.").strip()
 
     cw = constraints.get("world", {})
     if "exact" in cw:
         row["world_sales_units"] = int(cw["exact"][start_year])
-        row["rationale"] = (row.get("rationale","") + " World start fixed by local/web seed.").strip()
+        row["rationale"] = (row.get("rationale","") + " World start fixed.").strip()
     elif "range" in cw:
         lo, hi = cw["range"][start_year]
-        lo = max(lo, row["europe_sales_units"])
-        hi = max(hi, lo)
+        lo = max(lo, row["europe_sales_units"]); hi = max(hi, lo)
         cur = int(row.get("world_sales_units", 0))
         row["world_sales_units"] = clamp(cur, lo, hi)
 
     if row["europe_sales_units"] > row["world_sales_units"]:
         row["world_sales_units"] = row["europe_sales_units"]
 
-    needed = set(range(start_year, DEADLINE_YEAR + 1))
+    needed = set(range(start_year, DEADLINE_YEAR+1))
     have = {r.get("year") for r in rows}
     for y in sorted(needed - have):
-        rows.append({"year": y, "world_sales_units": 0, "europe_sales_units": 0, "rationale": "Filled by client."})
+        rows.append({"year": y, "world_sales_units": 0, "europe_sales_units": 0, "rationale":"Filled by client."})
     rows.sort(key=lambda r: r["year"])
 
     zero_years = set(constraints.get("zero_years", []))
+    protected = set()
+    if "exact" in ce: protected.update(ce["exact"].keys())
+    if "exact" in cw: protected.update(cw["exact"].keys())
+
     for r in rows:
-        if r["year"] in zero_years:
+        if r["year"] in zero_years and r["year"] not in protected:
             r["world_sales_units"] = 0
             r["europe_sales_units"] = 0
             r["rationale"] = (r.get("rationale","") + " Outside generation window -> zero.").strip()
@@ -859,496 +578,331 @@ def enforce_constraints_and_zero(data: dict, constraints: dict, start_year: int)
 def smooth_lifecycle(data: dict, start_year: int, zero_years: set):
     rows = sorted(data.get("yearly_estimates", []), key=lambda r: r["year"])
     if not rows: return data
-
-    def smooth_series(series: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        y0, v0 = series[0]
-        out = [(y0, max(0, v0))]
-        for i in range(1, len(series)):
-            y, suggested = series[i]
-            if y in zero_years:
-                out.append((y, 0)); continue
-            _, v_prev = out[-1]
-            years_since = y - y0
-            if years_since == 1: growth = 0.35
-            elif 2 <= years_since <= 3: growth = 0.12
-            elif 4 <= years_since <= 5: growth = 0.05
-            else: growth = -0.08
-            proposed = int(round(v_prev * (1 + growth)))
-            blended = int(max(0, 0.6 * proposed + 0.4 * suggested))
-            out.append((y, blended))
+    def smooth(series):
+        y0, v0 = series[0]; out=[(y0, max(0,v0))]
+        for i in range(1,len(series)):
+            y, s = series[i]
+            if y in zero_years: out.append((y,0)); continue
+            _, vp = out[-1]
+            d = y - y0
+            if d==1: g=0.35
+            elif 2<=d<=3: g=0.12
+            elif 4<=d<=5: g=0.05
+            else: g=-0.08
+            prop = int(round(vp*(1+g)))
+            out.append((y, int(max(0, 0.6*prop + 0.4*s))))
         return out
-
-    years = [r["year"] for r in rows]
-    world_series  = [(r["year"], int(r.get("world_sales_units", 0))) for r in rows]
-    europe_series = [(r["year"], int(r.get("europe_sales_units", 0))) for r in rows]
-    world_sm  = smooth_series(world_series)
-    europe_sm = smooth_series(europe_series)
-
-    for i, _ in enumerate(years):
-        w = max(0, world_sm[i][1])
-        e = max(0, europe_sm[i][1])
-        if e > w: e = w
-        rows[i]["world_sales_units"]  = min(w, WORLD_MAX_CAP)
+    yrs = [r["year"] for r in rows]
+    wsm = smooth([(r["year"], int(r.get("world_sales_units",0))) for r in rows])
+    esm = smooth([(r["year"], int(r.get("europe_sales_units",0))) for r in rows])
+    for i,_ in enumerate(yrs):
+        w = min(max(0, wsm[i][1]), WORLD_MAX_CAP)
+        e = min(max(0, esm[i][1]), w)
+        rows[i]["world_sales_units"] = w
         rows[i]["europe_sales_units"] = e
-
     data["yearly_estimates"] = rows
     return data
 
-# ---------------- Fleet & Repairs ----------------
-def compute_fleet_and_repairs(rows: List[Dict[str, Any]],
-                              decay_rate: float = DECAY_RATE,
-                              repair_rate: float = REPAIR_RATE) -> List[Dict[str, Any]]:
+# ------------------ Fleet & repairs ----------------
+def compute_fleet_and_repairs(rows: List[Dict[str,Any]], decay_rate=DECAY_RATE, repair_rate=REPAIR_RATE) -> List[Dict[str,Any]]:
     years = [r["year"] for r in rows]
-    world_sales = [int(r.get("world_sales_units", 0)) for r in rows]
-    europe_sales = [int(r.get("europe_sales_units", 0)) for r in rows]
+    ws = [int(r.get("world_sales_units",0)) for r in rows]
+    es = [int(r.get("europe_sales_units",0)) for r in rows]
     n = len(years)
-    world_fleet = [0.0] * n
-    europe_fleet = [0.0] * n
+    wf, ef = [0.0]*n, [0.0]*n
     for i in range(n):
-        cohort_year = years[i]
-        ws = world_sales[i]
-        es = europe_sales[i]
+        y0, w0, e0 = years[i], ws[i], es[i]
         for j in range(i, n):
-            age = years[j] - cohort_year
-            surv = 1.0 if age <= 1 else (1.0 - decay_rate) ** (age - 1)
-            world_fleet[j] += ws * surv
-            europe_fleet[j] += es * surv
-    results = []
+            age = years[j] - y0
+            surv = 1.0 if age<=1 else (1.0 - decay_rate)**(age-1)
+            wf[j] += w0*surv; ef[j] += e0*surv
+    res = []
     for i in range(n):
-        wf = world_fleet[i]
-        ef = europe_fleet[i]
-        results.append({
+        res.append({
             "year": years[i],
-            "world_fleet": int(round(wf)),
-            "europe_fleet": int(round(ef)),
-            "world_repairs": int(round(wf * repair_rate)),
-            "europe_repairs": int(round(ef * repair_rate)),
+            "world_fleet": int(round(wf[i])),
+            "europe_fleet": int(round(ef[i])),
+            "world_repairs": int(round(wf[i]*repair_rate)),
+            "europe_repairs": int(round(ef[i]*repair_rate)),
         })
-    return results
+    return res
 
-# ---------------- Output: CSV & Excel ----------------
-def save_csv(data: Dict[str, Any], base_name: str) -> str:
-    rows = data.get("yearly_estimates", [])
-    csv_name = f"{base_name}.csv"
+# ------------------ Output: CSV & Excel ------------
+def save_csv(data: Dict[str,Any], base: str) -> str:
+    csv_name = f"{base}.csv"
     with open(csv_name, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["year", "world_sales_units", "europe_sales_units"])
-        for r in rows:
-            writer.writerow([r.get("year"), r.get("world_sales_units"), r.get("europe_sales_units")])
+        w = csv.writer(f); w.writerow(["year","world_sales_units","europe_sales_units"])
+        for r in data.get("yearly_estimates", []):
+            w.writerow([r.get("year"), r.get("world_sales_units"), r.get("europe_sales_units")])
     return csv_name
 
-def save_excel(data: Dict[str, Any],
-               fleet_repair: List[Dict[str, Any]],
-               seed_for_prompt: Dict[str, Any],
-               constraints: Dict[str, Any],
-               icor_status: Dict[str, Any],
-               base_name: str) -> str:
+def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
+               seed: Dict[str,Any], constraints: Dict[str,Any],
+               diag: Dict[str,Any], base: str) -> str:
     estimates = pd.DataFrame([
-        {"Year": r["year"],
-         "World_Sales": int(r.get("world_sales_units", 0)),
-         "Europe_Sales": int(r.get("europe_sales_units", 0)),
-         "Rationale": r.get("rationale", "")}
+        {"Year": r["year"], "World_Sales": int(r.get("world_sales_units",0)),
+         "Europe_Sales": int(r.get("europe_sales_units",0)), "Rationale": r.get("rationale","")}
         for r in data.get("yearly_estimates", [])
     ])
     fr = pd.DataFrame(fleet_repair)[["year","world_fleet","europe_fleet","world_repairs","europe_repairs"]] \
-           .rename(columns={
-               "year":"Year",
-               "world_fleet":"World_Fleet",
-               "europe_fleet":"Europe_Fleet",
-               "world_repairs":"World_Windshield_Repairs",
-               "europe_repairs":"Europe_Windshield_Repairs"
-           })
+           .rename(columns={"year":"Year","world_fleet":"World_Fleet","europe_fleet":"Europe_Fleet",
+                            "world_repairs":"World_Windshield_Repairs","europe_repairs":"Europe_Windshield_Repairs"})
     estimates_merged = estimates.merge(fr, on="Year", how="left")
-
-    estimates_merged["ICOR_Supported"] = icor_status.get("supported_flag")
-    estimates_merged["ICOR_Match_Type"] = icor_status.get("match_type")
-
-    gen_win = seed_for_prompt.get("generation_window", {})
+    gen_win = seed.get("generation_window", {})
     gstart, gend = gen_win.get("start"), gen_win.get("end")
     estimates_merged["Gen_Active"] = estimates_merged["Year"].apply(lambda y: bool(gstart is not None and gend is not None and gstart <= y <= gend))
+    # ICOR fields retained for compatibility; plausibility attached in diag
+    estimates_merged["ICOR_Supported"] = diag.get("supported_flag")
+    estimates_merged["ICOR_Match_Type"] = diag.get("match_type")
 
-    estimates_merged = estimates_merged[
-        ["Year",
-         "World_Sales","Europe_Sales",
-         "World_Fleet","Europe_Fleet",
-         "World_Windshield_Repairs","Europe_Windshield_Repairs",
-         "Gen_Active","ICOR_Supported","ICOR_Match_Type",
-         "Rationale"]
-    ]
-
-    summary_rows = {
+    summary = pd.DataFrame({
         "Model": [data.get("model")],
-        "Generation_Input_or_Detected": [seed_for_prompt.get("generation")],
+        "Generation_Input_or_Detected": [seed.get("generation")],
         "Generation_Window_Start": [gstart],
         "Generation_Window_End": [gend],
-        "Generation_Window_Basis": [seed_for_prompt.get("generation_window_basis")],
-        "Generation_Alias_Used": [seed_for_prompt.get("generation_alias_used")],
+        "Generation_Window_Basis": [seed.get("generation_window_basis")],
+        "Generation_Alias_Used": [seed.get("generation_alias_used")],
         "Generation_Context_From_Model": [data.get("generation_or_trim_context")],
         "Start_Year": [data.get("start_year")],
         "End_Year": [data.get("end_year")],
         "Confidence": [data.get("confidence")],
-        "ICOR_Supported": [icor_status.get("supported_flag")],
-        "ICOR_Match_Type": [icor_status.get("match_type")],
-        "ICOR_Matched_Row": [json.dumps(icor_status.get("matched_row"), ensure_ascii=False)],
-    }
-    summary = pd.DataFrame(summary_rows)
-
-    seeds_constraints = pd.DataFrame({
-        "Seed_or_Constraint": ["seed", "constraints"],
-        "JSON": [json.dumps(seed_for_prompt, indent=2), json.dumps(constraints, indent=2)],
+        # Plausibility summary
+        "Plausibility_Flag": [bool(diag.get("plausibility", {}).get("flag"))],
+        "Plausibility_Reason": [diag.get("plausibility", {}).get("reason","")],
+        "Seed_Source_Note": [diag.get("plausibility", {}).get("source_note","")],
+        "ICOR_Supported": [diag.get("supported_flag")],
+        "ICOR_Match_Type": [diag.get("match_type")],
+        "ICOR_Matched_Row": [json.dumps(diag.get("matched_row"), ensure_ascii=False)],
     })
 
-    xlsx_name = f"{base_name}.xlsx"
-    with pd.ExcelWriter(xlsx_name, engine="openpyxl") as writer:
+    seeds_constraints = pd.DataFrame({
+        "Seed_or_Constraint": ["seed","constraints"],
+        "JSON": [json.dumps(seed, indent=2), json.dumps(constraints, indent=2)],
+    })
+
+    xlsx = f"{base}.xlsx"
+    with pd.ExcelWriter(xlsx, engine="openpyxl") as writer:
         estimates_merged.to_excel(writer, sheet_name="Estimates", index=False)
         fr.to_excel(writer, sheet_name="Fleet_Repairs", index=False)
         summary.to_excel(writer, sheet_name="Summary", index=False)
         seeds_constraints.to_excel(writer, sheet_name="Seeds_Constraints", index=False)
-    return xlsx_name
+    return xlsx
 
-    # ---------------- ICOR support (by model+year; label may differ) ----------------
+# ------------------ ICOR support (unchanged) -------
 def load_icor_catalog_csv_json(path: str) -> Optional[pd.DataFrame]:
     try:
-        if path.lower().endswith(".csv"):
-            return pd.read_csv(path)
-        elif path.lower().endswith((".json",)):
-            return pd.read_json(path)
+        if path.lower().endswith(".csv"): return pd.read_csv(path)
+        if path.lower().endswith(".json"): return pd.read_json(path)
     except Exception as e:
         print(f"[WARN] Failed to read ICOR CSV/JSON at {path}: {e}")
     return None
 
-def check_icor_support(icor_map: Optional[Dict[str, Dict[int, str]]],
-                       icor_df: Optional[pd.DataFrame],
-                       model_name: str,
-                       generation_input: str,
-                       start_year: int) -> Dict[str, Any]:
-    """
-    - TXT map present → ICOR-supported if there is an ICOR entry active at start_year
-    - CSV/JSON or simple-list fallback → supported if model exists at all
-    """
-    if icor_map:
-        norm_model = normalize_name(model_name)
-        if norm_model in icor_map:
-            years = sorted(icor_map[norm_model].keys())
-            active_years = [y for y in years if y <= start_year]
-            if active_years:
-                y_active = max(active_years)
-                icor_gen_raw  = icor_map[norm_model][y_active]
-                icor_gen_norm = normalize_generation(icor_gen_raw)
-                input_gen_norm = normalize_generation(generation_input)
-                match_type = "by_year_exact_gen" if (input_gen_norm and input_gen_norm == icor_gen_norm) else "by_year_diff_gen_label"
-                return {
-                    "supported_flag": True,
-                    "match_type": match_type,
-                    "matched_row": {"model": model_name, "icor_gen_code": icor_gen_raw, "icor_gen_from_year": y_active}
-                }
-            else:
-                return {
-                    "supported_flag": False,
-                    "match_type": "model_present_no_year_coverage",
-                    "matched_row": {"model": model_name, "first_year_in_icor": years[0] if years else None}
-                }
-        else:
-            return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
-
-    if icor_df is None or icor_df.empty:
-        return {"supported_flag": "unknown", "match_type": "no_catalog", "matched_row": None}
-
-    norm_target_model = normalize_name(model_name)
-    norm_target_gen   = normalize_generation(generation_input)
-
-    cols = {c.lower(): c for c in icor_df.columns}
-    if "model" not in cols:
-        return {"supported_flag": "unknown", "match_type": "no_model_column", "matched_row": None}
-    gen_col = cols.get("generation")
-
-    model_rows = icor_df[icor_df[cols["model"]].apply(lambda v: normalize_name(str(v)) == norm_target_model)]
-    if model_rows.empty:
-        return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
-
-    if gen_col and any(not str(g).strip() for g in model_rows[gen_col].fillna("")):
-        row = model_rows.iloc[0]
-        return {"supported_flag": True, "match_type": "all_gens", "matched_row": {"model": row[cols["model"]], "generation": ""}}
-
-    if gen_col and norm_target_gen:
-        for _, row in model_rows.iterrows():
-            if normalize_generation(str(row[gen_col])) == norm_target_gen:
-                return {"supported_flag": True, "match_type": "exact_gen", "matched_row": {"model": row[cols["model"]], "generation": row[gen_col]}}
-
-    row = model_rows.iloc[0]
-    return {"supported_flag": True, "match_type": "model_present_diff_gen_no_year_map", "matched_row": {"model": row[cols["model"]], "generation": (row[gen_col] if gen_col else "")}}
-
-# ---------------- Print summary ----------------
-def print_summary(data: Dict[str, Any], seed_for_prompt: Dict[str, Any], constraints: Dict[str, Any],
-                  gen_basis: str, icor_status: Dict[str, Any], autodetect_note: str = ""):
-    print("\n=== Generation-Specific Car Sales Estimates (Modelled) ===")
-    print(f"Model: {data.get('model', 'N/A')}  |  Generation input/detected: {seed_for_prompt.get('generation')}  [basis: {gen_basis}]")
-    if autodetect_note:
-        print(f"Auto-detect note: {autodetect_note}")
-    if data.get("generation_or_trim_context"):
-        print(f"Model's own generation context: {data['generation_or_trim_context']}")
-    gw = seed_for_prompt.get("generation_window", {})
-    print(f"Generation window (inclusive): {gw.get('start')}–{gw.get('end')}")
-    alias_used = seed_for_prompt.get("generation_alias_used")
-    if alias_used:
-        print(f"Using local Top100 alias '{alias_used}' as equivalent to detected generation for EU/World history/anchor.")
-    print(f"Coverage (forecast): {data.get('start_year')}–{data.get('end_year')}")
-    print(f"Confidence: {data.get('confidence', 'N/A')}")
-
-    print("\nSeeds & history (this generation only):")
-    if seed_for_prompt.get("europe"):
-        e = seed_for_prompt["europe"]["value"]
-        print(f"  Europe {seed_for_prompt['year']}: ~{e:,}  [{seed_for_prompt['europe']['source']}]")
-    else:
-        print("  Europe: (no start-year figure for this generation)")
-    hist_eu = seed_for_prompt.get("history_europe") or []
-    if hist_eu:
-        tail = ", ".join(f"{h['year']}:{h['units']:,}{'*' if h.get('estimated') else ''}" for h in hist_eu[-8:])
-        print(f"  Europe history (gen): {tail}")
-
-    if seed_for_prompt.get("world"):
-        w = seed_for_prompt["world"]["value"]
-        print(f"  World {seed_for_prompt['year']}: ~{w:,}  [{seed_for_prompt['world']['source']}]")
-    else:
-        print("  World: (no start-year figure for this generation)")
-    hist_w = seed_for_prompt.get("history_world") or []
-    if hist_w:
-        tail = ", ".join(f"{h['year']}:{h['units']:,}{'*' if h.get('estimated') else ''}" for h in hist_w[-8:])
-        print(f"  World history (gen): {tail}")
-
-    print("\nStart-year constraints:")
-    print(json.dumps({k: v for k, v in constraints.items() if k in ("europe","world")}, indent=2))
-    if constraints.get("zero_years"):
-        zy = f"{min(constraints['zero_years'])}..{max(constraints['zero_years'])}" if constraints["zero_years"] else "-"
-        print(f"Zeroed years outside window: {zy}")
-
-    rows = data.get("yearly_estimates", [])
-    if rows:
-        table = [[r.get("year"), r.get("world_sales_units"), r.get("europe_sales_units")] for r in rows]
-        print("\nYearly estimates (units):")
-        print(tabulate(table, headers=["Year", "World", "Europe"], tablefmt="github", numalign="right", stralign="right"))
-
-    print(f"\nICOR support: {icor_status.get('supported_flag')} (match={icor_status.get('match_type')})")
-    if icor_status.get("matched_row"):
-        print(f"Matched ICOR row: {icor_status['matched_row']}")
-
-# ---------------- Inputs, auto-deduction, main ----------------
-def ask_user_inputs() -> Dict[str, Any]:
-    model = input("Enter the car model (e.g., 'Ford Fiesta'): ").strip()
-    generation = input("Enter the generation tag (e.g., 'Mk6', 'Mk7', 'A5'; leave blank to auto-detect): ").strip()
-    year_str = input(f"Enter the starting year (e.g., 2013): ").strip()
-    if not model:
-        print("You must provide a car model.", file=sys.stderr); sys.exit(1)
+def parse_icor_supported_txt(path: str) -> Optional[Dict[str, Dict[int, str]]]:
+    if not os.path.exists(path): return None
     try:
-        year = int(year_str)
-    except ValueError:
-        print("Starting year must be an integer.", file=sys.stderr); sys.exit(1)
+        text = open(path, "r", encoding="utf-8").read()
+    except Exception as e:
+        print(f"[WARN] Cannot read ICOR TXT at {path}: {e}"); return None
+    i, n = 0, len(text); mapping={}
+    while i < n:
+        m = re.search(r'"([^"]+)"\s*:', text[i:])
+        if not m: break
+        model = m.group(1); start = i + m.end()
+        b = re.search(r'\{', text[start:])
+        if not b: break
+        brace_start = start + b.start()
+        depth, j = 0, brace_start
+        while j < n:
+            if text[j]=='{': depth += 1
+            elif text[j]=='}':
+                depth -= 1
+                if depth == 0: break
+            j += 1
+        if j >= n: break
+        inner = text[brace_start+1:j]
+        for y, gen in re.findall(r'(\d{4})\s*:\s*"([^"]+)"', inner):
+            mapping.setdefault(normalize_name(model), {})[int(y)] = gen
+        i = j + 1
+    return mapping
+
+def check_icor_support(icor_map, icor_df, model_name, generation_input, start_year):
+    if icor_map:
+        norm = normalize_name(model_name)
+        if norm in icor_map:
+            years = sorted(icor_map[norm].keys())
+            active = [y for y in years if y <= start_year]
+            if active:
+                yact = max(active); icor_gen = icor_map[norm][yact]
+                match = "by_year_exact_gen" if normalize_generation(icor_gen)==normalize_generation(generation_input) else "by_year_diff_gen_label"
+                return {"supported_flag": True, "match_type": match, "matched_row": {"model": model_name, "icor_gen_code": icor_gen, "icor_gen_from_year": yact}}
+            return {"supported_flag": False, "match_type": "model_present_no_year_coverage", "matched_row": {"model": model_name}}
+        return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
+    if icor_df is None or icor_df.empty:
+        return {"supported_flag":"unknown","match_type":"no_catalog","matched_row":None}
+    cols = {c.lower(): c for c in icor_df.columns}
+    if "model" not in cols: return {"supported_flag":"unknown","match_type":"no_model_column","matched_row":None}
+    norm_target_model = normalize_name(model_name)
+    rows = icor_df[icor_df[cols["model"]].apply(lambda v: normalize_name(str(v)) == norm_target_model)]
+    if rows.empty: return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
+    return {"supported_flag": True, "match_type": "model_present_diff_gen_no_year_map", "matched_row": {"model": rows.iloc[0][cols["model"]] }}
+
+# ------------------ Summary print ------------------
+def print_summary(data, seed, constraints, gen_basis, icor_status, autodetect_note=""):
+    print("\n=== Generation-Specific Car Sales Estimates ===")
+    print(f"Model: {data.get('model','N/A')} | Generation: {seed.get('generation')}  [basis: {gen_basis}]")
+    if autodetect_note: print(f"Auto-detect note: {autodetect_note}")
+    gw = seed.get("generation_window",{})
+    print(f"Generation window: {gw.get('start')}–{gw.get('end')}")
+    print(f"Coverage: {data.get('start_year')}–{data.get('end_year')}")
+    print(f"Confidence: {data.get('confidence','N/A')}")
+    if seed.get("europe"):
+        print(f"  Europe {seed['year']}: ~{seed['europe']['value']:,}  [{seed['europe']['source']}]")
+    if seed.get("world"):
+        print(f"  World  {seed['year']}: ~{seed['world']['value']:,}  [{seed['world']['source']}]")
+    rows = data.get("yearly_estimates",[])
+    if rows:
+        tbl = [[r["year"], r["world_sales_units"], r["europe_sales_units"]] for r in rows[:10]]
+        print(tabulate(tbl, headers=["Year","World","Europe"], tablefmt="github", numalign="right"))
+
+# ------------------ CLI inputs & main --------------
+def ask_user_inputs() -> Dict[str,Any]:
+    model = input("Enter the car model: ").strip()
+    generation = input("Enter the generation tag (blank to auto): ").strip()
+    year = int(input("Enter the starting year: ").strip())
     if year < 1990 or year > DEADLINE_YEAR:
-        print(f"Starting year must be between 1990 and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
+        print(f"Year must be between 1990 and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
     return {"car_model": model, "generation": generation, "start_year": year}
 
-def autodetect_generation(db_eu, db_world, _icor_map_unused, model, start_year, user_gen) -> Tuple[str, Tuple[int,int], str, str]:
-    """
-    ICOR-free generation detection.
-    Returns: (gen_label, window(start,end), basis, note)
-    basis ∈ {"user_input","web_serp","local_top100","future_top100","default_8yr"}
-    """
-    def _window_from_local_for_label(gen_label: str) -> Optional[Tuple[int,int]]:
-        # Build window from EU+World Top100 for this label only
-        det_norm = normalize_generation(gen_label)
-        years = []
-        mk = find_best_model_key(db_eu, db_world, user_model=model)
-        if mk:
-            for db in (db_eu, db_world):
-                for y, rec in db.get(mk, {}).items():
-                    if normalize_generation(rec.get("generation")) == det_norm:
-                        years.append(y)
-        return (min(years), max(years)) if years else None
-
-    def _enforce_overlap(window: Tuple[int,int], basis: str) -> Tuple[Tuple[int,int], str]:
-        # If the window ends before start_year, force a default 8-year window starting at start_year
-        gs, ge = window
-        if ge < start_year:
-            return (start_year, min(start_year + 8, DEADLINE_YEAR)), basis + "_no_overlap→default"
-        # Clip to horizon
-        return (max(gs, start_year), min(ge, DEADLINE_YEAR)), basis
-
-    # 1) User provided generation
-    if user_gen:
-        gen_label = user_gen
-        win_local = _window_from_local_for_label(gen_label)
-        window = win_local if win_local else (start_year, min(start_year+8, DEADLINE_YEAR))
-        window, basis = _enforce_overlap(window, "user_input")
-        return gen_label, window, basis, "Generation provided by user."
-
-    mk = find_best_model_key(db_eu, db_world, user_model=model)
-
-    # 2) Web SERP (preferred when blank)
-    web_gen, win_serp, _blob = detect_generation_via_web(model, start_year)
-    if PREFER_WEB_FOR_GEN and web_gen:
-        gen_label = web_gen
-        win_local = _window_from_local_for_label(gen_label)
-        # Merge SERP window (if present) with local window; otherwise default from start_year
-        if win_serp and win_local:
-            lo = min(win_serp[0], win_local[0]); hi = max(win_serp[1], win_local[1])
-            window = (lo, hi)
-            note = "Detected from web SERP; window merged with local Top100."
-        elif win_serp:
-            window = win_serp
-            note = "Detected from web SERP; window from snippet."
-        elif win_local:
-            window = win_local
-            note = "Detected from web SERP; window from local Top100."
-        else:
-            window = (start_year, min(start_year+8, DEADLINE_YEAR))
-            note = "Detected from web SERP; default window used."
-        window, basis = _enforce_overlap(window, "web_serp")
-        return gen_label, window, basis, note
-
-    # 3) Local Top100 – exact at start year
-    if mk:
-        for db in (db_eu, db_world):
-            if mk in db and start_year in db[mk] and db[mk][start_year].get("generation"):
-                gen_label = db[mk][start_year]["generation"]
-                win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-                window, basis = _enforce_overlap(win_local, "local_top100")
-                return gen_label, window, basis, "Detected from Top100 at the start year."
-
-    # 4) Local Top100 – nearest previous ≤ start year
-    if mk:
-        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        prev_years = [y for y in years if y <= start_year and (
-            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
-            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
-        )]
-        if prev_years:
-            y0 = prev_years[-1]
-            gen_label = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
-            win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-            window, basis = _enforce_overlap(win_local, "local_top100")
-            return gen_label, window, basis, f"Detected from Top100 nearest ≤ year ({y0})."
-
-    # 5) Local Top100 – nearest future (≤ 1y)
-    if mk:
-        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        next_years = [y for y in years if y >= start_year and (
-            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
-            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
-        )]
-        if next_years and (next_years[0] - start_year) <= MAX_FUTURE_GAP:
-            y1 = next_years[0]
-            gen_label = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
-            win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-            window, basis = _enforce_overlap(win_local, "future_top100")
-            return gen_label, window, basis, f"Detected from Top100 nearest ≥ year ({y1})."
-
-    # 6) Absolute fallback
-    gen_label = "GEN"
-    window, basis = _enforce_overlap((start_year, min(start_year+8, DEADLINE_YEAR)), "default_8yr")
-    return gen_label, window, basis, "Fallback default 8-year window."
-
+def detect_generation_via_web(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
+    # lightweight web gen detector (kept from earlier version)
+    queries = [
+        f'"{model}" {year} generation',
+        f'"{model}" {year} mk',
+        f'site:wikipedia.org "{model}" generation',
+    ]
+    best = None; best_score = -1e9; best_window=None; best_blob=None
+    ROMAN = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
+    def roman_or_digit_to_int(s):
+        s=s.lower().strip()
+        return int(s) if s.isdigit() else ROMAN.get(s)
+    GEN_PAT = [re.compile(r'\b(?:mk|mark)\s?([ivx\d]{1,3})\b', re.I),
+               re.compile(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx\d]{1,3})\b', re.I)]
+    ORDINAL = re.compile(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+generation\b', re.I)
+    ORD_WORDS = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,"seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
+    YEAR_RANGE = re.compile(r'(20\d{2})\s?(?:–|-|to)\s?(20\d{2})')
+    SINCE = re.compile(r'(?:since|from)\s+(20\d{2})')
+    for q in queries:
+        res = serp_search(q)
+        if "error" in res: continue
+        for b in pull_text_blobs(res):
+            text = (b.get("text") or "") + " " + (b.get("url") or "")
+            if normalize_name(model) not in normalize_name(text): continue
+            gen_label = None
+            for pat in GEN_PAT:
+                m = pat.search(text)
+                if m:
+                    n = roman_or_digit_to_int(m.group(1))
+                    if n: gen_label=f"Mk{n}"; break
+            if not gen_label:
+                m = ORDINAL.search(text)
+                if m:
+                    n = ORD_WORDS.get(m.group(1).lower()); 
+                    if n: gen_label=f"Mk{n}"
+            win=None
+            m = YEAR_RANGE.search(text)
+            if m:
+                y1,y2 = int(m.group(1)), int(m.group(2))
+                if 1990<=y1<=2100 and y1<=y2<=2100: win=(y1,y2)
+            else:
+                m2 = SINCE.search(text)
+                if m2:
+                    y1 = int(m2.group(1)); 
+                    if 1990<=y1<=2100: win=(y1, DEADLINE_YEAR)
+            dom_bonus = 5 if "wikipedia.org" in text.lower() else 0
+            yr_bonus  = 2 if str(year) in text else 0
+            score = 10*dom_bonus + 5*yr_bonus + (8 if win else 0)
+            if gen_label and score>best_score:
+                best_score=score; best=gen_label; best_window=win; best_blob=b
+        time.sleep(0.3)
+    return best, best_window, best_blob
 
 def main():
     user = ask_user_inputs()
 
-    # Load local Top100 databases (EU and World) from CWD
+    # Local DBs from CWD (Streamlit page sets cwd=data/)
     db_eu = load_local_database_eu(os.getcwd())
     db_world = load_local_database_world(os.getcwd())
 
-    # ICOR TXT: try CWD first, then script dir
+    # ICOR (kept only for "support" flag in Summary)
     here = os.path.dirname(os.path.abspath(__file__))
     icor_txt_path = os.path.join(os.getcwd(), "icor_supported_models.txt")
     if not os.path.exists(icor_txt_path):
         icor_txt_path = os.path.join(here, "icor_supported_models.txt")
-
-    # Preferred: map (year→gen)
     icor_map = parse_icor_supported_txt(icor_txt_path)
-
-    # Fallback: simple list → tiny DF used by checker
     icor_df = None
-    if icor_map is None:
-        icor_simple = parse_icor_supported_list(icor_txt_path)
-        if icor_simple:
-            icor_df = pd.DataFrame({"model": sorted(icor_simple), "generation": [""] * len(icor_simple)})
 
-    # Generation autodetect using EU+World local data (and web if preferred)
+    # Gen detect (LOCAL FIRST)
     gen_label, gen_window, gen_basis, autodetect_note = autodetect_generation(
         db_eu, db_world, icor_map, user["car_model"], user["start_year"], user["generation"]
     )
 
-    # Infer local alias across EU+World inside window
+    # Alias (optional)
     alias = infer_local_gen_alias(db_eu, db_world, user["car_model"], gen_label, gen_window)
 
-    # Local seeds/history for the generation (accept alias)
+    # Local seeds/history for that generation
     local = local_seed_for_generation(
         db_eu, db_world, user["car_model"], gen_label, user["start_year"],
         accepted_alias=alias, window=gen_window
     )
 
-    # If the model is missing in BOTH EU and World local DBs, query web; else keep web only as diagnostic
+    # Web only if no local coverage at all
     use_web = not (local.get("history_europe") or local.get("history_world") or local.get("eu") or local.get("world"))
     web = serp_seed(local.get("display_model") or user["car_model"], gen_label, user["start_year"]) if use_web else {}
 
-    # Build prompt seeds & constraints
-    seed_for_prompt, constraints = build_constraints(
-        user["start_year"],
-        local.get("display_model") or user["car_model"],
-        gen_label, gen_window,
-        db_eu, local, web
+    # Build prompt seeds & constraints (+plausibility)
+    seed, constraints, plaus = build_constraints(
+        user["start_year"], local.get("display_model") or user["car_model"],
+        gen_label, gen_window, db_eu, local, web
     )
-    seed_for_prompt["generation_window_basis"] = gen_basis
-    if alias:
-        seed_for_prompt["generation_alias_used"] = alias
+    seed["generation_window_basis"] = gen_basis
+    if alias: seed["generation_alias_used"] = alias
 
-    # GPT call
-    messages = build_messages(local.get("display_model") or user["car_model"], gen_label,
-                              user["start_year"], seed_for_prompt, constraints)
+    # Call OpenAI
+    messages = build_messages(local.get("display_model") or user["car_model"], gen_label, user["start_year"], seed, constraints)
     data = call_openai(messages)
 
-    # Enforce constraints & zeroing
+    # Enforce + smooth
     data = enforce_constraints_and_zero(data, constraints, user["start_year"])
-
-    # Optional smoothing
     if APPLY_SMOOTHING:
-        zero_set = set(constraints.get("zero_years", []))
-        data = smooth_lifecycle(data, user["start_year"], zero_set)
+        data = smooth_lifecycle(data, user["start_year"], set(constraints.get("zero_years", [])))
 
-    # Ensure full horizon coverage
-    needed = set(range(user["start_year"], DEADLINE_YEAR + 1))
+    # Horizon coverage
+    need = set(range(user["start_year"], DEADLINE_YEAR+1))
     have = {r.get("year") for r in data.get("yearly_estimates", [])}
-    for y in sorted(needed - have):
+    for y in sorted(need - have):
         data.setdefault("yearly_estimates", []).append({"year": y, "world_sales_units": 0, "europe_sales_units": 0, "rationale": "Filled by client."})
     data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
     data["start_year"] = user["start_year"]; data["end_year"] = DEADLINE_YEAR
 
-    # Fleet & repairs
-    fleet_repair = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
+    # Fleet + ICOR support
+    fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
+    icor_status = check_icor_support(icor_map, icor_df, local.get("display_model") or user["car_model"], gen_label, user["start_year"])
+    icor_status["plausibility"] = plaus
 
-    # ICOR support check
-    icor_status = check_icor_support(icor_map, icor_df,
-                                     local.get("display_model") or user["car_model"],
-                                     gen_label,
-                                     user["start_year"])
-
-    # Save outputs
-    safe_model_name = (data.get("model") or local.get("display_model") or user["car_model"]).replace(" ", "_")
+    # Save
+    safe_model = (data.get("model") or local.get("display_model") or user["car_model"]).replace(" ", "_")
     safe_gen = normalize_generation(gen_label or "GEN").replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    base = f"sales_estimates_{safe_model_name}_{safe_gen}_{user['start_year']}_{MODEL_NAME}_{timestamp}"
-
-    csv_path  = save_csv(data, base)
-    xlsx_path = save_excel(data, fleet_repair, seed_for_prompt, constraints, icor_status, base)
+    base = f"sales_estimates_{safe_model}_{safe_gen}_{user['start_year']}_{MODEL_NAME}_{timestamp}"
+    csv_path = save_csv(data, base)
+    xlsx_path = save_excel(data, fleet, seed, constraints, icor_status, base)
 
     # Console summary
-    print_summary(data, seed_for_prompt, constraints, gen_basis, icor_status, autodetect_note)
+    print_summary(data, seed, constraints, gen_basis, icor_status, autodetect_note)
     print(f"\nSaved CSV: {csv_path}")
     print(f"Saved Excel: {xlsx_path}")
-    print("\nNotes:")
-    print(f"- Fleet uses decay={DECAY_RATE*100:.2f}% starting N+2; Repairs are {REPAIR_RATE*100:.1f}% of fleet.")
-    print("- Gen detection order: Web (SERP) → Top100 exact → Top100 ≤ → ICOR → (Top100 ≥ if ≤1y) → default.")
-    print("- Within the detected window, a dominant local Top100 label can be used as an alias for EU/World seeding.\n")
+    print(f"\nNotes: {plaus.get('source_note','')}")
+    print("- Local Top100 EU/World are authoritative for generation; web is fallback only.")
 
 if __name__ == "__main__":
     main()
-
-    
