@@ -1,4 +1,4 @@
-# ui/pages/02_Generation_Estimator.py
+# ui/pages/02_Model_Researcher.py
 import os
 import glob
 import json
@@ -24,6 +24,20 @@ HERE = os.path.dirname(__file__)
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DATA_DIR = os.path.join(ROOT, "data")
 SCRIPTS_DIR = os.path.join(ROOT, "scripts")
+
+# --- Logo path (robust to where the page runs from)
+def find_logo_path(root: str) -> str | None:
+    candidates = [
+        os.path.join(root, "ui", "assets", "icor-logo.png"),
+        os.path.join(root, "assets", "icor-logo.png"),
+        os.path.join(root, "icor-logo.png"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+LOGO_PATH = find_logo_path(ROOT)
 
 # IMPORTANT: Do NOT call st.set_page_config() here (keep it in app.py only)
 
@@ -106,7 +120,14 @@ def track(event: str, props: dict | None = None):
 
 track("page_view_model_researcher", {"page": "02_Generation_Estimator"})
 
-st.title("ICOR – Model Researcher")
+# --- Header: logo + title + slogan
+c1, c2 = st.columns([1, 6], vertical_alignment="center")
+with c1:
+    if LOGO_PATH:
+        st.image(LOGO_PATH, use_column_width=True)
+with c2:
+    st.title("ICOR – Model Researcher")
+    st.caption("automatically perfect")
 
 # === HELPERS ===
 def localize_bools(df: pd.DataFrame, prefer_cols=None, true_txt="VRAI", false_txt="FAUX") -> pd.DataFrame:
@@ -258,7 +279,7 @@ def _safe_get(dict_like, dotted, default=None):
 def run_script2_with_env(input_text: str):
     """
     Launch Script 2 as a child process, piping stdin with the 3 lines:
-    <model>\n<generation or blank>\n<start_year>\n
+    <model>\\n<generation or blank>\\n<start_year>\\n
     """
     script_path = find_script2()
     if not script_path:
@@ -281,7 +302,7 @@ def run_script2_with_env(input_text: str):
     )
 
     try:
-        out, _ = proc.communicate(input_text, timeout=240)  # 4‑minute guard
+        out, _ = proc.communicate(input_text, timeout=240)  # 4-minute guard
         code = proc.returncode
     except subprocess.TimeoutExpired:
         proc.kill()
