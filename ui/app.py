@@ -38,12 +38,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============== PATHS ===============
-HERE = os.path.dirname(__file__)
-DATA_DIR = os.path.abspath(os.path.join(HERE, "data"))
-SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "scripts"))
+HERE = os.path.abspath(os.path.dirname(__file__))
+
+def find_project_root(start: str) -> str:
+    """
+    Walk upward from 'start' until we find a directory that contains
+    the expected project folders (data/ and scripts/). Fallback to 'start'.
+    """
+    cur = os.path.abspath(start)
+    while True:
+        has_data = os.path.isdir(os.path.join(cur, "data"))
+        has_scripts = os.path.isdir(os.path.join(cur, "scripts"))
+        if has_data and has_scripts:
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:  # reached filesystem root
+            return start
+        cur = parent
+
+PROJECT_ROOT = find_project_root(HERE)
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
-print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
+
+# ---- Logo: try multiple likely locations (root/ui, ui/, root/)
+def find_logo_path() -> str | None:
+    candidates = [
+        os.path.join(PROJECT_ROOT, "ui", "assets", "icor-logo.png"),
+        os.path.join(HERE, "assets", "icor-logo.png"),
+        os.path.join(PROJECT_ROOT, "icor-logo.png"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+LOGO_PATH = find_logo_path()
+print(f"[CHECKPOINT] Paths | ROOT={PROJECT_ROOT} | DATA={DATA_DIR} | SCRIPTS={SCRIPTS_DIR} | LOGO={LOGO_PATH}")
+
 
 # ---- Logo: try multiple likely locations
 def find_logo_path() -> str | None:
