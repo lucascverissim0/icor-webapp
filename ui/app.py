@@ -13,39 +13,39 @@ import sys  # for sys.executable
 st.set_page_config(page_title="ICOR – Strategic Opportunities", layout="wide")
 print("[CHECKPOINT] Page config set")
 
-# Allow simple HTML inside button labels (for clickable cards)
-st.markdown("<style>button p{margin:0}</style>", unsafe_allow_html=True)
+# ICOR styling for cards & tables
+st.markdown("""
+<style>
+  html, body, .block-container { background-color:#0E1117 !important; color:#E6E6E6 !important; }
+  .stDataFrame { border-radius:12px; overflow:hidden; }
 
-# ICOR-ish dark styling (works fine alongside .streamlit/config.toml)
-st.markdown(
-    """
-    <style>
-      html, body, .block-container { background-color: #0E1117 !important; color: #E6E6E6 !important; }
-      .stDataFrame, .stMarkdown { color: #E6E6E6 !important; }
-      .card {
-        background: #161A22; border: 1px solid #30363d; border-radius: 16px;
-        padding: 18px; text-align: center; transition: transform .08s ease-in-out, border-color .08s;
-      }
-      .card:hover { transform: translateY(-2px); border-color:#2AA7C9; }
-      .card-emoji { font-size: 34px; line-height: 1; }
-      .card-title { font-size: 16px; margin-top: 8px; color:#E6E6E6; }
-      .subtle { color:#A1A1AA; font-size: 13px; }
-      .section-title { font-weight:700; margin-top: 8px; }
-      .stDataFrame { border-radius: 12px; overflow: hidden; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+  /* Make buttons look like our cards */
+  div.stButton > button {
+    width: 100%;
+    text-align: left;
+    background: #161A22;
+    border: 1px solid #30363d;
+    border-radius: 16px;
+    padding: 16px 18px;
+    line-height: 1.25;
+    transition: transform .08s ease-in-out, border-color .08s;
+    white-space: pre-wrap;    /* allow newlines */
+    font-size: 16px;
+    color: #E6E6E6;
+  }
+  div.stButton > button:hover { transform: translateY(-2px); border-color:#2AA7C9; }
+</style>
+""", unsafe_allow_html=True)
 
 # =============== PATHS ===============
 HERE = os.path.dirname(__file__)
-DATA_DIR = os.path.abspath(os.path.join(HERE, "data"))         # because app.py is at repo root
+DATA_DIR = os.path.abspath(os.path.join(HERE, "data"))
 SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
 print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
 
-# ---- Logo: try multiple likely locations (first that exists wins)
+# ---- Logo: try multiple likely locations
 def find_logo_path() -> str | None:
     candidates = [
         os.path.join(HERE, "ui", "assets", "icor-logo.png"),
@@ -61,7 +61,7 @@ LOGO_PATH = find_logo_path()
 if LOGO_PATH:
     print(f"[CHECKPOINT] Using logo at {LOGO_PATH}")
 else:
-    print("[CHECKPOINT] Logo not found (looked in ui/assets/, assets/, ./)")
+    print("[CHECKPOINT] Logo not found")
 
 # =============== OPTIONAL: POSTHOG ===============
 def _safe_get(dict_like, dotted, default=None):
@@ -80,7 +80,7 @@ if PH_KEY:
     posthog.host = PH_HOST
     print("[CHECKPOINT] PostHog configured")
 else:
-    print("[CHECKPOINT] PostHog not configured (no key in secrets)")
+    print("[CHECKPOINT] PostHog not configured")
 
 def track(event: str, props: dict | None = None):
     if not PH_KEY:
@@ -92,16 +92,13 @@ def track(event: str, props: dict | None = None):
         pass
 
 # =============== AUTH (CUSTOM LOGIN) ===============
-USERS = st.secrets.get("users", {})  # dict-like from secrets
+USERS = st.secrets.get("users", {})
 print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
 def _verify_password(input_password: str, stored_password: str) -> bool:
-    """
-    Supports plaintext OR bcrypt-hashed passwords.
-    """
     if not isinstance(stored_password, str):
         return False
-    if stored_password.startswith("$2a$") or stored_password.startswith("$2b$") or stored_password.startswith("$2y$"):
+    if stored_password.startswith(("$2a$", "$2b$", "$2y$")):
         try:
             import bcrypt
         except Exception:
@@ -111,7 +108,6 @@ def _verify_password(input_password: str, stored_password: str) -> bool:
             return bcrypt.checkpw(input_password.encode("utf-8"), stored_password.encode("utf-8"))
         except Exception:
             return False
-    # plaintext fallback (simple)
     return input_password == stored_password
 
 def login_form():
@@ -169,15 +165,12 @@ with col_logout:
 
 # =============== HELPERS ===============
 def run_script1():
-    """
-    Run the backend pipeline script (script1.py) in data/ working dir.
-    """
     path = os.path.join(SCRIPTS_DIR, SCRIPT1_FILENAME)
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
     print("[CHECKPOINT] Running Script 1…")
     proc = subprocess.Popen(
-        [sys.executable, path],  # use same interpreter as Streamlit
+        [sys.executable, path],
         cwd=DATA_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -225,7 +218,7 @@ with st.sidebar:
             code, log = run_script1()
         st.session_state["_script1_log"] = log
         outcome = "success" if code == 0 else "error"
-        track("run_script1", {"status": outcome, "started_at": started_at, "ended_at": int(time.time())})
+        track("run_script1", {"status": outcome})
         if code != 0:
             st.error("Backend failed. See log below.")
         else:
@@ -270,52 +263,22 @@ else:
         except Exception as e:
             st.error(f"Could not read `{chosen_sheet}`: {e}")
 
-# =============== NAV CARDS (FULLY CLICKABLE) ===============
+# =============== NAV CARDS (styled buttons) ===============
 st.markdown(" ")
 st.markdown("### Explore more")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    if st.button(
-        label=(
-            '<div class="card">'
-            '<div class="card-emoji">🚗</div>'
-            '<div class="card-title">Fleet by Model / Year</div>'
-            '<div class="subtle">View EU or World</div>'
-            '</div>'
-        ),
-        key="card_fleet",
-        help="Fleet by Model/Year",
-    ):
+    if st.button("🚗  Fleet by Model / Year\n\nView EU or World", key="card_fleet"):
         st.session_state["section"] = "fleet"
 
 with col2:
-    if st.button(
-        label=(
-            '<div class="card">'
-            '<div class="card-emoji">🛠️</div>'
-            '<div class="card-title">Windshield Replacements</div>'
-            '<div class="subtle">View EU or World</div>'
-            '</div>'
-        ),
-        key="card_repl",
-        help="Windshield replacements",
-    ):
+    if st.button("🛠️  Windshield Replacements\n\nView EU or World", key="card_repl"):
         st.session_state["section"] = "repl"
 
 with col3:
-    if st.button(
-        label=(
-            '<div class="card">'
-            '<div class="card-emoji">📜</div>'
-            '<div class="card-title">Historical Sales</div>'
-            '<div class="subtle">Pick EU/World & Year</div>'
-            '</div>'
-        ),
-        key="card_hist",
-        help="Historical sales",
-    ):
+    if st.button("📜  Historical Sales\n\nPick EU/World & Year", key="card_hist"):
         st.session_state["section"] = "history"
 
 section = st.session_state.get("section")
