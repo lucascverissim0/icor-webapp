@@ -1,8 +1,6 @@
 import os
 import re
-import glob
 import time
-import json
 import subprocess
 import pandas as pd
 import streamlit as st
@@ -19,7 +17,7 @@ st.markdown("""
   html, body, .block-container { background-color:#0E1117 !important; color:#E6E6E6 !important; }
   .stDataFrame { border-radius:12px; overflow:hidden; }
 
-  /* Make buttons look like our cards */
+  /* Make buttons look like cards */
   div.stButton > button {
     width: 100%;
     text-align: left;
@@ -37,31 +35,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# =============== PATHS ===============
-HERE = os.path.dirname(__file__)
-DATA_DIR = os.path.abspath(os.path.join(HERE, "data"))
-SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "scripts"))
+# =============== PATHS (repo root layout) ===============
+HERE = os.path.abspath(os.path.dirname(__file__))  # repo root
+DATA_DIR = os.path.join(HERE, "data")
+SCRIPTS_DIR = os.path.join(HERE, "scripts")
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
-print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
+print(f"[CHECKPOINT] DATA_DIR={DATA_DIR}")
+print(f"[CHECKPOINT] SCRIPTS_DIR={SCRIPTS_DIR}")
 
-# ---- Logo: try multiple likely locations
-def find_logo_path() -> str | None:
-    candidates = [
-        os.path.join(HERE, "ui", "assets", "icor-logo.png"),
-        os.path.join(HERE, "assets", "icor-logo.png"),
-        os.path.join(HERE, "icor-logo.png"),
-    ]
-    for p in candidates:
-        if os.path.exists(p):
-            return p
-    return None
-
-LOGO_PATH = find_logo_path()
-if LOGO_PATH:
+# ---- Logo path (ui/assets/icor-logo.png)
+LOGO_PATH = os.path.join(HERE, "ui", "assets", "icor-logo.png")
+if os.path.exists(LOGO_PATH):
     print(f"[CHECKPOINT] Using logo at {LOGO_PATH}")
 else:
-    print("[CHECKPOINT] Logo not found")
+    print("[CHECKPOINT] Logo not found at ui/assets/icor-logo.png")
 
 # =============== OPTIONAL: POSTHOG ===============
 def _safe_get(dict_like, dotted, default=None):
@@ -111,7 +99,7 @@ def _verify_password(input_password: str, stored_password: str) -> bool:
     return input_password == stored_password
 
 def login_form():
-    if LOGO_PATH:
+    if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width=160)
     st.title("Strategic Opportunities")
     st.caption("Please log in to continue.")
@@ -150,7 +138,7 @@ if "user_id" not in st.session_state:
 # =============== HEADER (logo + title + logout) ===============
 col_logo, col_title, col_logout = st.columns([1, 5, 1])
 with col_logo:
-    if LOGO_PATH:
+    if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, use_column_width=True)
 with col_title:
     st.title("Strategic Opportunities")
@@ -159,18 +147,20 @@ with col_logout:
     if st.button("Logout"):
         track("logout", {"user": st.session_state.get("user_id")})
         for k in ("user_id", "user_name"):
-            if k in st.session_state:
-                del st.session_state[k]
+            st.session_state.pop(k, None)
         st.rerun()
 
 # =============== HELPERS ===============
 def run_script1():
+    """
+    Run the backend pipeline script (script1.py) in data/ working dir.
+    """
     path = os.path.join(SCRIPTS_DIR, SCRIPT1_FILENAME)
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
     print("[CHECKPOINT] Running Script 1…")
     proc = subprocess.Popen(
-        [sys.executable, path],
+        [sys.executable, path],  # use same interpreter as Streamlit
         cwd=DATA_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -195,7 +185,7 @@ def detect_year_sheets(region: str) -> list[str]:
     if not os.path.exists(EXCEL_PATH):
         return []
     xf = pd.ExcelFile(EXCEL_PATH)
-    pat = re.compile(r"^(20\d{2})\s+(EU|World)$")
+    pat = re.compile(r"^(20\\d{2})\\s+(EU|World)$")
     return sorted([s for s in xf.sheet_names if pat.match(s) and s.endswith(region)])
 
 def nice_table(df: pd.DataFrame):
@@ -218,7 +208,7 @@ with st.sidebar:
             code, log = run_script1()
         st.session_state["_script1_log"] = log
         outcome = "success" if code == 0 else "error"
-        track("run_script1", {"status": outcome})
+        track("run_script1", {"status": outcome, "started_at": started_at, "ended_at": int(time.time())})
         if code != 0:
             st.error("Backend failed. See log below.")
         else:
