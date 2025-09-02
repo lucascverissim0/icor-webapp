@@ -39,14 +39,29 @@ st.markdown("""
 
 # =============== PATHS ===============
 HERE = os.path.dirname(__file__)
-DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
-SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+DATA_DIR = os.path.abspath(os.path.join(HERE, "data"))
+SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
 print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
 
-# Path to ICOR logo
-logo_path = os.path.join(HERE, "ui", "assets", "icor-logo.png")
+# ---- Logo: try multiple likely locations
+def find_logo_path() -> str | None:
+    candidates = [
+        os.path.join(HERE, "ui", "assets", "icor-logo.png"),
+        os.path.join(HERE, "assets", "icor-logo.png"),
+        os.path.join(HERE, "icor-logo.png"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+LOGO_PATH = find_logo_path()
+if LOGO_PATH:
+    print(f"[CHECKPOINT] Using logo at {LOGO_PATH}")
+else:
+    print("[CHECKPOINT] Logo not found")
 
 # =============== OPTIONAL: POSTHOG ===============
 def _safe_get(dict_like, dotted, default=None):
@@ -65,7 +80,7 @@ if PH_KEY:
     posthog.host = PH_HOST
     print("[CHECKPOINT] PostHog configured")
 else:
-    print("[CHECKPOINT] PostHog not configured (no key in secrets)")
+    print("[CHECKPOINT] PostHog not configured")
 
 def track(event: str, props: dict | None = None):
     if not PH_KEY:
@@ -77,16 +92,13 @@ def track(event: str, props: dict | None = None):
         pass
 
 # =============== AUTH (CUSTOM LOGIN) ===============
-USERS = st.secrets.get("users", {})  # dict-like from secrets
+USERS = st.secrets.get("users", {})
 print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
 def _verify_password(input_password: str, stored_password: str) -> bool:
-    """
-    Supports plaintext OR bcrypt-hashed passwords.
-    """
     if not isinstance(stored_password, str):
         return False
-    if stored_password.startswith("$2a$") or stored_password.startswith("$2b$") or stored_password.startswith("$2y$"):
+    if stored_password.startswith(("$2a$", "$2b$", "$2y$")):
         try:
             import bcrypt
         except Exception:
@@ -96,12 +108,11 @@ def _verify_password(input_password: str, stored_password: str) -> bool:
             return bcrypt.checkpw(input_password.encode("utf-8"), stored_password.encode("utf-8"))
         except Exception:
             return False
-    # plaintext fallback (simple)
     return input_password == stored_password
 
 def login_form():
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=160)
+    if LOGO_PATH:
+        st.image(LOGO_PATH, width=160)
     st.title("Strategic Opportunities")
     st.caption("Please log in to continue.")
     with st.form("login_form", clear_on_submit=False):
@@ -123,7 +134,7 @@ def login_form():
             st.session_state["user_id"] = username
             st.session_state["user_name"] = name
             track("login_success", {"user": username})
-            st.rerun()  # updated
+            st.rerun()
             return True
         else:
             st.error("Invalid username or password.")
@@ -135,22 +146,6 @@ def login_form():
 if "user_id" not in st.session_state:
     login_form()
     st.stop()
-
-# Top bar: logo + title + logout
-col_logo, col_title, col_logout = st.columns([1, 5, 1])
-with col_logo:
-    if os.path.exists(logo_path):
-        st.image(logo_path, use_column_width=True)
-with col_title:
-    st.title("Strategic Opportunities")
-    st.caption("ICOR – automatically perfect")
-with col_logout:
-    if st.button("Logout"):
-        track("logout", {"user": st.session_state.get("user_id")})
-        for k in ("user_id", "user_name"):
-            if k in st.session_state:
-                del st.session_state[k]
-        st.rerun()  # updated
 
 # =============== HEADER (logo + title + logout) ===============
 col_logo, col_title, col_logout = st.columns([1, 5, 1])
@@ -170,15 +165,12 @@ with col_logout:
 
 # =============== HELPERS ===============
 def run_script1():
-    """
-    Run the backend pipeline script (script1.py) in data/ working dir.
-    """
     path = os.path.join(SCRIPTS_DIR, SCRIPT1_FILENAME)
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
     print("[CHECKPOINT] Running Script 1…")
     proc = subprocess.Popen(
-        [sys.executable, path],  # use same interpreter as Streamlit
+        [sys.executable, path],
         cwd=DATA_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -226,12 +218,12 @@ with st.sidebar:
             code, log = run_script1()
         st.session_state["_script1_log"] = log
         outcome = "success" if code == 0 else "error"
-        track("run_script1", {"status": outcome, "started_at": started_at, "ended_at": int(time.time())})
+        track("run_script1", {"status": outcome})
         if code != 0:
             st.error("Backend failed. See log below.")
         else:
             st.success("Backend finished. Reloading…")
-            st.rerun()  # updated
+            st.rerun()
 
     if os.path.exists(EXCEL_PATH):
         try:
