@@ -13,21 +13,25 @@ import sys  # for sys.executable
 st.set_page_config(page_title="ICOR – Strategic Opportunities", layout="wide")
 print("[CHECKPOINT] Page config set")
 
-# Dark theme CSS
+# Allow simple HTML inside button labels (for clickable cards)
+st.markdown("<style>button p{margin:0}</style>", unsafe_allow_html=True)
+
+# ICOR-ish dark styling (works fine alongside .streamlit/config.toml)
 st.markdown(
     """
     <style>
       html, body, .block-container { background-color: #0E1117 !important; color: #E6E6E6 !important; }
-      .stDataFrame, .stMarkdown, .css-1v0mbdj, .css-10trblm { color: #E6E6E6 !important; }
+      .stDataFrame, .stMarkdown { color: #E6E6E6 !important; }
       .card {
         background: #161A22; border: 1px solid #30363d; border-radius: 16px;
-        padding: 18px; text-align: center; transition: transform 0.08s ease-in-out; cursor: pointer;
+        padding: 18px; text-align: center; transition: transform .08s ease-in-out, border-color .08s;
       }
       .card:hover { transform: translateY(-2px); border-color:#2AA7C9; }
       .card-emoji { font-size: 34px; line-height: 1; }
       .card-title { font-size: 16px; margin-top: 8px; color:#E6E6E6; }
       .subtle { color:#A1A1AA; font-size: 13px; }
       .section-title { font-weight:700; margin-top: 8px; }
+      .stDataFrame { border-radius: 12px; overflow: hidden; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -35,14 +39,29 @@ st.markdown(
 
 # =============== PATHS ===============
 HERE = os.path.dirname(__file__)
-DATA_DIR = os.path.abspath(os.path.join(HERE, "..", "data"))
-SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+DATA_DIR = os.path.abspath(os.path.join(HERE, "data"))         # because app.py is at repo root
+SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
 print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
 
-# Path to ICOR logo
-logo_path = os.path.join(HERE, "ui", "assets", "icor-logo.png")
+# ---- Logo: try multiple likely locations (first that exists wins)
+def find_logo_path() -> str | None:
+    candidates = [
+        os.path.join(HERE, "ui", "assets", "icor-logo.png"),
+        os.path.join(HERE, "assets", "icor-logo.png"),
+        os.path.join(HERE, "icor-logo.png"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+LOGO_PATH = find_logo_path()
+if LOGO_PATH:
+    print(f"[CHECKPOINT] Using logo at {LOGO_PATH}")
+else:
+    print("[CHECKPOINT] Logo not found (looked in ui/assets/, assets/, ./)")
 
 # =============== OPTIONAL: POSTHOG ===============
 def _safe_get(dict_like, dotted, default=None):
@@ -96,8 +115,8 @@ def _verify_password(input_password: str, stored_password: str) -> bool:
     return input_password == stored_password
 
 def login_form():
-    if os.path.exists(logo_path):
-        st.image(logo_path, width=160)
+    if LOGO_PATH:
+        st.image(LOGO_PATH, width=160)
     st.title("Strategic Opportunities")
     st.caption("Please log in to continue.")
     with st.form("login_form", clear_on_submit=False):
@@ -119,7 +138,7 @@ def login_form():
             st.session_state["user_id"] = username
             st.session_state["user_name"] = name
             track("login_success", {"user": username})
-            st.rerun()  # updated
+            st.rerun()
             return True
         else:
             st.error("Invalid username or password.")
@@ -132,11 +151,11 @@ if "user_id" not in st.session_state:
     login_form()
     st.stop()
 
-# Top bar: logo + title + logout
+# =============== HEADER (logo + title + logout) ===============
 col_logo, col_title, col_logout = st.columns([1, 5, 1])
 with col_logo:
-    if os.path.exists(logo_path):
-        st.image(logo_path, use_column_width=True)
+    if LOGO_PATH:
+        st.image(LOGO_PATH, use_column_width=True)
 with col_title:
     st.title("Strategic Opportunities")
     st.caption("ICOR – automatically perfect")
@@ -146,7 +165,7 @@ with col_logout:
         for k in ("user_id", "user_name"):
             if k in st.session_state:
                 del st.session_state[k]
-        st.rerun()  # updated
+        st.rerun()
 
 # =============== HELPERS ===============
 def run_script1():
@@ -211,7 +230,7 @@ with st.sidebar:
             st.error("Backend failed. See log below.")
         else:
             st.success("Backend finished. Reloading…")
-            st.rerun()  # updated
+            st.rerun()
 
     if os.path.exists(EXCEL_PATH):
         try:
@@ -251,31 +270,53 @@ else:
         except Exception as e:
             st.error(f"Could not read `{chosen_sheet}`: {e}")
 
-# =============== NAV CARDS ===============
+# =============== NAV CARDS (FULLY CLICKABLE) ===============
 st.markdown(" ")
 st.markdown("### Explore more")
 
 col1, col2, col3 = st.columns(3)
+
 with col1:
-    if st.button(" ", key="card_fleet", help="Fleet by Model/Year", use_container_width=True):
+    if st.button(
+        label=(
+            '<div class="card">'
+            '<div class="card-emoji">🚗</div>'
+            '<div class="card-title">Fleet by Model / Year</div>'
+            '<div class="subtle">View EU or World</div>'
+            '</div>'
+        ),
+        key="card_fleet",
+        help="Fleet by Model/Year",
+    ):
         st.session_state["section"] = "fleet"
-    st.markdown('<div class="card"><div class="card-emoji">🚗</div>'
-                '<div class="card-title">Fleet by Model / Year</div>'
-                '<div class="subtle">View EU or World</div></div>', unsafe_allow_html=True)
 
 with col2:
-    if st.button(" ", key="card_repl", help="Windshield replacements", use_container_width=True):
+    if st.button(
+        label=(
+            '<div class="card">'
+            '<div class="card-emoji">🛠️</div>'
+            '<div class="card-title">Windshield Replacements</div>'
+            '<div class="subtle">View EU or World</div>'
+            '</div>'
+        ),
+        key="card_repl",
+        help="Windshield replacements",
+    ):
         st.session_state["section"] = "repl"
-    st.markdown('<div class="card"><div class="card-emoji">🛠️</div>'
-                '<div class="card-title">Windshield Replacements</div>'
-                '<div class="subtle">View EU or World</div></div>', unsafe_allow_html=True)
 
 with col3:
-    if st.button(" ", key="card_hist", help="Historical sales", use_container_width=True):
+    if st.button(
+        label=(
+            '<div class="card">'
+            '<div class="card-emoji">📜</div>'
+            '<div class="card-title">Historical Sales</div>'
+            '<div class="subtle">Pick EU/World & Year</div>'
+            '</div>'
+        ),
+        key="card_hist",
+        help="Historical sales",
+    ):
         st.session_state["section"] = "history"
-    st.markdown('<div class="card"><div class="card-emoji">📜</div>'
-                '<div class="card-title">Historical Sales</div>'
-                '<div class="subtle">Pick EU/World & Year</div></div>', unsafe_allow_html=True)
 
 section = st.session_state.get("section")
 
