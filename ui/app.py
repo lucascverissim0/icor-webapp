@@ -10,7 +10,7 @@ import posthog
 import sys  # for sys.executable
 
 # =============== PAGE META + THEME ===============
-st.set_page_config(page_title="ICOR – Decisions made simple", layout="wide")
+st.set_page_config(page_title="ICOR – Strategic Opportunities", layout="wide")
 print("[CHECKPOINT] Page config set")
 
 # Dark theme CSS
@@ -23,7 +23,7 @@ st.markdown(
         background: #161A22; border: 1px solid #30363d; border-radius: 16px;
         padding: 18px; text-align: center; transition: transform 0.08s ease-in-out; cursor: pointer;
       }
-      .card:hover { transform: translateY(-2px); border-color:#3b82f6; }
+      .card:hover { transform: translateY(-2px); border-color:#2AA7C9; }
       .card-emoji { font-size: 34px; line-height: 1; }
       .card-title { font-size: 16px; margin-top: 8px; color:#E6E6E6; }
       .subtle { color:#A1A1AA; font-size: 13px; }
@@ -40,6 +40,9 @@ SCRIPTS_DIR = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
 print(f"[CHECKPOINT] Paths resolved | DATA_DIR={DATA_DIR} | SCRIPTS_DIR={SCRIPTS_DIR}")
+
+# Path to ICOR logo
+logo_path = os.path.join(HERE, "ui", "assets", "icor-logo.png")
 
 # =============== OPTIONAL: POSTHOG ===============
 def _safe_get(dict_like, dotted, default=None):
@@ -70,19 +73,6 @@ def track(event: str, props: dict | None = None):
         pass
 
 # =============== AUTH (CUSTOM LOGIN) ===============
-# Expected secrets.toml structure:
-# [users]
-#   [users.user1]
-#   name = "Lucas"
-#   # either plaintext or bcrypt hash (begins with $2)
-#   password = "0474254923"
-#
-#   [users.user2]
-#   name = "Bob"
-#   password = "$2b$12$......"
-#
-# (Optional) [cookie] for remember-me (not implemented here; simple session only)
-
 USERS = st.secrets.get("users", {})  # dict-like from secrets
 print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
@@ -106,7 +96,9 @@ def _verify_password(input_password: str, stored_password: str) -> bool:
     return input_password == stored_password
 
 def login_form():
-    st.title("ICOR – Decisions made simple")
+    if os.path.exists(logo_path):
+        st.image(logo_path, width=160)
+    st.title("Strategic Opportunities")
     st.caption("Please log in to continue.")
     with st.form("login_form", clear_on_submit=False):
         username = st.text_input("Username")
@@ -140,11 +132,15 @@ if "user_id" not in st.session_state:
     login_form()
     st.stop()
 
-# Top bar: user badge + logout
-colA, colB = st.columns([6,1])
-with colA:
-    st.title("ICOR – Decisions made simple")
-with colB:
+# Top bar: logo + title + logout
+col_logo, col_title, col_logout = st.columns([1, 5, 1])
+with col_logo:
+    if os.path.exists(logo_path):
+        st.image(logo_path, use_column_width=True)
+with col_title:
+    st.title("Strategic Opportunities")
+    st.caption("ICOR – automatically perfect")
+with col_logout:
     if st.button("Logout"):
         track("logout", {"user": st.session_state.get("user_id")})
         for k in ("user_id", "user_name"):
