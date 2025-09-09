@@ -942,6 +942,18 @@ def main():
     data["start_year"] = launch_year
     data["end_year"] = DEADLINE_YEAR
 
+    # Guarantee rows cover every year from LAUNCH through DEADLINE and that the first
+    # modeled year is the launch year (so fleet accumulates from there).
+    all_years = {r["year"] for r in data.get("yearly_estimates", [])}
+    for y in range(launch_year, DEADLINE_YEAR + 1):
+        if y not in all_years:
+            data.setdefault("yearly_estimates", []).append({
+                "year": y, "world_sales_units": 0, "europe_sales_units": 0,
+                "rationale": "Filled to cover from generation launch."
+            })
+    data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
+
+
     # Fleet + ICOR support
     fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
     icor_status = check_icor_support(icor_map, icor_df, local.get("display_model") or user["car_model"], gen_label, launch_year)
