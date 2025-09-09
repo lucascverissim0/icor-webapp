@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generation‑specific sales estimator (EU + World)
-Authoritative sources: Top100_YYYY.txt (EU) and Top100_World_YYYY.txt (World).
-Fallback: SerpAPI web seeding when local data has no model/year coverage.
-
-Key behaviors:
-- Generation detection is LOCAL-FIRST (EU+World); web is used only if local has no labels.
-- Start-year window ALWAYS overlaps start_year (else default 8y window).
-- Web seeds get plausibility checks vs. prior-generation EU average and model-level EU total.
-- Implausible EU seeds are floored and flagged; coherent seeds are accepted but labeled as web.
+Generation-specific sales estimator (EU + World)
+- LOCAL-FIRST generation detection (EU+World); web only when local has no labels.
+- Start of estimates = DETECTED GENERATION LAUNCH YEAR (not the user's view year).
+- Web seeds get plausibility checks vs. prior-gen EU avg and model-level EU totals.
 - Exports Estimates, Fleet_Repairs, Summary, Seeds_Constraints with plausibility fields.
+
+This version adds:
+- Digit-aware strict model matching (Q5 will not match Q3).
+- Safer filenames (use the user's typed model).
+- Estimation starts at generation launch year (window start), not the user's year.
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -118,14 +118,51 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
             }
     return db
 
-# ------------------ Shared lookups -----------------
+# ------------------ Safer model matching -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
+    """
+    Safer, digit-aware matching:
+    - Try exact normalized key.
+    - Prefer candidates with identical digit-bearing tokens (e.g., 'q5' vs 'q3').
+    - Only accept a fuzzy match with high confidence (>=0.88).
+    - Otherwise return None.
+    """
     key = normalize_name(user_model)
+
+    # exact
     for db in dbs:
-        if key in db: return key
+        if key in db:
+            return key
+
+    # collect candidates
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
-    cand = difflib.get_close_matches(key, all_keys, n=1, cutoff=0.7)
-    return cand[0] if cand else None
+    if not all_keys:
+        return None
+
+    def digit_tokens(s: str) -> set[str]:
+        toks = s.split()
+        # tokens that are either pure digits or letter+digits (e.g., 'q5', 'x1')
+        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
+
+    target_digits = digit_tokens(key)
+    filtered = all_keys
+
+    # if we have digit tokens, require exact equality of that set
+    if target_digits:
+        same = [k for k in all_keys if digit_tokens(k) == target_digits]
+        if same:
+            filtered = same
+
+    # high-confidence fuzzy
+    best, best_r = None, -1.0
+    for cand in filtered:
+        r = difflib.SequenceMatcher(None, key, cand).ratio()
+        if r > best_r:
+            best, best_r = cand, r
+    if best and best_r >= 0.88:
+        return best
+
+    return None
 
 def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
     if not hist: return None
@@ -309,13 +346,15 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
             out["world"] = {"value": int(db_world[mk][start_year]["units_world"]), "source": "local-db", "is_model_level": True}
     return out
 
-# ------------------ Local-first generation ----------
-
-def autodetect_generation(db_eu, db_world, _icor_map_unused, model, start_year, user_gen):
+# ------------------ Generation detection ------------
+def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
     Generation detection (LOCAL FIRST; ICOR ignored).
     Returns 4-tuple: (gen_label: str, window:(start,end), basis: str, note: str)
-    basis ∈ {"user_input","local_top100","future_top100","web_serp","default_8yr"}
+
+    IMPORTANT CHANGE:
+    - We DO NOT clip the detected window to the user's year anymore.
+      We return the full window (min..max) so we can start at the launch year.
     """
     def _window_from_local_for_label(gen_label: str):
         det_norm = normalize_generation(gen_label)
@@ -328,72 +367,63 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, start_year, 
                         years.append(y)
         return (min(years), max(years)) if years else None
 
-    def _enforce_overlap(window, basis):
+    def _clip_to_horizon(window):  # clip only to model horizon, not to user_year
         gs, ge = window
-        # If window ends before start_year, force default 8-year window from start_year
-        if ge < start_year:
-            return (start_year, min(start_year + 8, DEADLINE_YEAR)), basis + "_no_overlap→default"
-        # Clip to forecast horizon
-        return (max(gs, start_year), min(ge, DEADLINE_YEAR)), basis
+        return (max(1990, gs), min(ge, DEADLINE_YEAR))
 
     # 0) User-provided generation
     if user_gen:
         gen_label = user_gen
-        win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-        window, basis = _enforce_overlap(win_local, "user_input")
-        return gen_label, window, basis, "Generation provided by user."
+        win_local = _window_from_local_for_label(gen_label)
+        if win_local:
+            return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
+        # Fallback window if not known locally
+        return gen_label, (max(1990, user_year-1), min(user_year+7, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
 
     mk = find_best_model_key(db_eu, db_world, user_model=model)
 
-    # 1) Local Top100 at start_year
+    # 1) Local Top100 at/near user_year (<=, then >= within small gap)
     if mk:
+        # exact at user_year
         for db in (db_eu, db_world):
-            if mk in db and start_year in db[mk] and db[mk][start_year].get("generation"):
-                gen_label = db[mk][start_year]["generation"]
-                win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-                window, basis = _enforce_overlap(win_local, "local_top100")
-                return gen_label, window, basis, "Detected from Top100 at the start year."
-
-    # 2) Nearest previous ≤ start_year
-    if mk:
+            if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
+                gen_label = db[mk][user_year]["generation"]
+                win_local = _window_from_local_for_label(gen_label)
+                if win_local:
+                    return gen_label, _clip_to_horizon(win_local), "local_top100", "Detected from Top100 at the user year."
+        # nearest previous ≤ user_year
         years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        prev_years = [y for y in years if y <= start_year and (
+        prev_years = [y for y in years if y <= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
         if prev_years:
             y0 = prev_years[-1]
             gen_label = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
-            win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-            window, basis = _enforce_overlap(win_local, "local_top100")
-            return gen_label, window, basis, f"Detected from Top100 nearest ≤ year ({y0})."
-
-    # 3) Nearest future (≤ 1y)
-    if mk:
-        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        next_years = [y for y in years if y >= start_year and (
+            win_local = _window_from_local_for_label(gen_label)
+            if win_local:
+                return gen_label, _clip_to_horizon(win_local), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
+        # nearest future (≤ 1y gap)
+        next_years = [y for y in years if y >= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
-        if next_years and (next_years[0] - start_year) <= MAX_FUTURE_GAP:
+        if next_years and (next_years[0] - user_year) <= MAX_FUTURE_GAP:
             y1 = next_years[0]
             gen_label = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
-            win_local = _window_from_local_for_label(gen_label) or (start_year, min(start_year+8, DEADLINE_YEAR))
-            window, basis = _enforce_overlap(win_local, "future_top100")
-            return gen_label, window, basis, f"Detected from Top100 nearest ≥ year ({y1})."
+            win_local = _window_from_local_for_label(gen_label)
+            if win_local:
+                return gen_label, _clip_to_horizon(win_local), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
 
-    # 4) Web SERP (only if local truly has no labels)
-    web_gen, win_serp, _ = detect_generation_via_web(model, start_year)
+    # 2) Web SERP (only if local truly has no labels)
+    web_gen, win_serp, _ = detect_generation_via_web(model, user_year)
     if web_gen:
-        gen_label = web_gen
-        window = win_serp or (start_year, min(start_year+8, DEADLINE_YEAR))
-        window, basis = _enforce_overlap(window, "web_serp")
-        return gen_label, window, basis, "Detected from web SERP."
+        window = win_serp or (user_year, min(user_year+8, DEADLINE_YEAR))
+        return web_gen, _clip_to_horizon(window), "web_serp", "Detected from web SERP."
 
-    # 5) Fallback default
+    # 3) Fallback default (8 years around user's intent)
     gen_label = "GEN"
-    window, basis = _enforce_overlap((start_year, min(start_year+8, DEADLINE_YEAR)), "default_8yr")
-    return gen_label, window, basis, "Fallback default 8-year window."
+    return gen_label, (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
 
 # ------------------ Priors & constraints ------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
@@ -792,7 +822,7 @@ def print_summary(data, seed, constraints, gen_basis, icor_status, autodetect_no
 def ask_user_inputs() -> Dict[str,Any]:
     model = input("Enter the car model: ").strip()
     generation = input("Enter the generation tag (blank to auto): ").strip()
-    year = int(input("Enter the starting year: ").strip())
+    year = int(input("Enter the starting year you'd like to view from (we will model from launch): ").strip())
     if year < 1990 or year > DEADLINE_YEAR:
         print(f"Year must be between 1990 and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
     return {"car_model": model, "generation": generation, "start_year": year}
@@ -865,59 +895,65 @@ def main():
     icor_map = parse_icor_supported_txt(icor_txt_path)
     icor_df = None
 
-    # Gen detect (LOCAL FIRST)
+    # Gen detect (LOCAL FIRST) — returns full window
     gen_label, gen_window, gen_basis, autodetect_note = autodetect_generation(
         db_eu, db_world, icor_map, user["car_model"], user["start_year"], user["generation"]
     )
 
+    # Launch year = window start (we model from launch, not from user's year)
+    launch_year = max(1990, gen_window[0])
+
     # Alias (optional)
     alias = infer_local_gen_alias(db_eu, db_world, user["car_model"], gen_label, gen_window)
 
-    # Local seeds/history for that generation
+    # Local seeds/history for that generation AT LAUNCH YEAR
     local = local_seed_for_generation(
-        db_eu, db_world, user["car_model"], gen_label, user["start_year"],
+        db_eu, db_world, user["car_model"], gen_label, launch_year,
         accepted_alias=alias, window=gen_window
     )
 
     # Web only if no local coverage at all
     use_web = not (local.get("history_europe") or local.get("history_world") or local.get("eu") or local.get("world"))
-    web = serp_seed(local.get("display_model") or user["car_model"], gen_label, user["start_year"]) if use_web else {}
+    web = serp_seed(local.get("display_model") or user["car_model"], gen_label, launch_year) if use_web else {}
 
-    # Build prompt seeds & constraints (+plausibility)
+    # Build prompt seeds & constraints (+plausibility) at LAUNCH YEAR
     seed, constraints, plaus = build_constraints(
-        user["start_year"], local.get("display_model") or user["car_model"],
+        launch_year, local.get("display_model") or user["car_model"],
         gen_label, gen_window, db_eu, local, web
     )
     seed["generation_window_basis"] = gen_basis
     if alias: seed["generation_alias_used"] = alias
 
     # Call OpenAI
-    messages = build_messages(local.get("display_model") or user["car_model"], gen_label, user["start_year"], seed, constraints)
+    messages = build_messages(local.get("display_model") or user["car_model"], gen_label, launch_year, seed, constraints)
     data = call_openai(messages)
 
     # Enforce + smooth
-    data = enforce_constraints_and_zero(data, constraints, user["start_year"])
+    data = enforce_constraints_and_zero(data, constraints, launch_year)
     if APPLY_SMOOTHING:
-        data = smooth_lifecycle(data, user["start_year"], set(constraints.get("zero_years", [])))
+        data = smooth_lifecycle(data, launch_year, set(constraints.get("zero_years", [])))
 
-    # Horizon coverage
-    need = set(range(user["start_year"], DEADLINE_YEAR+1))
+    # Horizon coverage (from LAUNCH YEAR)
+    need = set(range(launch_year, DEADLINE_YEAR+1))
     have = {r.get("year") for r in data.get("yearly_estimates", [])}
     for y in sorted(need - have):
         data.setdefault("yearly_estimates", []).append({"year": y, "world_sales_units": 0, "europe_sales_units": 0, "rationale": "Filled by client."})
     data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
-    data["start_year"] = user["start_year"]; data["end_year"] = DEADLINE_YEAR
+    data["start_year"] = launch_year
+    data["end_year"] = DEADLINE_YEAR
 
     # Fleet + ICOR support
     fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
-    icor_status = check_icor_support(icor_map, icor_df, local.get("display_model") or user["car_model"], gen_label, user["start_year"])
+    icor_status = check_icor_support(icor_map, icor_df, local.get("display_model") or user["car_model"], gen_label, launch_year)
     icor_status["plausibility"] = plaus
 
-    # Save
-    safe_model = (data.get("model") or local.get("display_model") or user["car_model"]).replace(" ", "_")
+    # -------------------- SAVE --------------------
+    # Filenames now use the *user's* typed model to avoid fuzzy-mismatch naming.
+    safe_model_for_name = user["car_model"].replace(" ", "_")
     safe_gen = normalize_generation(gen_label or "GEN").replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    base = f"sales_estimates_{safe_model}_{safe_gen}_{user['start_year']}_{MODEL_NAME}_{timestamp}"
+    base = f"sales_estimates_{safe_model_for_name}_{safe_gen}_{launch_year}_{MODEL_NAME}_{timestamp}"
+
     csv_path = save_csv(data, base)
     xlsx_path = save_excel(data, fleet, seed, constraints, icor_status, base)
 
@@ -927,6 +963,7 @@ def main():
     print(f"Saved Excel: {xlsx_path}")
     print(f"\nNotes: {plaus.get('source_note','')}")
     print("- Local Top100 EU/World are authoritative for generation; web is fallback only.")
+    print(f"- User requested view-from year: {user['start_year']}; modeled from LAUNCH year: {launch_year}.")
 
 if __name__ == "__main__":
     main()
