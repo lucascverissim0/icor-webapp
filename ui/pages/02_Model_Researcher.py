@@ -174,24 +174,40 @@ def load_latest_output():
     return latest
 
 def parse_seed_badges(xlsx_path: str):
+    """
+    Parse Summary + Seeds_Constraints to produce UI badges and metadata,
+    including generation launch year.
+    """
     confidence = None
     eu_badge = {"style": "badge-soft", "text": "Europe seed: none"}
     w_badge  = {"style": "badge-soft", "text": "World seed: none"}
-    plaus_badge = None  # NEW
+    plaus_badge = None
+    launch_year = None
+    gen_end = None
+    basis = None
 
-    # 1) Confidence + plausibility from Summary
+    # 1) Confidence + plausibility + launch year/basis from Summary
     try:
         summary = pd.read_excel(xlsx_path, sheet_name="Summary")
-        if "Confidence" in summary.columns and len(summary):
-            confidence = str(summary.loc[0, "Confidence"])
-        # NEW: Plausibility fields (written by Script 2)
-        if "Plausibility_Flag" in summary.columns:
-            flag = bool(summary.loc[0, "Plausibility_Flag"])
-            reason = str(summary.loc[0, "Plausibility_Reason"] or "").strip()
-            if flag:
-                plaus_badge = {"style": "badge-warn", "text": f"Plausibility: check · {reason[:110]}"}
-            else:
-                plaus_badge = {"style": "badge", "text": "Plausibility: OK"}
+        if len(summary):
+            if "Confidence" in summary.columns:
+                confidence = str(summary.loc[0, "Confidence"])
+            if "Generation_Window_Start" in summary.columns:
+                ly = summary.loc[0, "Generation_Window_Start"]
+                launch_year = int(ly) if pd.notnull(ly) else None
+            if "Generation_Window_End" in summary.columns:
+                ge = summary.loc[0, "Generation_Window_End"]
+                gen_end = int(ge) if pd.notnull(ge) else None
+            if "Generation_Window_Basis" in summary.columns:
+                basis = str(summary.loc[0, "Generation_Window_Basis"] or "").strip()
+
+            if "Plausibility_Flag" in summary.columns:
+                flag = bool(summary.loc[0, "Plausibility_Flag"])
+                reason = str(summary.loc[0, "Plausibility_Reason"] or "").strip()
+                plaus_badge = (
+                    {"style": "badge-warn", "text": f"Plausibility: check · {reason[:110]}"}
+                    if flag else {"style": "badge", "text": "Plausibility: OK"}
+                )
     except Exception:
         pass
 
@@ -238,18 +254,25 @@ def parse_seed_badges(xlsx_path: str):
         w = seed_json["world"]
         w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,}  ·  {w.get('source','seed')}"}
 
-    return confidence, eu_badge, w_badge, plaus_badge
+    return confidence, eu_badge, w_badge, plaus_badge, launch_year, gen_end, basis
 
-def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict, plaus_badge: dict | None = None):
+def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict,
+                  plaus_badge: dict | None = None,
+                  launch_year: int | None = None,
+                  basis: str | None = None):
     conf_txt = f"Confidence: <strong>{confidence}</strong>" if confidence else "Confidence: <span class='k'>n/a</span>"
     plaus_html = f"<div class='badge {plaus_badge['style']}'>{plaus_badge['text']}</div>" if plaus_badge else ""
+    launch_html = f"<div class='badge badge-strong'>Launch: <strong>{launch_year}</strong></div>" if launch_year else ""
+    basis_html = f"<div class='badge'>Basis: <span class='k'>{basis}</span></div>" if basis else ""
     st.markdown(
         f"""
         <div class="badges">
           <div class="badge">{conf_txt}</div>
+          {launch_html}
           <div class="badge {eu_badge['style']}">{eu_badge['text']}</div>
           <div class="badge {w_badge['style']}">{w_badge['text']}</div>
           {plaus_html}
+          {basis_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -336,8 +359,9 @@ if submitted:
             if not xlsx:
                 st.warning("No output Excel found. (The estimator ran but didn’t produce a file.)")
             else:
-                confidence, eu_b, w_b, plaus_b = parse_seed_badges(xlsx)
-                header_badges(confidence, eu_b, w_b, plaus_b)
+                # New: parse launch year + basis
+                confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
+                header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year, basis=basis)
 
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
