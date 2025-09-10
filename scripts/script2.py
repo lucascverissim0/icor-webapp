@@ -845,13 +845,9 @@ def main():
     data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
     data["start_year"] = launch_year; data["end_year"] = DEADLINE_YEAR
 
-    # Fleet & ICOR
-    here = os.path.dirname(os.path.abspath(__file__))
-    icor_txt_path = os.path.join(os.getcwd(), "icor_supported_models.txt")
-    if not os.path.exists(icor_txt_path):
-        icor_txt_path = os.path.join(here, "icor_supported_models.txt")
-    icor_map = parse_icor_supported_txt(icor_txt_path)
-    icor_status = check_icor_support(icor_map, None, display_model, seed.get("generation",""), launch_year)
+    # Fleet + ICOR support
+    fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
+    icor_status = check_icor_support(icor_map, icor_df, display_model, gen_label, launch_year)
     icor_status["plausibility"] = plaus
 
     # Save (relative to DATA_DIR/CWD)
@@ -859,26 +855,28 @@ def main():
     safe_gen = (normalize_generation(seed.get("generation","GEN")) or "GEN").replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = f"sales_estimates_{safe_model}_{safe_gen}_{launch_year}_{MODEL_NAME}_{timestamp}"
-    
+
     # Actually save files first
     csv_path = save_csv(data, base)
     xlsx_path = save_excel(data, fleet, seed, constraints, icor_status, base)
-    
+
     # Then compute absolute paths
     csv_abs  = os.path.abspath(csv_path)
     xlsx_abs = os.path.abspath(xlsx_path)
-    
+
+    # Console summary
     print_summary(data, seed, constraints, basis, icor_status, autodetect_note="")
     print(f"\nSaved CSV: {os.path.basename(csv_path)}")
     print(f"Saved Excel: {os.path.basename(xlsx_path)}")
-    
-    # Also print absolute paths
+
+    # Also print absolute paths (for Streamlit to parse reliably)
     print(f"Saved CSV (abs): {csv_abs}")
     print(f"Saved Excel (abs): {xlsx_abs}")
-    
+
     print(f"\nNotes: {plaus.get('source_note','')}")
     print("- Window-first: local Top100 used where available; web seeds only for gaps.")
     print(f"- User requested view-from year: {user['start_year']}; modeled from LAUNCH year: {launch_year}.")
+
 
 
 
