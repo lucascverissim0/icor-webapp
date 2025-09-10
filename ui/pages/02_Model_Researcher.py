@@ -373,20 +373,30 @@ if submitted:
                 "timestamp": int(time.time()),
             })
         else:
-            # Prefer exact path from stdout; fall back to latest-in-data if missing.
-            _, xlsx_from_stdout = extract_saved_paths_from_stdout(out)
-            xlsx = xlsx_from_stdout or load_latest_output()
-
-            # Always show the last lines for debugging context
-            tail = "\n".join((out or "").splitlines()[-25:])
-            with st.expander("Run log", expanded=False):
-                st.code(tail)
-
-            if not xlsx or not os.path.exists(xlsx):
-                st.warning("No output Excel found. The estimator ran but didn’t produce a file (or the path wasn’t accessible).")
+            # Prefer exact path from stdout
+            csv_path, xlsx_from_stdout = extract_saved_paths_from_stdout(out)
+            
+            if not xlsx_from_stdout:
+                st.error("The estimator finished but didn’t save an Excel file. "
+                         "Most likely the OpenAI step failed or returned invalid JSON. "
+                         "See the Run log below.")
+                # Still show the run log for debugging
+                tail = "\n".join((out or "").splitlines()[-50:])
+                with st.expander("Run log", expanded=False):
+                    st.code(tail)
             else:
-                confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
-                header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year, basis=basis)
+                xlsx = xlsx_from_stdout if os.path.exists(xlsx_from_stdout) else load_latest_output()
+            
+                # Always show last lines for debugging
+                tail = "\n".join((out or "").splitlines()[-25:])
+                with st.expander("Run log", expanded=False):
+                    st.code(tail)
+            
+                if not xlsx or not os.path.exists(xlsx):
+                    st.warning("No output Excel found. The estimator ran but didn’t produce a file (or the path wasn’t accessible).")
+                else:
+                    confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
+                    header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year, basis=basis)
 
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
