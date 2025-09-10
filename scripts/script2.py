@@ -349,20 +349,13 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
 # ------------------ Generation detection ------------
 def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
-    LOCAL-FIRST generation detection, but:
-    - Keep local data if it corresponds to the SAME generation active at the user's year.
-    - If local labels are stale (window ends before user's year), check the web:
-        * If web confirms SAME gen continues into user_year -> use/extend that window.
-        * If web indicates a DIFFERENT gen active at/near user_year -> prefer web.
-        * If web inconclusive -> assume the local gen continues (extend window to DEADLINE),
-          so we don't zero out post-local years incorrectly.
-    Returns (gen_label, window:(start,end), basis, note).
+    Generation detection (LOCAL FIRST; ICOR ignored).
+    Returns 4-tuple: (gen_label: str, window:(start,end), basis: str, note: str)
+
+    IMPORTANT CHANGE:
+    - We DO NOT clip the detected window to the user's year anymore.
+      We return the full window (min..max) so we can start at the launch year.
     """
-
-    def _clip_to_horizon(window):
-        gs, ge = window
-        return (max(1990, gs), min(ge, DEADLINE_YEAR))
-
     def _window_from_local_for_label(gen_label: str):
         det_norm = normalize_generation(gen_label)
         mk = find_best_model_key(db_eu, db_world, user_model=model)
@@ -374,18 +367,31 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
                         years.append(y)
         return (min(years), max(years)) if years else None
 
-    def _pick_local_near_user_year():
-        """Try to find a local generation label around user_year (exact, prev, small future)."""
-        mk = find_best_model_key(db_eu, db_world, user_model=model)
-        if not mk:
-            return None  # no local model
-        # exact
+    def _clip_to_horizon(window):  # clip only to model horizon, not to user_year
+        gs, ge = window
+        return (max(1990, gs), min(ge, DEADLINE_YEAR))
+
+    # 0) User-provided generation
+    if user_gen:
+        gen_label = user_gen
+        win_local = _window_from_local_for_label(gen_label)
+        if win_local:
+            return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
+        # Fallback window if not known locally
+        return gen_label, (max(1990, user_year-1), min(user_year+7, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
+
+    mk = find_best_model_key(db_eu, db_world, user_model=model)
+
+    # 1) Local Top100 at/near user_year (<=, then >= within small gap)
+    if mk:
+        # exact at user_year
         for db in (db_eu, db_world):
             if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
-                gl = db[mk][user_year]["generation"]
-                wl = _window_from_local_for_label(gl)
-                if wl: return gl, _clip_to_horizon(wl), "local_top100", "Detected from Top100 at the user year."
-        # nearest previous
+                gen_label = db[mk][user_year]["generation"]
+                win_local = _window_from_local_for_label(gen_label)
+                if win_local:
+                    return gen_label, _clip_to_horizon(win_local), "local_top100", "Detected from Top100 at the user year."
+        # nearest previous ≤ user_year
         years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
         prev_years = [y for y in years if y <= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
@@ -393,75 +399,31 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         )]
         if prev_years:
             y0 = prev_years[-1]
-            gl = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
-            wl = _window_from_local_for_label(gl)
-            if wl: return gl, _clip_to_horizon(wl), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
-        # nearest future (tolerance: 2y)
+            gen_label = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
+            win_local = _window_from_local_for_label(gen_label)
+            if win_local:
+                return gen_label, _clip_to_horizon(win_local), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
+        # nearest future (≤ 1y gap)
         next_years = [y for y in years if y >= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
-        if next_years and (next_years[0] - user_year) <= 2:
+        if next_years and (next_years[0] - user_year) <= MAX_FUTURE_GAP:
             y1 = next_years[0]
-            gl = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
-            wl = _window_from_local_for_label(gl)
-            if wl: return gl, _clip_to_horizon(wl), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
-        return None
+            gen_label = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
+            win_local = _window_from_local_for_label(gen_label)
+            if win_local:
+                return gen_label, _clip_to_horizon(win_local), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
 
-    def _overlaps(window, y):  # inclusive overlap
-        if not window: return False
-        gs, ge = window
-        return gs <= y <= ge
-
-    # 0) User-provided generation → trust (but keep full local window if available)
-    if user_gen:
-        gen_label = user_gen
-        win_local = _window_from_local_for_label(gen_label)
-        if win_local:
-            return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
-        # default window centered at user_year if not found locally
-        return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
-
-    # 1) LOCAL pick
-    local_pick = _pick_local_near_user_year()
-
-    # 2) If local overlaps user's year → keep it (same generation is active)
-    if local_pick and _overlaps(local_pick[1], user_year):
-        return local_pick  # (gen_label, window, basis, note)
-
-    # 3) Local is stale or missing → query WEB
+    # 2) Web SERP (only if local truly has no labels)
     web_gen, win_serp, _ = detect_generation_via_web(model, user_year)
-    web_win = _clip_to_horizon(win_serp) if win_serp else None
-
-    if local_pick:
-        local_gen, local_win, local_basis, local_note = local_pick
-        # Case A: WEB overlaps user's year
-        if web_gen and (web_win and _overlaps(web_win, user_year) or not win_serp):
-            # If SAME generation label (normalized), prefer WEB window (it may extend beyond local)
-            if normalize_generation(web_gen) == normalize_generation(local_gen):
-                # Prefer the broader, future-reaching window if web has one; else assume continuation
-                if web_win:
-                    return web_gen, web_win, "web_serp_confirms_local_gen", "Web confirms same generation continues."
-                # web had label but no window → assume continuation to DEADLINE
-                gs = local_win[0]
-                return local_gen, (gs, DEADLINE_YEAR), "assumed_continuation_same_gen", "Web agrees on gen; extending window."
-            else:
-                # DIFFERENT generation at/near user's year → switch to WEB
-                if web_win:
-                    return web_gen, web_win, "web_serp_overrides_diff_gen", "Local labels stale/different; using web."
-                # no window, but different label → start at user_year with default span
-                return web_gen, (user_year, min(user_year + 8, DEADLINE_YEAR)), "web_serp_overrides_diff_gen_default", "Web indicates different gen; default window."
-        # Case B: WEB inconclusive (no label/window) → assume local gen continues (so no zeros)
-        gs = local_win[0]
-        return local_gen, (gs, DEADLINE_YEAR), local_basis + "_assumed_continuation", local_note + " · Web inconclusive; assuming continuation."
-
-    # 4) No local at all → WEB or default
     if web_gen:
-        return web_gen, (web_win if web_win else (user_year, min(user_year + 8, DEADLINE_YEAR))), "web_serp", "Detected from web SERP."
+        window = win_serp or (user_year, min(user_year+8, DEADLINE_YEAR))
+        return web_gen, _clip_to_horizon(window), "web_serp", "Detected from web SERP."
 
-    # 5) Fallback
+    # 3) Fallback default (8 years around user's intent)
     gen_label = "GEN"
-    return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
+    return gen_label, (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
 
 # ------------------ Priors & constraints ------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
