@@ -381,37 +381,69 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         return (min(years), max(years)) if years else None
 
     def _pick_local_near_user_year():
-        mk = find_best_model_key(db_eu, db_world, user_model=model)
-        if not mk:
-            return None  # no local model
-        # exact at user year
-        for db in (db_eu, db_world):
-            if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
-                gl = db[mk][user_year]["generation"]
-                wl = _window_from_local_for_label(gl)
-                if wl: return gl, _clip_to_horizon(wl), "local_top100", "Detected from Top100 at the user year."
-        # nearest previous ≤ user_year
-        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        prev_years = [y for y in years if y <= user_year and (
-            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
-            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
-        )]
-        if prev_years:
-            y0 = prev_years[-1]
-            gl = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
+    mk = find_best_model_key(db_eu, db_world, user_model=model)
+    if not mk:
+        return None  # no local model
+
+    def _cand_from(db, year):
+        if mk in db and year in db[mk] and db[mk][year].get("generation"):
+            gl = db[mk][year]["generation"]
             wl = _window_from_local_for_label(gl)
-            if wl: return gl, _clip_to_horizon(wl), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
-        # nearest small future (≤2y)
-        next_years = [y for y in years if y >= user_year and (
-            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
-            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
-        )]
-        if next_years and (next_years[0] - user_year) <= 2:
-            y1 = next_years[0]
-            gl = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
-            wl = _window_from_local_for_label(gl)
-            if wl: return gl, _clip_to_horizon(wl), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
+            if wl:
+                return (gl, _clip_to_horizon(wl), db is db_eu and "local_eu" or "local_world",
+                        f"Detected from Top100 {'EU' if db is db_eu else 'World'} at the user year.")
         return None
+
+    # 1) Try EXACT year in BOTH DBs, then choose the "newer" one (latest window start)
+    cand_eu = _cand_from(db_eu, user_year)
+    cand_w  = _cand_from(db_world, user_year)
+    picks = [c for c in (cand_eu, cand_w) if c]
+
+    if picks:
+        # prefer later window start (newer gen). If tie, prefer world over EU.
+        picks.sort(key=lambda c: (c[1][0], 1 if c[2] == "local_world" else 0), reverse=True)
+        return picks[0]
+
+    # 2) Nearest previous ≤ user_year from either DB
+    years_eu = sorted(db_eu.get(mk, {}).keys())
+    years_w  = sorted(db_world.get(mk, {}).keys())
+    prev_years = [y for y in sorted(set(years_eu + years_w)) if y <= user_year and (
+        (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
+        (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
+    )]
+    if prev_years:
+        y0 = prev_years[-1]
+        # get both labels if present
+        candidates = []
+        if mk in db_eu and y0 in db_eu[mk] and db_eu[mk][y0].get("generation"):
+            gl = db_eu[mk][y0]["generation"]; wl = _window_from_local_for_label(gl)
+            if wl: candidates.append((gl, _clip_to_horizon(wl), "local_eu", f"Detected from Top100 EU nearest ≤ year ({y0})."))
+        if mk in db_world and y0 in db_world[mk] and db_world[mk][y0].get("generation"):
+            gl = db_world[mk][y0]["generation"]; wl = _window_from_local_for_label(gl)
+            if wl: candidates.append((gl, _clip_to_horizon(wl), "local_world", f"Detected from Top100 World nearest ≤ year ({y0})."))
+        if candidates:
+            candidates.sort(key=lambda c: (c[1][0], 1 if c[2] == "local_world" else 0), reverse=True)
+            return candidates[0]
+
+    # 3) Nearest small future (≤2y) from either DB
+    next_years = [y for y in sorted(set(years_eu + years_w)) if y >= user_year and (
+        (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
+        (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
+    )]
+    if next_years and (next_years[0] - user_year) <= 2:
+        y1 = next_years[0]
+        candidates = []
+        if mk in db_eu and y1 in db_eu[mk] and db_eu[mk][y1].get("generation"):
+            gl = db_eu[mk][y1]["generation"]; wl = _window_from_local_for_label(gl)
+            if wl: candidates.append((gl, _clip_to_horizon(wl), "local_eu", f"Detected from Top100 EU nearest ≥ year ({y1})."))
+        if mk in db_world and y1 in db_world[mk] and db_world[mk][y1].get("generation"):
+            gl = db_world[mk][y1]["generation"]; wl = _window_from_local_for_label(gl)
+            if wl: candidates.append((gl, _clip_to_horizon(wl), "local_world", f"Detected from Top100 World nearest ≥ year ({y1})."))
+        if candidates:
+            candidates.sort(key=lambda c: (c[1][0], 1 if c[2] == "local_world" else 0), reverse=True)
+            return candidates[0]
+
+    return None
 
     def _overlaps(window, y):  # inclusive overlap
         if not window: return False
