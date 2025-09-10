@@ -69,26 +69,81 @@ def normalize_generation(g: Optional[str]) -> str:
 
 # ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
+    """
+    Robust reader:
+    - Accepts a JSON array
+    - Or a dict with a likely array field ('data', 'rows', 'items', 'records')
+    - Or NDJSON (one JSON object per line)
+    Returns a list of dicts or None (and prints a warning).
+    """
     try:
-        return json.load(open(path, "r", encoding="utf-8"))
-    except Exception:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read().strip()
+    except Exception as e:
+        print(f"[LOAD-ERR] {path}: cannot read file: {e}", file=sys.stderr)
         return None
+
+    if not text:
+        print(f"[LOAD-ERR] {path}: file empty", file=sys.stderr)
+        return None
+
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, list):
+            return obj
+        if isinstance(obj, dict):
+            for k in ("data", "rows", "items", "records", "list"):
+                if k in obj and isinstance(obj[k], list):
+                    return obj[k]
+            # last resort: single record
+            return [obj]
+    except Exception:
+        # Try NDJSON
+        rows = []
+        ok = True
+        for i, line in enumerate(text.splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception as e:
+                ok = False
+                print(f"[LOAD-ERR] {path}: NDJSON parse error on line {i}: {e}", file=sys.stderr)
+                break
+        if ok and rows:
+            return rows
+
+    print(f"[LOAD-ERR] {path}: not a JSON array/dict/ndjson I can parse", file=sys.stderr)
+    return None
+
 
 def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
     db: Dict[str, Dict[int, Dict[str, Any]]] = {}
-    for path in sorted(glob.glob(os.path.join(folder, "Top100_*.txt"))):
-        if "_World_" in os.path.basename(path): continue
-        m = re.search(r"(\d{4})", os.path.basename(path)); 
-        if not m: continue
+    paths = sorted(glob.glob(os.path.join(folder, "Top100_*.txt")))
+    # Exclude world files
+    paths = [p for p in paths if "_World_" not in os.path.basename(p)]
+    if not paths:
+        print(f"[EU-LOAD] No EU files matched in {folder} (expected Top100_*.txt excluding _World_).", file=sys.stderr)
+
+    for path in paths:
+        m = re.search(r"(\d{4})", os.path.basename(path))
+        if not m: 
+            print(f"[EU-LOAD] Skip (no year): {path}", file=sys.stderr)
+            continue
         year = int(m.group(1))
         arr = _load_json_array(path)
-        if not arr: continue
+        if not arr:
+            print(f"[EU-LOAD] Skip (unreadable): {path}", file=sys.stderr)
+            continue
         for rec in arr:
-            model = rec.get("model") or rec.get("name") or ""
-            if not model: continue
+            model = (rec.get("model") or rec.get("name") or "").strip()
+            if not model:
+                continue
             gen   = rec.get("generation")
             units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int): continue
+            if not isinstance(units, int):
+                continue
             key = normalize_name(model)
             db.setdefault(key, {})
             db[key][year] = {
@@ -96,22 +151,34 @@ def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
                 "units_europe": int(units),
                 "estimated": bool(rec.get("estimated", False)),
             }
+    print(f"[EU-LOAD] Loaded models: {len(db)} keys.", file=sys.stderr)
     return db
+
 
 def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
     db: Dict[str, Dict[int, Dict[str, Any]]] = {}
-    for path in sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt"))):
+    paths = sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt")))
+    if not paths:
+        print(f"[WLD-LOAD] No World files matched in {folder} (expected Top100_World_*.txt).", file=sys.stderr)
+
+    for path in paths:
         m = re.search(r"(\d{4})", os.path.basename(path))
-        if not m: continue
+        if not m:
+            print(f"[WLD-LOAD] Skip (no year): {path}", file=sys.stderr)
+            continue
         year = int(m.group(1))
         arr = _load_json_array(path)
-        if not arr: continue
+        if not arr:
+            print(f"[WLD-LOAD] Skip (unreadable): {path}", file=sys.stderr)
+            continue
         for rec in arr:
-            model = rec.get("model") or rec.get("name") or ""
-            if not model: continue
+            model = (rec.get("model") or rec.get("name") or "").strip()
+            if not model:
+                continue
             gen   = rec.get("generation")
             units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int): continue
+            if not isinstance(units, int):
+                continue
             key = normalize_name(model)
             db.setdefault(key, {})
             db[key][year] = {
@@ -119,52 +186,48 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
                 "units_world": int(units),
                 "estimated": bool(rec.get("estimated", False)),
             }
+    print(f"[WLD-LOAD] Loaded models: {len(db)} keys.", file=sys.stderr)
     return db
 
 # ------------------ Safer model matching -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
-    """
-    Safer, digit-aware matching:
-    - Try exact normalized key.
-    - Prefer candidates with identical digit-bearing tokens (e.g., 'q5' vs 'q3').
-    - Only accept a fuzzy match with high confidence (>=0.88).
-    - Otherwise return None.
-    """
     key = normalize_name(user_model)
+    all_keys = sorted(set(k for db in dbs for k in db.keys()))
 
-    # exact
+    if not all_keys:
+        print(f"[MATCH] No keys in DBs; are your files loading?", file=sys.stderr)
+        return None
+
+    # 1) Exact
     for db in dbs:
         if key in db:
             return key
 
-    # collect candidates
-    all_keys = sorted(set(k for db in dbs for k in db.keys()))
-    if not all_keys:
-        return None
-
-    def digit_tokens(s: str) -> set[str]:
-        toks = s.split()
-        # tokens that are either pure digits or letter+digits (e.g., 'q5', 'x1')
-        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
-
-    target_digits = digit_tokens(key)
-    filtered = all_keys
-
-    # if we have digit tokens, require exact equality of that set
-    if target_digits:
-        same = [k for k in all_keys if digit_tokens(k) == target_digits]
-        if same:
-            filtered = same
-
-    # high-confidence fuzzy
+    # 2) Fuzzy (>= 0.86)
     best, best_r = None, -1.0
-    for cand in filtered:
+    for cand in all_keys:
         r = difflib.SequenceMatcher(None, key, cand).ratio()
         if r > best_r:
             best, best_r = cand, r
-    if best and best_r >= 0.88:
+    if best and best_r >= 0.86:
+        print(f"[MATCH] Fuzzy accepted: '{best}' (score {best_r:.3f}) for '{key}'", file=sys.stderr)
         return best
 
+    # 3) Token containment (handles minor suffixes like 'custom kombi' vs 'custom')
+    key_tokens  = set(key.split())
+    scored = []
+    for cand in all_keys:
+        ctoks = set(cand.split())
+        overlap = len(key_tokens & ctoks) / max(1, len(key_tokens | ctoks))
+        scored.append((overlap, cand))
+    scored.sort(reverse=True)
+    if scored and scored[0][0] >= 0.6:
+        print(f"[MATCH] Token containment accepted: '{scored[0][1]}' (overlap {scored[0][0]:.2f}) for '{key}'", file=sys.stderr)
+        return scored[0][1]
+
+    # 4) Nothing — print top suggestions
+    suggestions = ", ".join(c for _, c in scored[:5])
+    print(f"[MATCH-FAIL] No match for '{key}'. Top nearby: {suggestions}", file=sys.stderr)
     return None
 
 def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
