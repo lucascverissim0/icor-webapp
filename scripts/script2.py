@@ -11,6 +11,8 @@ This version adds:
 - Digit-aware strict model matching (Q5 will not match Q3).
 - Safer filenames (use the user's typed model).
 - Estimation starts at generation launch year (window start), not the user's year.
+- **Canonical generation label matching** across years (e.g., "2nd gen (2017–2023)" == "2nd gen (2017–)"),
+  fixing the issue where windows collapsed to a single year due to label variations.
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -62,6 +64,25 @@ def normalize_generation(g: Optional[str]) -> str:
     g = re.sub(r"[\(\)\[\]{}]", " ", g)
     g = re.sub(r"\bmk\s*", "mk", g)
     g = re.sub(r"\s+", " ", g).strip()
+    return g
+
+def canonical_gen_label(g: Optional[str]) -> str:
+    """
+    Reduce a generation label to its core identity (e.g., 'mk2', '2nd gen'),
+    dropping any year/range like '2017', '2017–2023', 'since 2017', etc.
+    This is used for ALL generation equality checks across years.
+    """
+    if not g:
+        return ""
+    g = normalize_generation(g)
+    # Remove 'since/from 20xx'
+    g = re.sub(r'\b(?:since|from)\s*20\d{2}\b', '', g)
+    # Remove standalone year or year ranges anywhere
+    g = re.sub(r'\b20\d{2}\s*(?:[–-]\s*20\d{2})?\b', '', g)
+    # Remove stray trailing dashes
+    g = re.sub(r'[–-]+$', '', g).strip()
+    # Collapse spaces
+    g = re.sub(r'\s{2,}', ' ', g).strip()
     return g
 
 # ------------------ Local DB loaders ---------------
@@ -213,7 +234,7 @@ def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
             for _, v in box.items():
                 if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
+        add("organic", f"{item.get("title","")}\n{item.get("snippet","")}".strip(), item.get("link",""))
     return blobs
 
 def build_generation_aliases(gen: str) -> List[str]:
@@ -294,17 +315,17 @@ def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, g
     mk = find_best_model_key(db_eu, db_world, user_model=user_model)
     if not mk: return None
     lo, hi = gen_window
-    det_norm = normalize_generation(detected_gen)
+    det_can = canonical_gen_label(detected_gen)
     labels = []
     for db in (db_eu, db_world):
         for y, rec in db.get(mk, {}).items():
             if lo <= y <= hi:
                 g = rec.get("generation")
-                if g: labels.append(normalize_generation(g))
+                if g: labels.append(canonical_gen_label(g))
     labels = [g for g in labels if g]
     if not labels: return None
     c = Counter(labels)
-    if det_norm in c: return None
+    if det_can in c: return None
     top, cnt = c.most_common(1)[0]
     if len(c)==1 or cnt/sum(c.values())>=0.7: return top
     return None
@@ -316,17 +337,21 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
     mk = find_best_model_key(db_eu, db_world, user_model=user_model)
     if not mk: return out
     out["found_model"] = True; out["model_key"] = mk
-    accepted = {normalize_generation(target_gen)}
-    if accepted_alias: accepted.add(normalize_generation(accepted_alias))
+
+    accepted = {canonical_gen_label(target_gen)}
+    if accepted_alias: accepted.add(canonical_gen_label(accepted_alias))
+
     def _hist(db, units_field):
         hist = []
         for y, rec in db.get(mk, {}).items():
             if window and not (window[0] <= y <= window[1]): continue
-            if normalize_generation(rec.get("generation")) in accepted:
+            if canonical_gen_label(rec.get("generation")) in accepted:
                 hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
         return sorted(hist, key=lambda r: r["year"])
+
     eu_hist = _hist(db_eu, "units_europe"); w_hist = _hist(db_world, "units_world")
     out["history_europe"] = eu_hist; out["history_world"] = w_hist
+
     # display model
     disp = None
     for db in (db_eu, db_world):
@@ -337,12 +362,13 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
             if mk in db and db[mk]:
                 disp = db[mk][sorted(db[mk].keys())[-1]]["model"]; break
     out["display_model"] = disp
-    # seeds at start year
+
+    # seeds at start year (only if same generation canonically)
     if mk in db_eu and start_year in db_eu[mk]:
-        if normalize_generation(db_eu[mk][start_year].get("generation")) in accepted:
+        if canonical_gen_label(db_eu[mk][start_year].get("generation")) in accepted:
             out["eu"] = {"value": int(db_eu[mk][start_year]["units_europe"]), "source": "local-db", "is_model_level": True}
     if mk in db_world and start_year in db_world[mk]:
-        if normalize_generation(db_world[mk][start_year].get("generation")) in accepted:
+        if canonical_gen_label(db_world[mk][start_year].get("generation")) in accepted:
             out["world"] = {"value": int(db_world[mk][start_year]["units_world"]), "source": "local-db", "is_model_level": True}
     return out
 
@@ -355,15 +381,17 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
     IMPORTANT CHANGE:
     - We DO NOT clip the detected window to the user's year anymore.
       We return the full window (min..max) so we can start at the launch year.
+    - We match generation rows using CANONICAL labels across years.
     """
     def _window_from_local_for_label(gen_label: str):
-        det_norm = normalize_generation(gen_label)
+        det_can = canonical_gen_label(gen_label)
         mk = find_best_model_key(db_eu, db_world, user_model=model)
         years = []
         if mk:
             for db in (db_eu, db_world):
                 for y, rec in db.get(mk, {}).items():
-                    if normalize_generation(rec.get("generation")) == det_norm:
+                    rec_can = canonical_gen_label(rec.get("generation"))
+                    if rec_can and rec_can == det_can:
                         years.append(y)
         return (min(years), max(years)) if years else None
 
@@ -435,12 +463,12 @@ def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
 def prior_generation_avg_eu(db_eu, user_model, detected_gen: str, start_year: int, lookback_years: int = 3) -> Optional[int]:
     mk = find_best_model_key(db_eu, {}, user_model=user_model)
     if not mk: return None
-    det_norm = normalize_generation(detected_gen)
+    det_can = canonical_gen_label(detected_gen)
     vals = []
     for y in range(start_year-1, max(1990, start_year - lookback_years) - 1, -1):
         rec = db_eu.get(mk, {}).get(y)
         if not rec: continue
-        if normalize_generation(rec.get("generation")) == det_norm:  # same-gen
+        if canonical_gen_label(rec.get("generation")) == det_can:  # same-gen -> skip
             continue
         units = rec.get("units_europe")
         if isinstance(units, int): vals.append(units)
@@ -895,7 +923,7 @@ def main():
     icor_map = parse_icor_supported_txt(icor_txt_path)
     icor_df = None
 
-    # Gen detect (LOCAL FIRST) — returns full window
+    # Gen detect (LOCAL FIRST) — returns full window via CANONICAL label matching
     gen_label, gen_window, gen_basis, autodetect_note = autodetect_generation(
         db_eu, db_world, icor_map, user["car_model"], user["start_year"], user["generation"]
     )
@@ -942,8 +970,7 @@ def main():
     data["start_year"] = launch_year
     data["end_year"] = DEADLINE_YEAR
 
-    # Guarantee rows cover every year from LAUNCH through DEADLINE and that the first
-    # modeled year is the launch year (so fleet accumulates from there).
+    # Guarantee rows cover every year from LAUNCH through DEADLINE
     all_years = {r["year"] for r in data.get("yearly_estimates", [])}
     for y in range(launch_year, DEADLINE_YEAR + 1):
         if y not in all_years:
@@ -952,7 +979,6 @@ def main():
                 "rationale": "Filled to cover from generation launch."
             })
     data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
-
 
     # Fleet + ICOR support
     fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
