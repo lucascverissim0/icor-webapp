@@ -40,7 +40,7 @@
   {"model":"BMW X1","generation":"F48 (2015–2022)","units_sold": 95700},
   {"model":"Kia Sportage","generation":"QL (2016–2021)","units_sold": 94800},
   {"model":"Škoda Kodiaq","generation":"1st gen (2017–)","units_sold": 93300},
-  {"model":"Volvo XC60","generation":"2nd gen (2017–)","units_sold": 92200},
+  {"model":"Volvo XC60","generation":"2nd gen","units_sold": 92200},
   {"model":"Audi A3","generation":"8Y (2020–)","units_sold": 91900},
   {"model":"Škoda Scala","generation":"1st gen (2019–)","units_sold": 90400},
   {"model":"Toyota Aygo","generation":"AB40 (2014–2021)","units_sold": 89800},
@@ -100,4 +100,5 @@
   {"model":"Škoda Enyaq","generation":"iV","units_sold":44268},
   {"model":"Lancia Ypsilon","generation":"846","units_sold":43862}
 ]
+
 
