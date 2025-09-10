@@ -375,17 +375,21 @@ if submitted:
                 "timestamp": int(time.time()),
             })
         else:
-            # Prefer exact path from stdout; fall back to latest-in-data if missing.
             csv_path, xlsx_from_stdout = extract_saved_paths_from_stdout(out)
 
             if not xlsx_from_stdout:
                 st.error("The estimator finished but didn’t save an Excel file. "
                          "Most likely the OpenAI step failed or returned invalid JSON. "
                          "Check the Run log above.")
-                # Try a best-effort fallback anyway
                 xlsx = load_latest_output()
             else:
+                # NEW: resolve relative paths against DATA_DIR (Script 2's cwd)
                 xlsx = xlsx_from_stdout
+                if xlsx and not os.path.isabs(xlsx):
+                    xlsx = os.path.join(DATA_DIR, xlsx)
+                if csv_path and not os.path.isabs(csv_path):
+                    csv_path = os.path.join(DATA_DIR, csv_path)
+
 
             if not xlsx or not os.path.exists(xlsx):
                 st.warning("No output Excel found. The estimator ran but didn’t produce a file (or the path wasn’t accessible).")
