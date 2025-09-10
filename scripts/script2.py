@@ -859,17 +859,21 @@ def main():
     safe_gen = (normalize_generation(seed.get("generation","GEN")) or "GEN").replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = f"sales_estimates_{safe_model}_{safe_gen}_{launch_year}_{MODEL_NAME}_{timestamp}"
-    csv_path = save_csv(data, base)
-    xlsx_path = save_excel(data, compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE),
-                           seed, constraints, icor_status, base)
-
-    # Console summary
+    csv_abs  = os.path.abspath(csv_path)
+    xlsx_abs = os.path.abspath(xlsx_path)
+    
     print_summary(data, seed, constraints, basis, icor_status, autodetect_note="")
-    print(f"\nSaved CSV: {csv_path}")
-    print(f"Saved Excel: {xlsx_path}")
+    print(f"\nSaved CSV: {os.path.basename(csv_path)}")
+    print(f"Saved Excel: {os.path.basename(xlsx_path)}")
+    
+    # NEW: also print absolute paths
+    print(f"Saved CSV (abs): {csv_abs}")
+    print(f"Saved Excel (abs): {xlsx_abs}")
+    
     print(f"\nNotes: {plaus.get('source_note','')}")
-    print(f"- Window-first: local Top100 used where available; web seeds only for gaps.")
+    print("- Window-first: local Top100 used where available; web seeds only for gaps.")
     print(f"- User requested view-from year: {user['start_year']}; modeled from LAUNCH year: {launch_year}.")
+
 
 if __name__ == "__main__":
     main()
