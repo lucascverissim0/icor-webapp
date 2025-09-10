@@ -121,48 +121,45 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
 # ------------------ Safer model matching -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
     """
-    Safer, digit-aware matching:
-    - Try exact normalized key.
-    - Prefer candidates with identical digit-bearing tokens (e.g., 'q5' vs 'q3').
-    - Only accept a fuzzy match with high confidence (>=0.88).
-    - Otherwise return None.
+    Stricter resolver:
+    - Tokenizes both query and candidates.
+    - Requires query tokens ⊆ candidate tokens (to avoid matching 'Transit' when we asked 'Transit Custom').
+    - Hard filters to avoid sibling collisions (connect/tourneo vs custom).
     """
-    key = normalize_name(user_model)
+    qnorm = normalize_name(user_model)
+    qtokens = set(qnorm.split())
 
-    # exact
-    for db in dbs:
-        if key in db:
-            return key
+    # sibling guards for common Ford family names (extend as needed)
+    forbids = []
+    if "custom" in qtokens:
+        forbids += ["connect", "tourneo"]
+    if "connect" in qtokens:
+        forbids += ["custom", "tourneo"]
+    if "tourneo" in qtokens:
+        forbids += ["custom", "connect"]
 
-    # collect candidates
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
-    if not all_keys:
-        return None
+    # 1) exact
+    if qnorm in all_keys:
+        return qnorm
 
-    def digit_tokens(s: str) -> set[str]:
-        toks = s.split()
-        # tokens that are either pure digits or letter+digits (e.g., 'q5', 'x1')
-        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
+    # 2) token containment with sibling guards
+    def ok_candidate(cand: str) -> bool:
+        ctokens = set(cand.split())
+        if not qtokens.issubset(ctokens):
+            return False
+        return not any(bad in ctokens for bad in forbids)
 
-    target_digits = digit_tokens(key)
-    filtered = all_keys
+    filtered = [k for k in all_keys if ok_candidate(k)]
+    if filtered:
+        # prefer the shortest (tightest) matching key
+        return sorted(filtered, key=lambda s: (len(s), s))[0]
 
-    # if we have digit tokens, require exact equality of that set
-    if target_digits:
-        same = [k for k in all_keys if digit_tokens(k) == target_digits]
-        if same:
-            filtered = same
+    # 3) fallback to fuzzy, but still apply guards
+    cand = difflib.get_close_matches(qnorm, all_keys, n=5, cutoff=0.8)
+    cand = [k for k in cand if ok_candidate(k)]
+    return cand[0] if cand else None
 
-    # high-confidence fuzzy
-    best, best_r = None, -1.0
-    for cand in filtered:
-        r = difflib.SequenceMatcher(None, key, cand).ratio()
-        if r > best_r:
-            best, best_r = cand, r
-    if best and best_r >= 0.88:
-        return best
-
-    return None
 
 def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
     if not hist: return None
@@ -263,21 +260,30 @@ def best_number_for_region(blobs: List[Dict[str,str]], region: str, model: str, 
     return best
 
 def build_search_queries(model: str, gen: str, year: int) -> List[str]:
+    exact = f'"{model}"'
+    # anti-sibling exclusions that hurt precision for Ford family
+    minus = '-"Transit Connect" -"Tourneo" -"Transit Courier" -"Transit"'
+    # if the model already contains "Transit Custom", keep the generic -Transit last (so exact phrase wins)
+    if "transit custom" in normalize_name(model):
+        minus = '-"Transit Connect" -"Tourneo" -"Transit Courier" -"Transit"'
+
     gen_alias = " OR ".join(f'"{a}"' for a in build_generation_aliases(gen)) if gen else ""
+    with_gen = f'({gen_alias}) ' if gen_alias else ""
+
     base = [
-        f'"{model}" {year} sales europe -price -msrp -€ -$',
-        f'"{model}" {year} registrations europe -price -msrp -€ -$',
-        f'"{model}" {year} global sales -price -msrp -€ -$',
-        f'"{model}" {year} worldwide sales -price -msrp -€ -$',
+        f'{exact} {with_gen}{year} "generation" sales europe {minus} -price -msrp -€ -$',
+        f'{exact} {with_gen}{year} registrations europe {minus} -price -msrp -€ -$',
+        f'{exact} {with_gen}{year} "generation" global sales {minus} -price -msrp -€ -$',
+        f'{exact} {with_gen}{year} worldwide sales {minus} -price -msrp -€ -$',
     ]
-    if gen_alias:
-        base = [q.replace(f'"{model}"', f'"{model}" ({gen_alias})') for q in base]
     preferred = [
-        f'site:carsalesbase.com "{model}" {year} sales',
-        f'site:acea.auto "{model}" {year} registrations',
-        f'site:marklines.com "{model}" {year} sales',
+        f'site:carsalesbase.com {exact} {year} sales',
+        f'site:acea.auto {exact} {year} registrations',
+        f'site:marklines.com {exact} {year} sales',
+        f'site:wikipedia.org {exact} generation {year}',
     ]
     return base + preferred
+
 
 def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
     blobs_all: List[Dict[str,str]] = []
@@ -349,119 +355,100 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
 # ------------------ Generation detection ------------
 def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
-    LOCAL-FIRST generation detection, but:
-    - Keep local data if it corresponds to the SAME generation active at the user's year.
-    - If local labels are stale (window ends before user's year), check the web:
-        * If web confirms SAME gen continues into user_year -> use/extend that window.
-        * If web indicates a DIFFERENT gen active at/near user_year -> prefer web.
-        * If web inconclusive -> assume the local gen continues (extend window to DEADLINE),
-          so we don't zero out post-local years incorrectly.
-    Returns (gen_label, window:(start,end), basis, note).
+    LOCAL-FIRST, but only reuse local Top100 when it's the SAME generation as the user's year.
+    Falls back to WEB when local window is stale or mismatched.
+    Returns (gen_label, window, basis, note).
     """
 
-    def _clip_to_horizon(window):
+    def _clip(window): 
         gs, ge = window
         return (max(1990, gs), min(ge, DEADLINE_YEAR))
 
     def _window_from_local_for_label(gen_label: str):
-        det_norm = normalize_generation(gen_label)
+        det = normalize_generation(gen_label)
         mk = find_best_model_key(db_eu, db_world, user_model=model)
         years = []
         if mk:
             for db in (db_eu, db_world):
                 for y, rec in db.get(mk, {}).items():
-                    if normalize_generation(rec.get("generation")) == det_norm:
+                    if normalize_generation(rec.get("generation")) == det:
                         years.append(y)
         return (min(years), max(years)) if years else None
 
-    def _pick_local_near_user_year():
-        """Try to find a local generation label around user_year (exact, prev, small future)."""
+    def _pick_local_near():
         mk = find_best_model_key(db_eu, db_world, user_model=model)
         if not mk:
-            return None  # no local model
-        # exact
+            return None
+        # exact label at user year
         for db in (db_eu, db_world):
             if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
                 gl = db[mk][user_year]["generation"]
                 wl = _window_from_local_for_label(gl)
-                if wl: return gl, _clip_to_horizon(wl), "local_top100", "Detected from Top100 at the user year."
+                if wl: return gl, _clip(wl), "local_top100", "Detected at user year."
         # nearest previous
-        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        prev_years = [y for y in years if y <= user_year and (
+        yrs = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
+        prev = [y for y in yrs if y <= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
-        if prev_years:
-            y0 = prev_years[-1]
+        if prev:
+            y0 = prev[-1]
             gl = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
             wl = _window_from_local_for_label(gl)
-            if wl: return gl, _clip_to_horizon(wl), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
-        # nearest future (tolerance: 2y)
-        next_years = [y for y in years if y >= user_year and (
+            if wl: return gl, _clip(wl), "local_top100", f"Nearest ≤ year ({y0})."
+        # nearest future (up to +2y)
+        nexty = [y for y in yrs if y >= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
-        if next_years and (next_years[0] - user_year) <= 2:
-            y1 = next_years[0]
+        if nexty and (nexty[0] - user_year) <= 2:
+            y1 = nexty[0]
             gl = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
             wl = _window_from_local_for_label(gl)
-            if wl: return gl, _clip_to_horizon(wl), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
+            if wl: return gl, _clip(wl), "future_top100", f"Nearest ≥ year ({y1})."
         return None
 
-    def _overlaps(window, y):  # inclusive overlap
-        if not window: return False
-        gs, ge = window
-        return gs <= y <= ge
+    def _overlaps(win, y): 
+        return win and (win[0] <= y <= win[1])
 
-    # 0) User-provided generation → trust (but keep full local window if available)
+    # 0) user-provided generation
     if user_gen:
-        gen_label = user_gen
-        win_local = _window_from_local_for_label(gen_label)
-        if win_local:
-            return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
-        # default window centered at user_year if not found locally
-        return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
+        gl = user_gen
+        wl = _window_from_local_for_label(gl)
+        return (gl, _clip(wl) if wl else (user_year, min(user_year+8, DEADLINE_YEAR)),
+                "user_input", "User provided.")
 
-    # 1) LOCAL pick
-    local_pick = _pick_local_near_user_year()
-
-    # 2) If local overlaps user's year → keep it (same generation is active)
+    # 1) local candidate
+    local_pick = _pick_local_near()
     if local_pick and _overlaps(local_pick[1], user_year):
-        return local_pick  # (gen_label, window, basis, note)
+        # same generation active at user_year -> keep local
+        return local_pick
 
-    # 3) Local is stale or missing → query WEB
+    # 2) stale/missing local -> web
     web_gen, win_serp, _ = detect_generation_via_web(model, user_year)
-    web_win = _clip_to_horizon(win_serp) if win_serp else None
+    web_win = _clip(win_serp) if win_serp else None
 
     if local_pick:
-        local_gen, local_win, local_basis, local_note = local_pick
-        # Case A: WEB overlaps user's year
-        if web_gen and (web_win and _overlaps(web_win, user_year) or not win_serp):
-            # If SAME generation label (normalized), prefer WEB window (it may extend beyond local)
-            if normalize_generation(web_gen) == normalize_generation(local_gen):
-                # Prefer the broader, future-reaching window if web has one; else assume continuation
+        lgen, lwin, lbasis, lnote = local_pick
+        if web_gen:
+            if normalize_generation(web_gen) == normalize_generation(lgen):
+                # same gen; prefer web window if it extends, else assume continuation to DEADLINE
                 if web_win:
-                    return web_gen, web_win, "web_serp_confirms_local_gen", "Web confirms same generation continues."
-                # web had label but no window → assume continuation to DEADLINE
-                gs = local_win[0]
-                return local_gen, (gs, DEADLINE_YEAR), "assumed_continuation_same_gen", "Web agrees on gen; extending window."
+                    return web_gen, web_win, "web_confirms_local_gen", "Web confirms same generation."
+                return lgen, (lwin[0], DEADLINE_YEAR), "assumed_continuation_same_gen", "Web agrees on gen; extending."
             else:
-                # DIFFERENT generation at/near user's year → switch to WEB
+                # different gen active at/near user_year -> switch to web gen
                 if web_win:
-                    return web_gen, web_win, "web_serp_overrides_diff_gen", "Local labels stale/different; using web."
-                # no window, but different label → start at user_year with default span
-                return web_gen, (user_year, min(user_year + 8, DEADLINE_YEAR)), "web_serp_overrides_diff_gen_default", "Web indicates different gen; default window."
-        # Case B: WEB inconclusive (no label/window) → assume local gen continues (so no zeros)
-        gs = local_win[0]
-        return local_gen, (gs, DEADLINE_YEAR), local_basis + "_assumed_continuation", local_note + " · Web inconclusive; assuming continuation."
+                    return web_gen, web_win, "web_overrides_diff_gen", "Local stale/different; using web."
+                return web_gen, (user_year, min(user_year+8, DEADLINE_YEAR)), "web_overrides_diff_gen_default", "Web different gen; default window."
+        # web inconclusive -> assume continuation of local gen
+        return lgen, (lwin[0], DEADLINE_YEAR), lbasis + "_assumed_continuation", lnote + " · Web inconclusive."
 
-    # 4) No local at all → WEB or default
+    # 3) no local at all -> web or default
     if web_gen:
-        return web_gen, (web_win if web_win else (user_year, min(user_year + 8, DEADLINE_YEAR))), "web_serp", "Detected from web SERP."
+        return web_gen, (web_win if web_win else (user_year, min(user_year+8, DEADLINE_YEAR))), "web_serp", "Detected via web."
+    return "GEN", (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default."
 
-    # 5) Fallback
-    gen_label = "GEN"
-    return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
 
 # ------------------ Priors & constraints ------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
