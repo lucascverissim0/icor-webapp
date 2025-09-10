@@ -11,9 +11,6 @@ This version adds:
 - Digit-aware strict model matching (Q5 will not match Q3).
 - Safer filenames (use the user's typed model).
 - Estimation starts at generation launch year (window start), not the user's year.
-- **Wiki-first, section-aware generation detection**: parse all generation sections on Wikipedia,
-  pick the window that covers the user's input year; fallback to prior SERP snippet heuristic
-  (now with extra boost for windows that cover the year).
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -69,81 +66,26 @@ def normalize_generation(g: Optional[str]) -> str:
 
 # ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
-    """
-    Robust reader:
-    - Accepts a JSON array
-    - Or a dict with a likely array field ('data', 'rows', 'items', 'records')
-    - Or NDJSON (one JSON object per line)
-    Returns a list of dicts or None (and prints a warning).
-    """
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-    except Exception as e:
-        print(f"[LOAD-ERR] {path}: cannot read file: {e}", file=sys.stderr)
-        return None
-
-    if not text:
-        print(f"[LOAD-ERR] {path}: file empty", file=sys.stderr)
-        return None
-
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            return obj
-        if isinstance(obj, dict):
-            for k in ("data", "rows", "items", "records", "list"):
-                if k in obj and isinstance(obj[k], list):
-                    return obj[k]
-            # last resort: single record
-            return [obj]
+        return json.load(open(path, "r", encoding="utf-8"))
     except Exception:
-        # Try NDJSON
-        rows = []
-        ok = True
-        for i, line in enumerate(text.splitlines(), 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rows.append(json.loads(line))
-            except Exception as e:
-                ok = False
-                print(f"[LOAD-ERR] {path}: NDJSON parse error on line {i}: {e}", file=sys.stderr)
-                break
-        if ok and rows:
-            return rows
-
-    print(f"[LOAD-ERR] {path}: not a JSON array/dict/ndjson I can parse", file=sys.stderr)
-    return None
-
+        return None
 
 def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
     db: Dict[str, Dict[int, Dict[str, Any]]] = {}
-    paths = sorted(glob.glob(os.path.join(folder, "Top100_*.txt")))
-    # Exclude world files
-    paths = [p for p in paths if "_World_" not in os.path.basename(p)]
-    if not paths:
-        print(f"[EU-LOAD] No EU files matched in {folder} (expected Top100_*.txt excluding _World_).", file=sys.stderr)
-
-    for path in paths:
-        m = re.search(r"(\d{4})", os.path.basename(path))
-        if not m: 
-            print(f"[EU-LOAD] Skip (no year): {path}", file=sys.stderr)
-            continue
+    for path in sorted(glob.glob(os.path.join(folder, "Top100_*.txt"))):
+        if "_World_" in os.path.basename(path): continue
+        m = re.search(r"(\d{4})", os.path.basename(path)); 
+        if not m: continue
         year = int(m.group(1))
         arr = _load_json_array(path)
-        if not arr:
-            print(f"[EU-LOAD] Skip (unreadable): {path}", file=sys.stderr)
-            continue
+        if not arr: continue
         for rec in arr:
-            model = (rec.get("model") or rec.get("name") or "").strip()
-            if not model:
-                continue
+            model = rec.get("model") or rec.get("name") or ""
+            if not model: continue
             gen   = rec.get("generation")
             units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int):
-                continue
+            if not isinstance(units, int): continue
             key = normalize_name(model)
             db.setdefault(key, {})
             db[key][year] = {
@@ -151,34 +93,22 @@ def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
                 "units_europe": int(units),
                 "estimated": bool(rec.get("estimated", False)),
             }
-    print(f"[EU-LOAD] Loaded models: {len(db)} keys.", file=sys.stderr)
     return db
-
 
 def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
     db: Dict[str, Dict[int, Dict[str, Any]]] = {}
-    paths = sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt")))
-    if not paths:
-        print(f"[WLD-LOAD] No World files matched in {folder} (expected Top100_World_*.txt).", file=sys.stderr)
-
-    for path in paths:
+    for path in sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt"))):
         m = re.search(r"(\d{4})", os.path.basename(path))
-        if not m:
-            print(f"[WLD-LOAD] Skip (no year): {path}", file=sys.stderr)
-            continue
+        if not m: continue
         year = int(m.group(1))
         arr = _load_json_array(path)
-        if not arr:
-            print(f"[WLD-LOAD] Skip (unreadable): {path}", file=sys.stderr)
-            continue
+        if not arr: continue
         for rec in arr:
-            model = (rec.get("model") or rec.get("name") or "").strip()
-            if not model:
-                continue
+            model = rec.get("model") or rec.get("name") or ""
+            if not model: continue
             gen   = rec.get("generation")
             units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int):
-                continue
+            if not isinstance(units, int): continue
             key = normalize_name(model)
             db.setdefault(key, {})
             db[key][year] = {
@@ -186,48 +116,52 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
                 "units_world": int(units),
                 "estimated": bool(rec.get("estimated", False)),
             }
-    print(f"[WLD-LOAD] Loaded models: {len(db)} keys.", file=sys.stderr)
     return db
 
 # ------------------ Safer model matching -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
+    """
+    Safer, digit-aware matching:
+    - Try exact normalized key.
+    - Prefer candidates with identical digit-bearing tokens (e.g., 'q5' vs 'q3').
+    - Only accept a fuzzy match with high confidence (>=0.88).
+    - Otherwise return None.
+    """
     key = normalize_name(user_model)
-    all_keys = sorted(set(k for db in dbs for k in db.keys()))
 
-    if not all_keys:
-        print(f"[MATCH] No keys in DBs; are your files loading?", file=sys.stderr)
-        return None
-
-    # 1) Exact
+    # exact
     for db in dbs:
         if key in db:
             return key
 
-    # 2) Fuzzy (>= 0.86)
+    # collect candidates
+    all_keys = sorted(set(k for db in dbs for k in db.keys()))
+    if not all_keys:
+        return None
+
+    def digit_tokens(s: str) -> set[str]:
+        toks = s.split()
+        # tokens that are either pure digits or letter+digits (e.g., 'q5', 'x1')
+        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
+
+    target_digits = digit_tokens(key)
+    filtered = all_keys
+
+    # if we have digit tokens, require exact equality of that set
+    if target_digits:
+        same = [k for k in all_keys if digit_tokens(k) == target_digits]
+        if same:
+            filtered = same
+
+    # high-confidence fuzzy
     best, best_r = None, -1.0
-    for cand in all_keys:
+    for cand in filtered:
         r = difflib.SequenceMatcher(None, key, cand).ratio()
         if r > best_r:
             best, best_r = cand, r
-    if best and best_r >= 0.86:
-        print(f"[MATCH] Fuzzy accepted: '{best}' (score {best_r:.3f}) for '{key}'", file=sys.stderr)
+    if best and best_r >= 0.88:
         return best
 
-    # 3) Token containment (handles minor suffixes like 'custom kombi' vs 'custom')
-    key_tokens  = set(key.split())
-    scored = []
-    for cand in all_keys:
-        ctoks = set(cand.split())
-        overlap = len(key_tokens & ctoks) / max(1, len(key_tokens | ctoks))
-        scored.append((overlap, cand))
-    scored.sort(reverse=True)
-    if scored and scored[0][0] >= 0.6:
-        print(f"[MATCH] Token containment accepted: '{scored[0][1]}' (overlap {scored[0][0]:.2f}) for '{key}'", file=sys.stderr)
-        return scored[0][1]
-
-    # 4) Nothing — print top suggestions
-    suggestions = ", ".join(c for _, c in scored[:5])
-    print(f"[MATCH-FAIL] No match for '{key}'. Top nearby: {suggestions}", file=sys.stderr)
     return None
 
 def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
@@ -273,19 +207,13 @@ def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
         if not text: return
         if looks_like_price(text): return
         blobs.append({"source": source, "text": text, "url": url})
-
     for key in ("answer_box","knowledge_graph"):
         box = serp_json.get(key)
         if isinstance(box, dict):
             for _, v in box.items():
-                if isinstance(v, str):
-                    add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
-
+                if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        title = item.get("title", "")
-        snippet = item.get("snippet", "")
-        add("organic", f"{title}\n{snippet}".strip(), item.get("link",""))
-
+        add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
     return blobs
 
 def build_generation_aliases(gen: str) -> List[str]:
@@ -421,13 +349,16 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
 # ------------------ Generation detection ------------
 def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
-    LOCAL + WEB cross-check:
-    - If user provides a generation: trust it (use local window if available).
-    - Otherwise, get the best local pick near the user year.
-    - ALWAYS do a web check; if the web window covers user_year and conflicts with local, prefer web.
-    - If web is inconclusive and local overlaps user_year, keep local.
-    - If neither is solid, default to an 8-year window from user_year.
+    LOCAL-FIRST generation detection, but:
+    - Keep local data if it corresponds to the SAME generation active at the user's year.
+    - If local labels are stale (window ends before user's year), check the web:
+        * If web confirms SAME gen continues into user_year -> use/extend that window.
+        * If web indicates a DIFFERENT gen active at/near user_year -> prefer web.
+        * If web inconclusive -> assume the local gen continues (extend window to DEADLINE),
+          so we don't zero out post-local years incorrectly.
+    Returns (gen_label, window:(start,end), basis, note).
     """
+
     def _clip_to_horizon(window):
         gs, ge = window
         return (max(1990, gs), min(ge, DEADLINE_YEAR))
@@ -444,68 +375,37 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         return (min(years), max(years)) if years else None
 
     def _pick_local_near_user_year():
+        """Try to find a local generation label around user_year (exact, prev, small future)."""
         mk = find_best_model_key(db_eu, db_world, user_model=model)
         if not mk:
             return None  # no local model
-    
-        def _cand_from(db, year):
-            if mk in db and year in db[mk] and db[mk][year].get("generation"):
-                gl = db[mk][year]["generation"]
+        # exact
+        for db in (db_eu, db_world):
+            if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
+                gl = db[mk][user_year]["generation"]
                 wl = _window_from_local_for_label(gl)
-                if wl:
-                    return (gl, _clip_to_horizon(wl), db is db_eu and "local_eu" or "local_world",
-                            f"Detected from Top100 {'EU' if db is db_eu else 'World'} at the user year.")
-            return None
-    
-        # 1) Try EXACT year in BOTH DBs, then choose the "newer" one (latest window start)
-        cand_eu = _cand_from(db_eu, user_year)
-        cand_w  = _cand_from(db_world, user_year)
-        picks = [c for c in (cand_eu, cand_w) if c]
-    
-        if picks:
-            # prefer later window start (newer gen). If tie, prefer world over EU.
-            picks.sort(key=lambda c: (c[1][0], 1 if c[2] == "local_world" else 0), reverse=True)
-            return picks[0]
-    
-        # 2) Nearest previous ≤ user_year from either DB
-        years_eu = sorted(db_eu.get(mk, {}).keys())
-        years_w  = sorted(db_world.get(mk, {}).keys())
-        prev_years = [y for y in sorted(set(years_eu + years_w)) if y <= user_year and (
+                if wl: return gl, _clip_to_horizon(wl), "local_top100", "Detected from Top100 at the user year."
+        # nearest previous
+        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
+        prev_years = [y for y in years if y <= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
         if prev_years:
             y0 = prev_years[-1]
-            # get both labels if present
-            candidates = []
-            if mk in db_eu and y0 in db_eu[mk] and db_eu[mk][y0].get("generation"):
-                gl = db_eu[mk][y0]["generation"]; wl = _window_from_local_for_label(gl)
-                if wl: candidates.append((gl, _clip_to_horizon(wl), "local_eu", f"Detected from Top100 EU nearest ≤ year ({y0})."))
-            if mk in db_world and y0 in db_world[mk] and db_world[mk][y0].get("generation"):
-                gl = db_world[mk][y0]["generation"]; wl = _window_from_local_for_label(gl)
-                if wl: candidates.append((gl, _clip_to_horizon(wl), "local_world", f"Detected from Top100 World nearest ≤ year ({y0})."))
-            if candidates:
-                candidates.sort(key=lambda c: (c[1][0], 1 if c[2] == "local_world" else 0), reverse=True)
-                return candidates[0]
-    
-        # 3) Nearest small future (≤2y) from either DB
-        next_years = [y for y in sorted(set(years_eu + years_w)) if y >= user_year and (
+            gl = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
+            wl = _window_from_local_for_label(gl)
+            if wl: return gl, _clip_to_horizon(wl), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
+        # nearest future (tolerance: 2y)
+        next_years = [y for y in years if y >= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
         )]
         if next_years and (next_years[0] - user_year) <= 2:
             y1 = next_years[0]
-            candidates = []
-            if mk in db_eu and y1 in db_eu[mk] and db_eu[mk][y1].get("generation"):
-                gl = db_eu[mk][y1]["generation"]; wl = _window_from_local_for_label(gl)
-                if wl: candidates.append((gl, _clip_to_horizon(wl), "local_eu", f"Detected from Top100 EU nearest ≥ year ({y1})."))
-            if mk in db_world and y1 in db_world[mk] and db_world[mk][y1].get("generation"):
-                gl = db_world[mk][y1]["generation"]; wl = _window_from_local_for_label(gl)
-                if wl: candidates.append((gl, _clip_to_horizon(wl), "local_world", f"Detected from Top100 World nearest ≥ year ({y1})."))
-            if candidates:
-                candidates.sort(key=lambda c: (c[1][0], 1 if c[2] == "local_world" else 0), reverse=True)
-                return candidates[0]
-    
+            gl = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
+            wl = _window_from_local_for_label(gl)
+            if wl: return gl, _clip_to_horizon(wl), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
         return None
 
     def _overlaps(window, y):  # inclusive overlap
@@ -519,37 +419,49 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         win_local = _window_from_local_for_label(gen_label)
         if win_local:
             return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
+        # default window centered at user_year if not found locally
         return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
 
-    # 1) LOCAL pick (may be stale/mislabeled)
+    # 1) LOCAL pick
     local_pick = _pick_local_near_user_year()
 
-    # 2) ALWAYS do a web cross-check at/near the user year
+    # 2) If local overlaps user's year → keep it (same generation is active)
+    if local_pick and _overlaps(local_pick[1], user_year):
+        return local_pick  # (gen_label, window, basis, note)
+
+    # 3) Local is stale or missing → query WEB
     web_gen, win_serp, _ = detect_generation_via_web(model, user_year)
     web_win = _clip_to_horizon(win_serp) if win_serp else None
 
-    # 3) If web disagrees and covers the user year → prefer web
-    if web_gen and web_win and _overlaps(web_win, user_year):
-        if local_pick:
-            local_gen, local_win, _, _ = local_pick
-            if normalize_generation(web_gen) != normalize_generation(local_gen):
-                return web_gen, web_win, "web_overrides_conflicting_local", "Web indicates a different gen at the user year; overriding local."
-            # Same label → prefer broader/explicit web window
-            if web_win != local_win:
-                return web_gen, web_win, "web_confirms_and_extends_local", "Web confirms same gen and provides/extends window."
-            return local_pick  # aligned
-        # No local → use web
-        return web_gen, web_win, "web_serp", "Detected from web SERP."
-
-    # 4) Web inconclusive → keep local if it overlaps; else assume continuation
-    if local_pick and _overlaps(local_pick[1], user_year):
-        return local_pick
     if local_pick:
-        lg, lw, lb, ln = local_pick
-        return lg, (lw[0], DEADLINE_YEAR), lb + "_assumed_continuation", ln + " · Web inconclusive; assuming continuation."
+        local_gen, local_win, local_basis, local_note = local_pick
+        # Case A: WEB overlaps user's year
+        if web_gen and (web_win and _overlaps(web_win, user_year) or not win_serp):
+            # If SAME generation label (normalized), prefer WEB window (it may extend beyond local)
+            if normalize_generation(web_gen) == normalize_generation(local_gen):
+                # Prefer the broader, future-reaching window if web has one; else assume continuation
+                if web_win:
+                    return web_gen, web_win, "web_serp_confirms_local_gen", "Web confirms same generation continues."
+                # web had label but no window → assume continuation to DEADLINE
+                gs = local_win[0]
+                return local_gen, (gs, DEADLINE_YEAR), "assumed_continuation_same_gen", "Web agrees on gen; extending window."
+            else:
+                # DIFFERENT generation at/near user's year → switch to WEB
+                if web_win:
+                    return web_gen, web_win, "web_serp_overrides_diff_gen", "Local labels stale/different; using web."
+                # no window, but different label → start at user_year with default span
+                return web_gen, (user_year, min(user_year + 8, DEADLINE_YEAR)), "web_serp_overrides_diff_gen_default", "Web indicates different gen; default window."
+        # Case B: WEB inconclusive (no label/window) → assume local gen continues (so no zeros)
+        gs = local_win[0]
+        return local_gen, (gs, DEADLINE_YEAR), local_basis + "_assumed_continuation", local_note + " · Web inconclusive; assuming continuation."
 
-    # 5) Neither local nor web solid → default
-    return "GEN", (user_year, min(user_year + 8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
+    # 4) No local at all → WEB or default
+    if web_gen:
+        return web_gen, (web_win if web_win else (user_year, min(user_year + 8, DEADLINE_YEAR))), "web_serp", "Detected from web SERP."
+
+    # 5) Fallback
+    gen_label = "GEN"
+    return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
 
 # ------------------ Priors & constraints ------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
@@ -926,203 +838,6 @@ def check_icor_support(icor_map, icor_df, model_name, generation_input, start_ye
     if rows.empty: return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
     return {"supported_flag": True, "match_type": "model_present_diff_gen_no_year_map", "matched_row": {"model": rows.iloc[0][cols["model"]] }}
 
-# ------------------ NEW: Wiki-first helpers --------
-ORD2NUM = {
-    "first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,
-    "seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12
-}
-ROMAN2NUM = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
-
-def _to_int_or_roman(tok: str) -> Optional[int]:
-    tok = tok.strip().lower()
-    if tok.isdigit(): return int(tok)
-    return ROMAN2NUM.get(tok)
-
-def _mk_from_heading(h: str) -> Optional[str]:
-    """
-    'Second generation (2023–present)' -> 'Mk2'
-    'Mk IV (2004–2013)' -> 'Mk4'
-    """
-    t = h.lower()
-    # ordinal
-    for ordw, n in ORD2NUM.items():
-        if re.search(rf'\b{ordw}\s+generation\b', t):
-            return f"Mk{n}"
-    # mk / mark + roman/digit
-    m = re.search(r'\b(?:mk|mark)\s*([ivx\d]{1,3})\b', t, flags=re.I)
-    if m:
-        n = _to_int_or_roman(m.group(1))
-        if n: return f"Mk{n}"
-    # 'Xth generation'
-    m = re.search(r'\b([ivx\d]{1,3})(?:st|nd|rd|th)?\s+generation\b', t, flags=re.I)
-    if m:
-        n = _to_int_or_roman(m.group(1))
-        if n: return f"Mk{n}"
-    return None
-
-def _parse_year_span(txt: str, deadline: int) -> Optional[Tuple[int,int]]:
-    """
-    Extract a (start,end) from text like:
-      (2012–2018), (2019–present), 2012–2018, since 2023
-    Accept both en-dash and hyphen.
-    """
-    # (YYYY–YYYY) or YYYY–YYYY
-    m = re.search(r'(20\d{2})\s*[–\-]\s*(20\d{2}|present)', txt, flags=re.I)
-    if m:
-        y1 = int(m.group(1))
-        y2 = m.group(2)
-        y2 = deadline if re.match(r'present', y2, flags=re.I) else int(y2)
-        if 1990 <= y1 <= 2100 and y1 <= y2 <= 2100:
-            return (y1, y2)
-    # 'since YYYY' / 'from YYYY'
-    m = re.search(r'\b(?:since|from)\s+(20\d{2})\b', txt, flags=re.I)
-    if m:
-        y1 = int(m.group(1))
-        if 1990 <= y1 <= 2100:
-            return (y1, deadline)
-    return None
-
-def _extract_generations_from_wikipedia_html(html: str, deadline: int) -> List[Tuple[str, Tuple[int,int], str]]:
-    """
-    Returns list of (mk_label?, (start,end), heading_text).
-    We scan H2/H3 headings and their immediate text for a year window.
-    """
-    sections = []
-    chunks = re.split(r'(?i)(<h[23][^>]*>.*?</h[23]>)', html)
-    for i in range(1, len(chunks), 2):
-        heading_html = chunks[i]
-        body_html    = chunks[i+1] if i+1 < len(chunks) else ""
-        # strip tags
-        heading_txt = re.sub(r'<[^>]+>', ' ', heading_html)
-        heading_txt = re.sub(r'\s+', ' ', heading_txt).strip()
-        # only consider generation-ish headings
-        if not re.search(r'\bgeneration\b|\bmk\b|\bmark\b', heading_txt, flags=re.I):
-            continue
-        # search year span in heading or first part of body
-        body_snip = re.sub(r'<[^>]+>', ' ', body_html)[:2000]
-        window = _parse_year_span(heading_txt, deadline) or _parse_year_span(body_snip, deadline)
-        if not window:
-            continue
-        mk = _mk_from_heading(heading_txt)
-        sections.append((mk, window, heading_txt))
-    # Deduplicate overlapping identical windows/labels
-    uniq = []
-    seen = set()
-    for mk, win, h in sections:
-        key = (mk or "", win[0], win[1])
-        if key in seen: continue
-        seen.add(key); uniq.append((mk, win, h))
-    return uniq
-
-def _pick_window_covering_year(cadidates: List[Tuple[str, Tuple[int,int], str]], year: int) -> Optional[Tuple[str, Tuple[int,int], str]]:
-    """
-    Pick the candidate whose window contains the year. If multiple, prefer:
-      - latest start year (more recent gen),
-      - then shorter span (tighter window),
-      - then one with an explicit Mk label.
-    """
-    fits = [(mk, (s,e), h) for mk,(s,e),h in cadidates if s <= year <= e]
-    if not fits: return None
-    fits.sort(key=lambda t: (t[1][0], -(t[1][1]-t[1][0]), 1 if t[0] else 0), reverse=True)
-    return fits[0]
-
-# ------------------ REPLACED: Web gen detector -----
-def detect_generation_via_web(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
-    """
-    Wiki-first detector:
-      1) Find the best Wikipedia page for the model via SerpAPI.
-      2) Parse ALL generation sections + year windows.
-      3) Choose the window covering `year`.
-      4) Return (MkN label if derivable, (start,end), diag).
-
-    Falls back to the previous snippet-driven logic if Wikipedia parsing fails.
-    """
-    # ------------- Try Wikipedia structured parse -------------
-    wiki_url = None
-    try:
-        q = f'site:wikipedia.org "{model}" generation'
-        res = serp_search(q)
-    
-        target_norm = normalize_name(model)      # e.g., "ford transit custom"
-        target_slug = target_norm.replace(" ", "_")
-    
-        def _looks_like_match(link: str, title: str) -> bool:
-            t = normalize_name(title)
-            if target_norm not in t:
-                return False
-            L = link.lower()
-            # Prefer exact page whose /wiki/ path contains the full slug
-            if "/wiki/" in L and target_slug in L.split("/wiki/")[-1]:
-                return True
-            # Otherwise accept only if the full normalized name appears in the title/snippet
-            return target_norm in t
-    
-        for item in res.get("organic_results", [])[:8]:
-            link = item.get("link","") or ""
-            title = (item.get("title") or "") + " " + (item.get("snippet") or "")
-            if "wikipedia.org" in link and _looks_like_match(link, title):
-                wiki_url = link
-                break
-    except Exception:
-        pass
-
-    if wiki_url:
-        try:
-            r = requests.get(wiki_url, timeout=SEARCH_TIMEOUT)
-            if r.ok and r.text:
-                cands = _extract_generations_from_wikipedia_html(r.text, DEADLINE_YEAR)
-                pick = _pick_window_covering_year(cands, year)
-                if pick:
-                    mk, window, heading = pick
-                    gen_label = mk or "GEN"
-                    diag = {"source":"wikipedia_html", "url": wiki_url, "heading": heading}
-                    return gen_label, window, diag
-        except Exception:
-            pass
-
-    # ------------- Fallback to prior SERP blob heuristic -------------
-    queries = [
-        f'"{model}" {year} generation',
-        f'"{model}" {year} mk',
-        f'site:wikipedia.org "{model}" generation',
-    ]
-    best = None; best_score = -1e9; best_window=None; best_blob=None
-    GEN_PAT = [re.compile(r'\b(?:mk|mark)\s?([ivx\d]{1,3})\b', re.I),
-               re.compile(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx\d]{1,3})\b', re.I)]
-    ORDINAL = re.compile(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+generation\b', re.I)
-    for q in queries:
-        res = serp_search(q)
-        if "error" in res: continue
-        for b in pull_text_blobs(res):
-            text = (b.get("text") or "") + " " + (b.get("url") or "")
-            if normalize_name(model) not in normalize_name(text): continue
-            gen_label = None
-            for pat in GEN_PAT:
-                m = pat.search(text)
-                if m:
-                    n = _to_int_or_roman(m.group(1))
-                    if n: gen_label=f"Mk{n}"; break
-            if not gen_label:
-                m = ORDINAL.search(text)
-                if m:
-                    n = ORD2NUM.get(m.group(1).lower()); 
-                    if n: gen_label=f"Mk{n}"
-            win = _parse_year_span(text, DEADLINE_YEAR)
-            covers = 1 if (win and win[0] <= year <= win[1]) else 0
-            dom_bonus = 5 if "wikipedia.org" in text.lower() else 0
-            yr_bonus  = 2 if str(year) in text else 0
-            span_bonus = 1 if win else 0
-            score = 20*covers + 10*dom_bonus + 5*yr_bonus + 2*span_bonus
-            if gen_label and score>best_score:
-                best_score=score; best=gen_label; best_window=win; best_blob=b
-        time.sleep(0.25)
-    if best:
-        window = best_window if best_window else (year, min(year+8, DEADLINE_YEAR))
-        return best, window, best_blob
-
-    # Last-resort default
-    return None, None, None
-
 # ------------------ Summary print ------------------
 def print_summary(data, seed, constraints, gen_basis, icor_status, autodetect_note=""):
     print("\n=== Generation-Specific Car Sales Estimates ===")
@@ -1149,6 +864,59 @@ def ask_user_inputs() -> Dict[str,Any]:
     if year < 1990 or year > DEADLINE_YEAR:
         print(f"Year must be between 1990 and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
     return {"car_model": model, "generation": generation, "start_year": year}
+
+def detect_generation_via_web(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
+    # lightweight web gen detector (kept from earlier version)
+    queries = [
+        f'"{model}" {year} generation',
+        f'"{model}" {year} mk',
+        f'site:wikipedia.org "{model}" generation',
+    ]
+    best = None; best_score = -1e9; best_window=None; best_blob=None
+    ROMAN = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
+    def roman_or_digit_to_int(s):
+        s=s.lower().strip()
+        return int(s) if s.isdigit() else ROMAN.get(s)
+    GEN_PAT = [re.compile(r'\b(?:mk|mark)\s?([ivx\d]{1,3})\b', re.I),
+               re.compile(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx\d]{1,3})\b', re.I)]
+    ORDINAL = re.compile(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+generation\b', re.I)
+    ORD_WORDS = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,"seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
+    YEAR_RANGE = re.compile(r'(20\d{2})\s?(?:–|-|to)\s?(20\d{2})')
+    SINCE = re.compile(r'(?:since|from)\s+(20\d{2})')
+    for q in queries:
+        res = serp_search(q)
+        if "error" in res: continue
+        for b in pull_text_blobs(res):
+            text = (b.get("text") or "") + " " + (b.get("url") or "")
+            if normalize_name(model) not in normalize_name(text): continue
+            gen_label = None
+            for pat in GEN_PAT:
+                m = pat.search(text)
+                if m:
+                    n = roman_or_digit_to_int(m.group(1))
+                    if n: gen_label=f"Mk{n}"; break
+            if not gen_label:
+                m = ORDINAL.search(text)
+                if m:
+                    n = ORD_WORDS.get(m.group(1).lower()); 
+                    if n: gen_label=f"Mk{n}"
+            win=None
+            m = YEAR_RANGE.search(text)
+            if m:
+                y1,y2 = int(m.group(1)), int(m.group(2))
+                if 1990<=y1<=2100 and y1<=y2<=2100: win=(y1,y2)
+            else:
+                m2 = SINCE.search(text)
+                if m2:
+                    y1 = int(m2.group(1)); 
+                    if 1990<=y1<=2100: win=(y1, DEADLINE_YEAR)
+            dom_bonus = 5 if "wikipedia.org" in text.lower() else 0
+            yr_bonus  = 2 if str(year) in text else 0
+            score = 10*dom_bonus + 5*yr_bonus + (8 if win else 0)
+            if gen_label and score>best_score:
+                best_score=score; best=gen_label; best_window=win; best_blob=b
+        time.sleep(0.3)
+    return best, best_window, best_blob
 
 def main():
     user = ask_user_inputs()
@@ -1222,6 +990,7 @@ def main():
                 "rationale": "Filled to cover from generation launch."
             })
     data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
+
 
     # Fleet + ICOR support
     fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
