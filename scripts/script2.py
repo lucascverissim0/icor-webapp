@@ -968,9 +968,8 @@ def detect_generation_via_web(model: str, year: int) -> Tuple[Optional[str], Opt
             if "wikipedia.org" in link and _looks_like_match(link, title):
                 wiki_url = link
                 break
-  except Exception:
-      pass
-
+    except Exception:
+        pass
 
     if wiki_url:
         try:
