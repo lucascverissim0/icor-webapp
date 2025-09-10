@@ -358,16 +358,13 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
 # ------------------ Generation detection ------------
 def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
-    LOCAL-FIRST generation detection, but:
-    - Keep local data if it corresponds to the SAME generation active at the user's year.
-    - If local labels are stale (window ends before user's year), check the web:
-        * If web confirms SAME gen continues into user_year -> use/extend that window.
-        * If web indicates a DIFFERENT gen active at/near user_year -> prefer web.
-        * If web inconclusive -> assume the local gen continues (extend window to DEADLINE),
-          so we don't zero out post-local years incorrectly.
-    Returns (gen_label, window:(start,end), basis, note).
+    LOCAL + WEB cross-check:
+    - If user provides a generation: trust it (use local window if available).
+    - Otherwise, get the best local pick near the user year.
+    - ALWAYS do a web check; if the web window covers user_year and conflicts with local, prefer web.
+    - If web is inconclusive and local overlaps user_year, keep local.
+    - If neither is solid, default to an 8-year window from user_year.
     """
-
     def _clip_to_horizon(window):
         gs, ge = window
         return (max(1990, gs), min(ge, DEADLINE_YEAR))
@@ -384,17 +381,16 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         return (min(years), max(years)) if years else None
 
     def _pick_local_near_user_year():
-        """Try to find a local generation label around user_year (exact, prev, small future)."""
         mk = find_best_model_key(db_eu, db_world, user_model=model)
         if not mk:
             return None  # no local model
-        # exact
+        # exact at user year
         for db in (db_eu, db_world):
             if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
                 gl = db[mk][user_year]["generation"]
                 wl = _window_from_local_for_label(gl)
                 if wl: return gl, _clip_to_horizon(wl), "local_top100", "Detected from Top100 at the user year."
-        # nearest previous
+        # nearest previous ≤ user_year
         years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
         prev_years = [y for y in years if y <= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
@@ -405,7 +401,7 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
             gl = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
             wl = _window_from_local_for_label(gl)
             if wl: return gl, _clip_to_horizon(wl), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
-        # nearest future (tolerance: 2y)
+        # nearest small future (≤2y)
         next_years = [y for y in years if y >= user_year and (
             (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
             (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
@@ -428,49 +424,37 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         win_local = _window_from_local_for_label(gen_label)
         if win_local:
             return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
-        # default window centered at user_year if not found locally
         return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
 
-    # 1) LOCAL pick
+    # 1) LOCAL pick (may be stale/mislabeled)
     local_pick = _pick_local_near_user_year()
 
-    # 2) If local overlaps user's year → keep it (same generation is active)
-    if local_pick and _overlaps(local_pick[1], user_year):
-        return local_pick  # (gen_label, window, basis, note)
-
-    # 3) Local is stale or missing → query WEB
+    # 2) ALWAYS do a web cross-check at/near the user year
     web_gen, win_serp, _ = detect_generation_via_web(model, user_year)
     web_win = _clip_to_horizon(win_serp) if win_serp else None
 
+    # 3) If web disagrees and covers the user year → prefer web
+    if web_gen and web_win and _overlaps(web_win, user_year):
+        if local_pick:
+            local_gen, local_win, _, _ = local_pick
+            if normalize_generation(web_gen) != normalize_generation(local_gen):
+                return web_gen, web_win, "web_overrides_conflicting_local", "Web indicates a different gen at the user year; overriding local."
+            # Same label → prefer broader/explicit web window
+            if web_win != local_win:
+                return web_gen, web_win, "web_confirms_and_extends_local", "Web confirms same gen and provides/extends window."
+            return local_pick  # aligned
+        # No local → use web
+        return web_gen, web_win, "web_serp", "Detected from web SERP."
+
+    # 4) Web inconclusive → keep local if it overlaps; else assume continuation
+    if local_pick and _overlaps(local_pick[1], user_year):
+        return local_pick
     if local_pick:
-        local_gen, local_win, local_basis, local_note = local_pick
-        # Case A: WEB overlaps user's year
-        if web_gen and (web_win and _overlaps(web_win, user_year) or not win_serp):
-            # If SAME generation label (normalized), prefer WEB window (it may extend beyond local)
-            if normalize_generation(web_gen) == normalize_generation(local_gen):
-                # Prefer the broader, future-reaching window if web has one; else assume continuation
-                if web_win:
-                    return web_gen, web_win, "web_serp_confirms_local_gen", "Web confirms same generation continues."
-                # web had label but no window → assume continuation to DEADLINE
-                gs = local_win[0]
-                return local_gen, (gs, DEADLINE_YEAR), "assumed_continuation_same_gen", "Web agrees on gen; extending window."
-            else:
-                # DIFFERENT generation at/near user's year → switch to WEB
-                if web_win:
-                    return web_gen, web_win, "web_serp_overrides_diff_gen", "Local labels stale/different; using web."
-                # no window, but different label → start at user_year with default span
-                return web_gen, (user_year, min(user_year + 8, DEADLINE_YEAR)), "web_serp_overrides_diff_gen_default", "Web indicates different gen; default window."
-        # Case B: WEB inconclusive (no label/window) → assume local gen continues (so no zeros)
-        gs = local_win[0]
-        return local_gen, (gs, DEADLINE_YEAR), local_basis + "_assumed_continuation", local_note + " · Web inconclusive; assuming continuation."
+        lg, lw, lb, ln = local_pick
+        return lg, (lw[0], DEADLINE_YEAR), lb + "_assumed_continuation", ln + " · Web inconclusive; assuming continuation."
 
-    # 4) No local at all → WEB or default
-    if web_gen:
-        return web_gen, (web_win if web_win else (user_year, min(user_year + 8, DEADLINE_YEAR))), "web_serp", "Detected from web SERP."
-
-    # 5) Fallback
-    gen_label = "GEN"
-    return gen_label, (user_year, min(user_year + 8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
+    # 5) Neither local nor web solid → default
+    return "GEN", (user_year, min(user_year + 8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
 
 # ------------------ Priors & constraints ------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
@@ -963,13 +947,30 @@ def detect_generation_via_web(model: str, year: int) -> Tuple[Optional[str], Opt
     try:
         q = f'site:wikipedia.org "{model}" generation'
         res = serp_search(q)
-        for item in res.get("organic_results", [])[:5]:
+    
+        target_norm = normalize_name(model)      # e.g., "ford transit custom"
+        target_slug = target_norm.replace(" ", "_")
+    
+        def _looks_like_match(link: str, title: str) -> bool:
+            t = normalize_name(title)
+            if target_norm not in t:
+                return False
+            L = link.lower()
+            # Prefer exact page whose /wiki/ path contains the full slug
+            if "/wiki/" in L and target_slug in L.split("/wiki/")[-1]:
+                return True
+            # Otherwise accept only if the full normalized name appears in the title/snippet
+            return target_norm in t
+    
+        for item in res.get("organic_results", [])[:8]:
             link = item.get("link","") or ""
             title = (item.get("title") or "") + " " + (item.get("snippet") or "")
-            if "wikipedia.org" in link and normalize_name(model).split()[0] in normalize_name(title):
-                wiki_url = link; break
-    except Exception:
-        pass
+            if "wikipedia.org" in link and _looks_like_match(link, title):
+                wiki_url = link
+                break
+      except Exception:
+          pass
+
 
     if wiki_url:
         try:
