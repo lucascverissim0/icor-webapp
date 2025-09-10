@@ -11,8 +11,8 @@ This version adds:
 - Digit-aware strict model matching (Q5 will not match Q3).
 - Safer filenames (use the user's typed model).
 - Estimation starts at generation launch year (window start), not the user's year.
-- **Canonical generation label matching** across years (e.g., "2nd gen (2017–2023)" == "2nd gen (2017–)"),
-  fixing the issue where windows collapsed to a single year due to label variations.
+- Canonical generation identity (mk ii / 2nd gen / second generation → 'gen2').
+- Contiguity expansion across unlabeled years to avoid collapsing the window.
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -66,23 +66,56 @@ def normalize_generation(g: Optional[str]) -> str:
     g = re.sub(r"\s+", " ", g).strip()
     return g
 
-# --- drop-in replacement ---
+# --- Canonical generation identity ('genN') --------
+_ROMAN = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
+_ORD  = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,
+         "seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
+
+def _roman_to_int(tok: str) -> Optional[int]:
+    return _ROMAN.get(tok.lower())
+
+def _extract_gen_number(s: str) -> Optional[int]:
+    t = s.lower()
+
+    # mk/mark N
+    m = re.search(r'\b(?:mk|mark)\s*([ivx]+|\d{1,2})\b', t)
+    if m:
+        tok = m.group(1)
+        return int(tok) if tok.isdigit() else _roman_to_int(tok)
+
+    # gen/generation N
+    m = re.search(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx]+|\d{1,2})\b', t)
+    if m:
+        tok = m.group(1)
+        return int(tok) if tok.isdigit() else _roman_to_int(tok)
+
+    # ordinal word + generation
+    m = re.search(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+gen(?:eration)?\b', t)
+    if m:
+        return _ORD.get(m.group(1))
+
+    # 2nd/3rd/4th gen
+    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+gen(?:eration)?\b', t)
+    if m:
+        return int(m.group(1))
+
+    # bare 'gen2'
+    m = re.search(r'\bgen\s*([ivx]+|\d{1,2})\b', t)
+    if m:
+        tok = m.group(1)
+        return int(tok) if tok.isdigit() else _roman_to_int(tok)
+
+    return None
+
 def canonical_gen_label(g: Optional[str]) -> str:
     """
     Map any generation label to a numeric identity like 'gen2'.
-    Handles forms like:
-      - '2nd gen', 'gen 2', 'generation 2'
-      - 'mk2', 'mk ii', 'mark 2'
-      - 'second generation', 'iii generation'
-      - with/without year decorations like '(2017–2023)', 'since 2017'
-    If no number can be extracted, falls back to a cleaned label (years removed).
+    Removes year/range decorations and unifies different naming styles.
     """
     if not g:
         return ""
-
     s = normalize_generation(g)
-
-    # Remove common year/range decorations first (incl. various dashes)
+    # strip year decorations / ranges
     s = re.sub(r'\b(?:since|from)\s*20\d{2}\b', '', s)
     s = re.sub(r'\b20\d{2}\s*(?:[–-]\s*20\d{2})?\b', '', s)
     s = s.replace('—', '-').replace('–', '-').strip()
@@ -92,63 +125,7 @@ def canonical_gen_label(g: Optional[str]) -> str:
     n = _extract_gen_number(s)
     if n:
         return f"gen{n}"
-
-    # Fallback: cleaned (year-stripped) text, so at least consistent if no number present
     return s.strip()
-
-_ROMAN = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
-_ORD  = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,
-         "seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
-
-def _roman_to_int(tok: str) -> Optional[int]:
-    return _ROMAN.get(tok.lower())
-
-def _extract_gen_number(s: str) -> Optional[int]:
-    """
-    Try several patterns to find a generation number:
-      mk/mark + roman/number, gen/generation + roman/number, ordinal words, '2nd gen' etc.
-    Returns an int or None.
-    """
-    t = s.lower()
-
-    # 1) mk / mark N
-    m = re.search(r'\b(?:mk|mark)\s*([ivx]+|\d{1,2})\b', t)
-    if m:
-        tok = m.group(1)
-        if tok.isdigit():
-            return int(tok)
-        r = _roman_to_int(tok)
-        if r: return r
-
-    # 2) gen / generation N
-    m = re.search(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx]+|\d{1,2})\b', t)
-    if m:
-        tok = m.group(1)
-        if tok.isdigit():
-            return int(tok)
-        r = _roman_to_int(tok)
-        if r: return r
-
-    # 3) ordinal word 'second generation'
-    m = re.search(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+gen(?:eration)?\b', t)
-    if m:
-        return _ORD.get(m.group(1))
-
-    # 4) 2nd/3rd/4th gen
-    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+gen(?:eration)?\b', t)
-    if m:
-        return int(m.group(1))
-
-    # 5) bare 'gen2' pattern
-    m = re.search(r'\bgen\s*([ivx]+|\d{1,2})\b', t)
-    if m:
-        tok = m.group(1)
-        if tok.isdigit():
-            return int(tok)
-        r = _roman_to_int(tok)
-        if r: return r
-
-    return None
 
 # ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
@@ -227,19 +204,16 @@ def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: 
 
     def digit_tokens(s: str) -> set[str]:
         toks = s.split()
-        # tokens that are either pure digits or letter+digits (e.g., 'q5', 'x1')
         return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
 
     target_digits = digit_tokens(key)
     filtered = all_keys
 
-    # if we have digit tokens, require exact equality of that set
     if target_digits:
         same = [k for k in all_keys if digit_tokens(k) == target_digits]
         if same:
             filtered = same
 
-    # high-confidence fuzzy
     best, best_r = None, -1.0
     for cand in filtered:
         r = difflib.SequenceMatcher(None, key, cand).ratio()
@@ -247,7 +221,6 @@ def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: 
             best, best_r = cand, r
     if best and best_r >= 0.88:
         return best
-
     return None
 
 def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
@@ -299,17 +272,26 @@ def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
             for _, v in box.items():
                 if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
+        # FIXED: quoting inside f-string
         add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
     return blobs
 
 def build_generation_aliases(gen: str) -> List[str]:
     g = (gen or "").strip()
     if not g: return []
-    gnorm = normalize_generation(g)
     out = {g}
-    if gnorm.startswith("mk"):
-        n = gnorm[2:]
-        out.update({f"mk{n}", f"mk {n}", f"mark {n}", f"{n}th generation"})
+    can = canonical_gen_label(g)  # e.g., 'gen2'
+    m = re.match(r'gen(\d+)$', can)
+    if m:
+        n = int(m.group(1))
+        out.update({
+            f"mk{n}", f"mk {n}", f"mark {n}",
+            f"{n}th generation", f"{n} gen", f"gen {n}"
+        })
+        ord_map = {1:"first",2:"second",3:"third",4:"fourth",5:"fifth",6:"sixth",
+                   7:"seventh",8:"eighth",9:"ninth",10:"tenth",11:"eleventh",12:"twelfth"}
+        if n in ord_map:
+            out.add(f"{ord_map[n]} generation")
     return sorted(a for a in out if a)
 
 def best_number_for_region(blobs: List[Dict[str,str]], region: str, model: str, gen: str, year: int) -> Optional[Dict[str,Any]]:
@@ -348,6 +330,16 @@ def best_number_for_region(blobs: List[Dict[str,str]], region: str, model: str, 
             best = {"value": candidate, "url": b.get("url",""), "snippet": b.get("text",""), "is_model_level": is_model and not is_country_only and not is_monthly}
     return best
 
+def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
+    blobs_all: List[Dict[str,str]] = []
+    for q in build_search_queries(model, gen, year):
+        res = serp_search(q)
+        if "error" not in res: blobs_all.extend(pull_text_blobs(res))
+        time.sleep(0.35)
+    eu = best_number_for_region(blobs_all, "europe", model, gen, year)
+    w  = best_number_for_region(blobs_all, "world",  model, gen, year)
+    return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w}
+
 def build_search_queries(model: str, gen: str, year: int) -> List[str]:
     gen_alias = " OR ".join(f'"{a}"' for a in build_generation_aliases(gen)) if gen else ""
     base = [
@@ -364,16 +356,6 @@ def build_search_queries(model: str, gen: str, year: int) -> List[str]:
         f'site:marklines.com "{model}" {year} sales',
     ]
     return base + preferred
-
-def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
-    blobs_all: List[Dict[str,str]] = []
-    for q in build_search_queries(model, gen, year):
-        res = serp_search(q)
-        if "error" not in res: blobs_all.extend(pull_text_blobs(res))
-        time.sleep(0.35)
-    eu = best_number_for_region(blobs_all, "europe", model, gen, year)
-    w  = best_number_for_region(blobs_all, "world",  model, gen, year)
-    return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w}
 
 # ------------------ Local seeds/history -------------
 def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int,int]) -> Optional[str]:
@@ -409,9 +391,13 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
     def _hist(db, units_field):
         hist = []
         for y, rec in db.get(mk, {}).items():
-            if window and not (window[0] <= y <= window[1]): continue
-            if canonical_gen_label(rec.get("generation")) in accepted:
-                hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
+            if window and not (window[0] <= y <= window[1]): 
+                continue
+            g = rec.get("generation")
+            # Accept unlabeled rows inside the computed window
+            if g and canonical_gen_label(g) not in accepted:
+                continue
+            hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
         return sorted(hist, key=lambda r: r["year"])
 
     eu_hist = _hist(db_eu, "units_europe"); w_hist = _hist(db_world, "units_world")
@@ -428,39 +414,109 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
                 disp = db[mk][sorted(db[mk].keys())[-1]]["model"]; break
     out["display_model"] = disp
 
-    # seeds at start year (only if same generation canonically)
+    # seeds at start year (accept unlabeled rows inside window)
     if mk in db_eu and start_year in db_eu[mk]:
-        if canonical_gen_label(db_eu[mk][start_year].get("generation")) in accepted:
+        g = db_eu[mk][start_year].get("generation")
+        if (not g) or (canonical_gen_label(g) in accepted):
             out["eu"] = {"value": int(db_eu[mk][start_year]["units_europe"]), "source": "local-db", "is_model_level": True}
     if mk in db_world and start_year in db_world[mk]:
-        if canonical_gen_label(db_world[mk][start_year].get("generation")) in accepted:
+        g = db_world[mk][start_year].get("generation")
+        if (not g) or (canonical_gen_label(g) in accepted):
             out["world"] = {"value": int(db_world[mk][start_year]["units_world"]), "source": "local-db", "is_model_level": True}
     return out
 
 # ------------------ Generation detection ------------
+def _combined_rec(db_eu, db_world, mk, y):
+    """Return a combined record (if any) for model key mk at year y from EU/World DBs."""
+    rec_eu = db_eu.get(mk, {}).get(y)
+    rec_w  = db_world.get(mk, {}).get(y)
+    if rec_eu and rec_w:
+        if rec_eu.get("generation"): return rec_eu
+        if rec_w.get("generation"):  return rec_w
+        return rec_eu
+    return rec_eu or rec_w
+
+def _expand_window_by_contiguity(db_eu, db_world, mk, pivot_year, det_can):
+    """
+    Starting from pivot_year (where we saw this generation), walk backward/forward
+    across years where the model exists and the generation is either:
+      - same canonical label (== det_can), or
+      - missing/empty (treated as same-gen),
+    stopping when we hit a conflicting labeled generation.
+    """
+    years_all = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
+    if not years_all:
+        return (pivot_year, pivot_year)
+
+    # Backward
+    lo = pivot_year
+    y = pivot_year - 1
+    while y in years_all:
+        rec = _combined_rec(db_eu, db_world, mk, y)
+        if not rec: break
+        g = rec.get("generation")
+        if g:
+            can = canonical_gen_label(g)
+            if can == det_can:
+                lo = y
+            else:
+                break
+        else:
+            lo = y
+        y -= 1
+
+    # Forward
+    hi = pivot_year
+    y = pivot_year + 1
+    while y in years_all:
+        rec = _combined_rec(db_eu, db_world, mk, y)
+        if not rec: break
+        g = rec.get("generation")
+        if g:
+            can = canonical_gen_label(g)
+            if can == det_can:
+                hi = y
+            else:
+                break
+        else:
+            hi = y
+        y += 1
+
+    return (lo, hi)
+
 def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
     Generation detection (LOCAL FIRST; ICOR ignored).
     Returns 4-tuple: (gen_label: str, window:(start,end), basis: str, note: str)
 
-    IMPORTANT CHANGE:
-    - We DO NOT clip the detected window to the user's year anymore.
-      We return the full window (min..max) so we can start at the launch year.
-    - We match generation rows using CANONICAL labels across years.
+    We DO NOT clip the detected window to the user's year.
+    We expand across unlabeled contiguous years to avoid window collapse.
     """
     def _window_from_local_for_label(gen_label: str):
         det_can = canonical_gen_label(gen_label)
         mk = find_best_model_key(db_eu, db_world, user_model=model)
-        years = []
+        years_same = []
+        years_labeled = []
         if mk:
             for db in (db_eu, db_world):
                 for y, rec in db.get(mk, {}).items():
-                    rec_can = canonical_gen_label(rec.get("generation"))
-                    if rec_can and rec_can == det_can:
-                        years.append(y)
-        return (min(years), max(years)) if years else None
+                    g = rec.get("generation")
+                    if g:
+                        years_labeled.append(y)
+                        if canonical_gen_label(g) == det_can:
+                            years_same.append(y)
 
-    def _clip_to_horizon(window):  # clip only to model horizon, not to user_year
+        if years_same:
+            pivot = min(years_same)  # earliest labeled occurrence
+            lo, hi = _expand_window_by_contiguity(db_eu, db_world, mk, pivot, det_can)
+            return (lo, hi)
+        if years_labeled:
+            pivot = min(years_labeled, key=lambda y: abs(y - user_year))
+            lo, hi = _expand_window_by_contiguity(db_eu, db_world, mk, pivot, det_can)
+            return (lo, hi)
+        return None
+
+    def _clip_to_horizon(window):
         gs, ge = window
         return (max(1990, gs), min(ge, DEADLINE_YEAR))
 
@@ -470,12 +526,11 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         win_local = _window_from_local_for_label(gen_label)
         if win_local:
             return gen_label, _clip_to_horizon(win_local), "user_input", "Generation provided by user."
-        # Fallback window if not known locally
         return gen_label, (max(1990, user_year-1), min(user_year+7, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
 
     mk = find_best_model_key(db_eu, db_world, user_model=model)
 
-    # 1) Local Top100 at/near user_year (<=, then >= within small gap)
+    # 1) Local Top100 at/near user_year
     if mk:
         # exact at user_year
         for db in (db_eu, db_world):
@@ -514,7 +569,7 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         window = win_serp or (user_year, min(user_year+8, DEADLINE_YEAR))
         return web_gen, _clip_to_horizon(window), "web_serp", "Detected from web SERP."
 
-    # 3) Fallback default (8 years around user's intent)
+    # 3) Fallback default
     gen_label = "GEN"
     return gen_label, (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
 
@@ -533,7 +588,8 @@ def prior_generation_avg_eu(db_eu, user_model, detected_gen: str, start_year: in
     for y in range(start_year-1, max(1990, start_year - lookback_years) - 1, -1):
         rec = db_eu.get(mk, {}).get(y)
         if not rec: continue
-        if canonical_gen_label(rec.get("generation")) == det_can:  # same-gen -> skip
+        g = rec.get("generation")
+        if g and canonical_gen_label(g) == det_can:  # same-gen -> skip
             continue
         units = rec.get("units_europe")
         if isinstance(units, int): vals.append(units)
@@ -988,7 +1044,7 @@ def main():
     icor_map = parse_icor_supported_txt(icor_txt_path)
     icor_df = None
 
-    # Gen detect (LOCAL FIRST) — returns full window via CANONICAL label matching
+    # Gen detect (LOCAL FIRST) — expanded across unlabeled contiguous years
     gen_label, gen_window, gen_basis, autodetect_note = autodetect_generation(
         db_eu, db_world, icor_map, user["car_model"], user["start_year"], user["generation"]
     )
