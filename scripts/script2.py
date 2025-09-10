@@ -859,6 +859,12 @@ def main():
     safe_gen = (normalize_generation(seed.get("generation","GEN")) or "GEN").replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = f"sales_estimates_{safe_model}_{safe_gen}_{launch_year}_{MODEL_NAME}_{timestamp}"
+    
+    # Actually save files first
+    csv_path = save_csv(data, base)
+    xlsx_path = save_excel(data, fleet, seed, constraints, icor_status, base)
+    
+    # Then compute absolute paths
     csv_abs  = os.path.abspath(csv_path)
     xlsx_abs = os.path.abspath(xlsx_path)
     
@@ -866,13 +872,14 @@ def main():
     print(f"\nSaved CSV: {os.path.basename(csv_path)}")
     print(f"Saved Excel: {os.path.basename(xlsx_path)}")
     
-    # NEW: also print absolute paths
+    # Also print absolute paths
     print(f"Saved CSV (abs): {csv_abs}")
     print(f"Saved Excel (abs): {xlsx_abs}")
     
     print(f"\nNotes: {plaus.get('source_note','')}")
     print("- Window-first: local Top100 used where available; web seeds only for gaps.")
     print(f"- User requested view-from year: {user['start_year']}; modeled from LAUNCH year: {launch_year}.")
+
 
 
 if __name__ == "__main__":
