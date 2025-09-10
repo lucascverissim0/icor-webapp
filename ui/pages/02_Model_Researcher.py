@@ -56,6 +56,7 @@ st.markdown(
       .badge-warn { border-color:#f59e0b; }
       .badge-soft { border-color:#52525b; }
       .k { color:#A1A1AA; }
+      .stDownloadButton > button { width: 100%; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -105,9 +106,18 @@ def ensure_auth():
 ensure_auth()
 
 # === POSTHOG (tracking) ===
+def _safe_get(dict_like, dotted, default=None):
+    try:
+        cur = dict_like
+        for part in dotted.split("."):
+            cur = cur[part]
+        return cur
+    except Exception:
+        return default
+
 try:
-    posthog.project_api_key = st.secrets.posthog.api_key
-    posthog.host = st.secrets.posthog.host
+    posthog.project_api_key = _safe_get(st.secrets, "posthog.api_key")
+    posthog.host = _safe_get(st.secrets, "posthog.host", "https://app.posthog.com")
 except Exception:
     pass
 
@@ -278,15 +288,6 @@ def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict,
         unsafe_allow_html=True,
     )
 
-def _safe_get(dict_like, dotted, default=None):
-    try:
-        cur = dict_like
-        for part in dotted.split("."):
-            cur = cur[part]
-        return cur
-    except Exception:
-        return default
-
 def run_script2_with_env(input_text: str):
     """
     Launch Script 2 as a child process, piping stdin with the 3 lines:
@@ -313,7 +314,7 @@ def run_script2_with_env(input_text: str):
     )
 
     try:
-        out, _ = proc.communicate(input_text, timeout=240)  # 4-minute guard
+        out, _ = proc.communicate(input_text, timeout=420)  # generous guard
         code = proc.returncode
     except subprocess.TimeoutExpired:
         proc.kill()
@@ -337,11 +338,11 @@ def extract_saved_paths_from_stdout(out: str) -> tuple[str | None, str | None]:
 with st.form("gen_estimator_form", clear_on_submit=False):
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        model = st.text_input("Car model", placeholder="Ford Fiesta")
+        model = st.text_input("Car model", placeholder="Ford Transit Custom")
     with col2:
-        generation = st.text_input("Generation (optional)", placeholder="Mk6")
+        generation = st.text_input("Generation (optional)", placeholder="Mk2")
     with col3:
-        start_year = st.number_input("Start year", min_value=1990, max_value=2035, value=2013, step=1)
+        start_year = st.number_input("Start year (view from)", min_value=1990, max_value=2035, value=2023, step=1)
 
     submitted = st.form_submit_button("Run Generation Estimator", type="primary")
 
@@ -355,16 +356,17 @@ if submitted:
 
         # Surface common setup issues
         if "OPENAI_API_KEY not set" in (out or ""):
-            st.warning("OPENAI_API_KEY isn’t configured for Script 2. Set it in `st.secrets` or env.")
+            st.warning("OPENAI_API_KEY isn’t configured for Script 2. Set it in `st.secrets` or environment.")
         if "SERPAPI_KEY not set" in (out or ""):
-            st.info("SERPAPI_KEY isn’t set; web seeding will be disabled (local-only).")
+            st.info("SERPAPI_KEY isn’t set; web seeding will be limited to local data.")
+
+        # Always show the last lines for debugging context
+        tail = "\n".join((out or "").splitlines()[-50:])
+        with st.expander("Run log", expanded=False):
+            st.code(tail)
 
         if code != 0:
-            tail = "\n".join((out or "").splitlines()[-25:])
-            st.error("Script 2 failed. See brief diagnostic below.")
-            if tail.strip():
-                with st.expander("Diagnostic (last lines)"):
-                    st.code(tail)
+            st.error("Script 2 failed. See diagnostic above.")
             track("run_script2", {
                 "model": model,
                 "generation": generation or "",
@@ -373,44 +375,49 @@ if submitted:
                 "timestamp": int(time.time()),
             })
         else:
-            # Prefer exact path from stdout
+            # Prefer exact path from stdout; fall back to latest-in-data if missing.
             csv_path, xlsx_from_stdout = extract_saved_paths_from_stdout(out)
-            
+
             if not xlsx_from_stdout:
                 st.error("The estimator finished but didn’t save an Excel file. "
                          "Most likely the OpenAI step failed or returned invalid JSON. "
-                         "See the Run log below.")
-                # Still show the run log for debugging
-                tail = "\n".join((out or "").splitlines()[-50:])
-                with st.expander("Run log", expanded=False):
-                    st.code(tail)
+                         "Check the Run log above.")
+                # Try a best-effort fallback anyway
+                xlsx = load_latest_output()
             else:
-                xlsx = xlsx_from_stdout if os.path.exists(xlsx_from_stdout) else load_latest_output()
-            
-                # Always show last lines for debugging
-                tail = "\n".join((out or "").splitlines()[-25:])
-                with st.expander("Run log", expanded=False):
-                    st.code(tail)
-            
-                if not xlsx or not os.path.exists(xlsx):
-                    st.warning("No output Excel found. The estimator ran but didn’t produce a file (or the path wasn’t accessible).")
-                else:
-                    confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
-                    header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year, basis=basis)
+                xlsx = xlsx_from_stdout
 
+            if not xlsx or not os.path.exists(xlsx):
+                st.warning("No output Excel found. The estimator ran but didn’t produce a file (or the path wasn’t accessible).")
+            else:
+                # Badges (safe if Summary missing: function already guards)
+                confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
+                header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year, basis=basis)
+
+                # Try to load Estimates; if it fails, show a clear error instead of blank page
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
+                except Exception as e:
+                    st.error(f"Could not read the 'Estimates' sheet from:\n{xlsx}\n\nError: {e}")
+                    est = None
+
+                if est is not None and not est.empty:
+                    # Localize boolean columns for nicer display
                     est = localize_bools(est, prefer_cols=["ICOR_Supported", "Gen_Active"])
                     st.dataframe(est, use_container_width=True)
 
-                    st.download_button(
-                        "Download estimates Excel",
-                        data=open(xlsx, "rb").read(),
-                        file_name=os.path.basename(xlsx),
-                        use_container_width=True,
-                    )
-                except Exception as e:
-                    st.error(f"Could not read Estimates sheet: {e}")
+                    # Download button
+                    try:
+                        st.download_button(
+                            "Download estimates Excel",
+                            data=open(xlsx, "rb").read(),
+                            file_name=os.path.basename(xlsx),
+                            use_container_width=True,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    st.warning("The workbook was created, but the 'Estimates' sheet appears to be missing or empty.")
 
                 track("run_script2", {
                     "model": model,
