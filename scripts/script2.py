@@ -234,7 +234,7 @@ def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
             for _, v in box.items():
                 if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        add("organic", f"{item.get("title","")}\n{item.get("snippet","")}".strip(), item.get("link",""))
+        add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
     return blobs
 
 def build_generation_aliases(gen: str) -> List[str]:
