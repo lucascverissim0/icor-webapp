@@ -205,7 +205,7 @@
     "units_sold": 336331
   },
   {
-    "model": "Ford Transit (global)",
+    "model": "Ford Transit Custom",
     "generation": "V362",
     "units_sold": 325917
   },
