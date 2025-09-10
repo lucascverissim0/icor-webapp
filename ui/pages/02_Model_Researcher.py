@@ -375,24 +375,59 @@ if submitted:
                 "timestamp": int(time.time()),
             })
         else:
+            # --- Prefer exact path from stdout; fall back to latest-in-data if missing.
             csv_path, xlsx_from_stdout = extract_saved_paths_from_stdout(out)
 
-            if not xlsx_from_stdout:
-                st.error("The estimator finished but didn’t save an Excel file. "
-                         "Most likely the OpenAI step failed or returned invalid JSON. "
-                         "Check the Run log above.")
-                xlsx = load_latest_output()
-            else:
-                # NEW: resolve relative paths against DATA_DIR (Script 2's cwd)
-                xlsx = xlsx_from_stdout
-                if xlsx and not os.path.isabs(xlsx):
-                    xlsx = os.path.join(DATA_DIR, xlsx)
-                if csv_path and not os.path.isabs(csv_path):
-                    csv_path = os.path.join(DATA_DIR, csv_path)
+            # NEW: also parse absolute paths if Script 2 printed them
+            csv_abs = None
+            xlsx_abs = None
+            for line in (out or "").splitlines():
+                line = line.strip()
+                if line.startswith("Saved CSV (abs):"):
+                    csv_abs = line.split("Saved CSV (abs):", 1)[1].strip()
+                elif line.startswith("Saved Excel (abs):"):
+                    xlsx_abs = line.split("Saved Excel (abs):", 1)[1].strip()
 
+            # Collect candidates in order of preference
+            candidates = []
 
-            if not xlsx or not os.path.exists(xlsx):
-                st.warning("No output Excel found. The estimator ran but didn’t produce a file (or the path wasn’t accessible).")
+            # 1) absolute path that Script 2 printed
+            if xlsx_abs:
+                candidates.append(xlsx_abs)
+
+            # 2) relative filename from 'Saved Excel:' line (resolve against DATA_DIR)
+            if xlsx_from_stdout:
+                p = xlsx_from_stdout
+                if not os.path.isabs(p):
+                    p = os.path.join(DATA_DIR, p)
+                candidates.append(p)
+
+            # 3) last resort: newest sales_estimates_*.xlsx in DATA_DIR
+            fallback = load_latest_output()
+            if fallback:
+                candidates.append(fallback)
+
+            # Pick the first that exists
+            xlsx = next((p for p in candidates if p and os.path.exists(p)), None)
+
+            # Extra diagnostics: list DATA_DIR contents so it's obvious what's there
+            with st.expander("Data folder contents", expanded=False):
+                st.write("DATA_DIR:", DATA_DIR)
+                try:
+                    files = sorted(
+                        glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")),
+                        key=os.path.getmtime,
+                        reverse=True,
+                    )
+                    if not files:
+                        st.write("No sales_estimates_*.xlsx files found.")
+                    else:
+                        st.write("\n".join(os.path.basename(f) for f in files[:15]))
+                except Exception as e:
+                    st.write(f"(Could not list files: {e})")
+
+            if not xlsx:
+                st.error("No output Excel found. The estimator ran but the file wasn’t found at the expected paths.")
             else:
                 # Badges (safe if Summary missing: function already guards)
                 confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
@@ -430,3 +465,4 @@ if submitted:
                     "status": "success",
                     "timestamp": int(time.time()),
                 })
+
