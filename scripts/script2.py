@@ -445,8 +445,8 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
         "generation_window": {"start": start_year, "end": end_year},
         "generation_window_basis": None,
         "year": start_year,
-        "europe": None,
-        "world": None,
+        "europe": None,   # may become a dict below
+        "world": None,    # may become a dict below
         "history_europe": eu_hist,
         "history_world": w_hist,
         "notes": "Window-first seeding: use local Top100 within window; web only for gaps.",
@@ -454,41 +454,66 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
     constraints = {"world": {}, "europe": {}, "zero_years": [y for y in range(end_year+1, DEADLINE_YEAR+1)]}
     plaus = {"flag": False, "reason": "", "source_note": ""}
 
-    eu_val = None; w_val = None
+    def _ensure_branch_dict(branch: str):
+        """Make sure seed[branch] is a dict before assigning keys into it."""
+        if not isinstance(seed.get(branch), dict):
+            seed[branch] = {}
+
+    eu_val = None
+    w_val = None
+
+    # ---- Prefer local exact seeds at launch if present
     if mk:
         if mk in db_eu and start_year in db_eu[mk] and isinstance(db_eu[mk][start_year].get("units_europe"), int):
             eu_val = int(db_eu[mk][start_year]["units_europe"])
-            seed["europe"] = {"value": eu_val, "source": "local-db", "is_model_level": True}
-            constraints["europe"]["exact"] = {start_year: eu_val}
+            _ensure_branch_dict("europe")
+            seed["europe"].update({"value": eu_val, "source": "local-db", "is_model_level": True})
+            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
+
         if mk in db_world and start_year in db_world[mk] and isinstance(db_world[mk][start_year].get("units_world"), int):
             w_val = int(db_world[mk][start_year]["units_world"])
-            seed["world"] = {"value": w_val, "source": "local-db", "is_model_level": True}
-            constraints["world"]["exact"] = {start_year: min(w_val, WORLD_MAX_CAP)}
-
-    # Web seed strictly for start year if local missing
-    if eu_val is None or w_val is None:
-        web = serp_seed(display_model, "", start_year)  # gen label not required
-        if eu_val is None and web.get("europe"):
-            eu_val = int(web["europe"]["value"])
-            seed.setdefault("europe", {"is_model_level": bool(web["europe"].get("is_model_level"))})
-            seed["europe"]["value"] = eu_val; seed["europe"]["source"] = "web-serp"
-            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
-            plaus["source_note"] = "EU seed derived from web (window-first)."
-        if w_val is None and web.get("world"):
-            w_val = int(web["world"]["value"])
-            seed.setdefault("world", {"is_model_level": bool(web["world"].get("is_model_level"))})
-            seed["world"]["value"] = w_val; seed["world"]["source"] = "web-serp"
+            _ensure_branch_dict("world")
+            seed["world"].update({"value": w_val, "source": "local-db", "is_model_level": True})
             constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(w_val, WORLD_MAX_CAP)
 
-    # EU→World prior if world missing but EU exists
+    # ---- If missing, try web seeding strictly for start year
+    if eu_val is None or w_val is None:
+        web = serp_seed(display_model, "", start_year)  # gen label not required
+
+        if eu_val is None and web.get("europe"):
+            eu_val = int(web["europe"]["value"])
+            _ensure_branch_dict("europe")
+            seed["europe"].update({
+                "value": eu_val,
+                "source": "web-serp",
+                "is_model_level": bool(web["europe"].get("is_model_level"))
+            })
+            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
+            plaus["source_note"] = "EU seed derived from web (window-first)."
+
+        if w_val is None and web.get("world"):
+            w_val = int(web["world"]["value"])
+            _ensure_branch_dict("world")
+            seed["world"].update({
+                "value": w_val,
+                "source": "web-serp",
+                "is_model_level": bool(web["world"].get("is_model_level"))
+            })
+            constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(w_val, WORLD_MAX_CAP)
+
+    # ---- If World still missing but EU exists → EU→World range prior
     if w_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, mk, start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
         world_max = int(min(WORLD_MAX_CAP, math.floor(eu_val / max(lo_share, 1e-6))))
         constraints["world"]["range"] = {start_year: (world_min, world_max)}
-        seed["eu_share_prior"] = {"low": lo_share, "high": hi_share,
-                                  "rank": diag["rank"], "presence_years": diag["presence_years"]}
+        seed["eu_share_prior"] = {
+            "low": lo_share, "high": hi_share,
+            "rank": diag["rank"], "presence_years": diag["presence_years"]
+        }
+
     return seed, constraints, plaus
+
 
 # ------------------ OpenAI call --------------------
 def build_messages(car_model: str, target_gen_label: str, launch_year: int, seed: dict, constraints: dict) -> List[Dict[str,str]]:
