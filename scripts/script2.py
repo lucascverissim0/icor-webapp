@@ -66,24 +66,89 @@ def normalize_generation(g: Optional[str]) -> str:
     g = re.sub(r"\s+", " ", g).strip()
     return g
 
+# --- drop-in replacement ---
 def canonical_gen_label(g: Optional[str]) -> str:
     """
-    Reduce a generation label to its core identity (e.g., 'mk2', '2nd gen'),
-    dropping any year/range like '2017', '2017–2023', 'since 2017', etc.
-    This is used for ALL generation equality checks across years.
+    Map any generation label to a numeric identity like 'gen2'.
+    Handles forms like:
+      - '2nd gen', 'gen 2', 'generation 2'
+      - 'mk2', 'mk ii', 'mark 2'
+      - 'second generation', 'iii generation'
+      - with/without year decorations like '(2017–2023)', 'since 2017'
+    If no number can be extracted, falls back to a cleaned label (years removed).
     """
     if not g:
         return ""
-    g = normalize_generation(g)
-    # Remove 'since/from 20xx'
-    g = re.sub(r'\b(?:since|from)\s*20\d{2}\b', '', g)
-    # Remove standalone year or year ranges anywhere
-    g = re.sub(r'\b20\d{2}\s*(?:[–-]\s*20\d{2})?\b', '', g)
-    # Remove stray trailing dashes
-    g = re.sub(r'[–-]+$', '', g).strip()
-    # Collapse spaces
-    g = re.sub(r'\s{2,}', ' ', g).strip()
-    return g
+
+    s = normalize_generation(g)
+
+    # Remove common year/range decorations first (incl. various dashes)
+    s = re.sub(r'\b(?:since|from)\s*20\d{2}\b', '', s)
+    s = re.sub(r'\b20\d{2}\s*(?:[–-]\s*20\d{2})?\b', '', s)
+    s = s.replace('—', '-').replace('–', '-').strip()
+    s = re.sub(r'[–-]+$', '', s)
+    s = re.sub(r'\s{2,}', ' ', s)
+
+    n = _extract_gen_number(s)
+    if n:
+        return f"gen{n}"
+
+    # Fallback: cleaned (year-stripped) text, so at least consistent if no number present
+    return s.strip()
+
+_ROMAN = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
+_ORD  = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,
+         "seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
+
+def _roman_to_int(tok: str) -> Optional[int]:
+    return _ROMAN.get(tok.lower())
+
+def _extract_gen_number(s: str) -> Optional[int]:
+    """
+    Try several patterns to find a generation number:
+      mk/mark + roman/number, gen/generation + roman/number, ordinal words, '2nd gen' etc.
+    Returns an int or None.
+    """
+    t = s.lower()
+
+    # 1) mk / mark N
+    m = re.search(r'\b(?:mk|mark)\s*([ivx]+|\d{1,2})\b', t)
+    if m:
+        tok = m.group(1)
+        if tok.isdigit():
+            return int(tok)
+        r = _roman_to_int(tok)
+        if r: return r
+
+    # 2) gen / generation N
+    m = re.search(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx]+|\d{1,2})\b', t)
+    if m:
+        tok = m.group(1)
+        if tok.isdigit():
+            return int(tok)
+        r = _roman_to_int(tok)
+        if r: return r
+
+    # 3) ordinal word 'second generation'
+    m = re.search(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+gen(?:eration)?\b', t)
+    if m:
+        return _ORD.get(m.group(1))
+
+    # 4) 2nd/3rd/4th gen
+    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+gen(?:eration)?\b', t)
+    if m:
+        return int(m.group(1))
+
+    # 5) bare 'gen2' pattern
+    m = re.search(r'\bgen\s*([ivx]+|\d{1,2})\b', t)
+    if m:
+        tok = m.group(1)
+        if tok.isdigit():
+            return int(tok)
+        r = _roman_to_int(tok)
+        if r: return r
+
+    return None
 
 # ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
