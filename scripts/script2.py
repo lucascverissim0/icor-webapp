@@ -10,7 +10,7 @@ Key behaviors:
   * Else default to an 8-year window starting at the user's year
 - Use local Top100 data ONLY within that window; web seeds fill gaps (EU/World) at the launch year.
 - Guardrails:
-  * EU ≤ World
+  * Europe ≤ World
   * Zero outside generation window
   * EU→World range prior when World seed is missing
 - Outputs: CSV + Excel with Estimates, Fleet_Repairs, Summary, Seeds_Constraints
@@ -364,7 +364,7 @@ def detect_generation_window_via_web(model: str, year: int) -> Optional[Tuple[in
             best_score, best = score, win
     return best
 
-# ------------------ Local-first, window-first  -----
+# ------------------ Window-first orchestration -----
 def detect_window_then_collect_local(db_eu, db_world, model: str, user_year: int):
     """
     1) Pick generation window that is active at user_year.
@@ -455,14 +455,13 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
     plaus = {"flag": False, "reason": "", "source_note": ""}
 
     def _ensure_branch_dict(branch: str):
-        """Make sure seed[branch] is a dict before assigning keys into it."""
         if not isinstance(seed.get(branch), dict):
             seed[branch] = {}
 
     eu_val = None
     w_val = None
 
-    # ---- Prefer local exact seeds at launch if present
+    # Prefer local exact seeds at launch if present
     if mk:
         if mk in db_eu and start_year in db_eu[mk] and isinstance(db_eu[mk][start_year].get("units_europe"), int):
             eu_val = int(db_eu[mk][start_year]["units_europe"])
@@ -476,10 +475,9 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
             seed["world"].update({"value": w_val, "source": "local-db", "is_model_level": True})
             constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(w_val, WORLD_MAX_CAP)
 
-    # ---- If missing, try web seeding strictly for start year
+    # If missing, try web seeding strictly for start year
     if eu_val is None or w_val is None:
-        web = serp_seed(display_model, "", start_year)  # gen label not required
-
+        web = serp_seed(display_model, "", start_year)
         if eu_val is None and web.get("europe"):
             eu_val = int(web["europe"]["value"])
             _ensure_branch_dict("europe")
@@ -490,7 +488,6 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
             })
             constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
             plaus["source_note"] = "EU seed derived from web (window-first)."
-
         if w_val is None and web.get("world"):
             w_val = int(web["world"]["value"])
             _ensure_branch_dict("world")
@@ -501,7 +498,7 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
             })
             constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(w_val, WORLD_MAX_CAP)
 
-    # ---- If World still missing but EU exists → EU→World range prior
+    # If World still missing but EU exists → EU→World range prior
     if w_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, mk, start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
@@ -513,7 +510,6 @@ def build_constraints_from_window(window: Tuple[int,int], display_model: str,
         }
 
     return seed, constraints, plaus
-
 
 # ------------------ OpenAI call --------------------
 def build_messages(car_model: str, target_gen_label: str, launch_year: int, seed: dict, constraints: dict) -> List[Dict[str,str]]:
@@ -671,7 +667,6 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
     gen_win = seed.get("generation_window", {})
     gstart, gend = gen_win.get("start"), gen_win.get("end")
     estimates_merged["Gen_Active"] = estimates_merged["Year"].apply(lambda y: bool(gstart is not None and gend is not None and gstart <= y <= gend))
-    # ICOR fields retained for compatibility; plausibility attached in diag
     estimates_merged["ICOR_Supported"] = diag.get("supported_flag")
     estimates_merged["ICOR_Match_Type"] = diag.get("match_type")
 
@@ -686,7 +681,6 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
         "Start_Year": [data.get("start_year")],
         "End_Year": [data.get("end_year")],
         "Confidence": [data.get("confidence")],
-        # Plausibility summary
         "Plausibility_Flag": [bool(diag.get("plausibility", {}).get("flag"))],
         "Plausibility_Reason": [diag.get("plausibility", {}).get("reason","")],
         "Seed_Source_Note": [diag.get("plausibility", {}).get("source_note","")],
@@ -708,7 +702,7 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
         seeds_constraints.to_excel(writer, sheet_name="Seeds_Constraints", index=False)
     return xlsx
 
-# ------------------ ICOR support (unchanged) -------
+# ------------------ ICOR support -------------------
 def load_icor_catalog_csv_json(path: str) -> Optional[pd.DataFrame]:
     try:
         if path.lower().endswith(".csv"): return pd.read_csv(path)
@@ -844,10 +838,18 @@ def main():
             })
     data["yearly_estimates"] = sorted(data["yearly_estimates"], key=lambda r: r["year"])
     data["start_year"] = launch_year; data["end_year"] = DEADLINE_YEAR
+    data["model"] = display_model
 
-    # Fleet + ICOR support
+    # Fleet & ICOR
     fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
-    icor_status = check_icor_support(icor_map, icor_df, display_model, gen_label, launch_year)
+
+    # Load ICOR support map (optional; robust to missing file)
+    here = os.path.dirname(os.path.abspath(__file__))
+    icor_txt_path = os.path.join(os.getcwd(), "icor_supported_models.txt")
+    if not os.path.exists(icor_txt_path):
+        icor_txt_path = os.path.join(here, "icor_supported_models.txt")
+    icor_map = parse_icor_supported_txt(icor_txt_path) or {}
+    icor_status = check_icor_support(icor_map, None, display_model, seed.get("generation",""), launch_year)
     icor_status["plausibility"] = plaus
 
     # Save (relative to DATA_DIR/CWD)
@@ -868,17 +870,12 @@ def main():
     print_summary(data, seed, constraints, basis, icor_status, autodetect_note="")
     print(f"\nSaved CSV: {os.path.basename(csv_path)}")
     print(f"Saved Excel: {os.path.basename(xlsx_path)}")
-
-    # Also print absolute paths (for Streamlit to parse reliably)
     print(f"Saved CSV (abs): {csv_abs}")
     print(f"Saved Excel (abs): {xlsx_abs}")
 
     print(f"\nNotes: {plaus.get('source_note','')}")
     print("- Window-first: local Top100 used where available; web seeds only for gaps.")
     print(f"- User requested view-from year: {user['start_year']}; modeled from LAUNCH year: {launch_year}.")
-
-
-
 
 if __name__ == "__main__":
     main()
