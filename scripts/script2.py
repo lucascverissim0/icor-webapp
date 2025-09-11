@@ -11,7 +11,8 @@ This version adds:
 - Digit-aware strict model matching (Q5 will not match Q3).
 - Safer filenames (use the user's typed model).
 - Estimation starts at generation launch year (window start), not the user's year.
-- Canonical generation identity (mk ii / 2nd gen / second generation → 'gen2').
+- Canonical generation identity (mk ii / 2nd gen / second generation / II → 'gen2').
+- Slash/alternative handling ('XV / XVI' → {'gen15','gen16'}).
 - Contiguity expansion across unlabeled years to avoid collapsing the window.
 """
 
@@ -58,240 +59,121 @@ def normalize_name(s: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-def normalize_generation(g: Optional[str]) -> str:
-    if not g: return ""
-    g = str(g).lower()
-    g = re.sub(r"[\(\)\[\]{}]", " ", g)
-    g = re.sub(r"\bmk\s*", "mk", g)
+# --- Robust Generation Normalizers -----------------
+_ROMAN_MAP = {'I':1,'V':5,'X':10,'L':50,'C':100,'D':500,'M':1000}
+_ORD_WORDS = {
+    "first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,
+    "seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12,
+    "thirteenth":13,"fourteenth":14,"fifteenth":15,"sixteenth":16,
+    "seventeenth":17,"eighteenth":18,"nineteenth":19,"twentieth":20
+}
+
+def _roman_to_int_any(s: str) -> int | None:
+    if not s: return None
+    s = s.upper()
+    if not all(ch in _ROMAN_MAP for ch in s): return None
+    total, prev = 0, 0
+    for ch in reversed(s):
+        val = _ROMAN_MAP[ch]
+        if val < prev: total -= val
+        else: total += val; prev = val
+    return total if 0 < total <= 3999 else None
+
+def normalize_generation(s: str | None) -> str:
+    if not s: return ""
+    g = str(s)
+    g = re.sub(r"\((?:\s*(?:c\.\s*)?\d{3,4}(?:\s*[–\-\/]\s*(?:\d{2,4})?)?\s*)\)\s*$", "", g)
+    g = g.replace("—", "-").replace("–", "-").strip()
+    g = re.sub(r"[/|]", " / ", g)
+    g = re.sub(r"[\(\)\[\]\{\}]", " ", g)
+    g = re.sub(r"\bmk\s*", "mk", g, flags=re.I)
     g = re.sub(r"\s+", " ", g).strip()
     return g
 
-# --- Canonical generation identity ('genN') --------
-_ROMAN = {"i":1,"ii":2,"iii":3,"iv":4,"v":5,"vi":6,"vii":7,"viii":8,"ix":9,"x":10,"xi":11,"xii":12}
-_ORD  = {"first":1,"second":2,"third":3,"fourth":4,"fifth":5,"sixth":6,
-         "seventh":7,"eighth":8,"ninth":9,"tenth":10,"eleventh":11,"twelfth":12}
+_GEN_NUMBER_PATTERNS = [
+    re.compile(r"\b(?:mk|mark)\s*([ivxlcdm]+|\d{1,3})\b", re.I),
+    re.compile(r"\bgen(?:eration)?\s*(?:no\.?\s*)?([ivxlcdm]+|\d{1,3})\b", re.I),
+    re.compile(r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)\b(?:\s+gen(?:eration)?)?", re.I),
+    re.compile(r"\b(\d{1,3})(?:st|nd|rd|th)?\b(?:\s+gen(?:eration)?)?", re.I),
+    re.compile(r"\(\s*(\d{1,3})(?:st|nd|rd|th)\s*\)", re.I),
+]
 
-def _roman_to_int(tok: str) -> Optional[int]:
-    return _ROMAN.get(tok.lower())
+def _extract_all_gen_numbers_from_token(tok: str) -> list[int]:
+    nums: list[int] = []
+    for pat in _GEN_NUMBER_PATTERNS:
+        for m in pat.finditer(tok):
+            g = m.group(1) if m.groups() else None
+            if g is None:
+                word = m.group(0).strip().split()[0].lower()
+                n = _ORD_WORDS.get(word)
+                if n: nums.append(n)
+                continue
+            g = g.strip()
+            if g.isdigit():
+                nums.append(int(g))
+            else:
+                rn = _roman_to_int_any(g)
+                if rn: nums.append(rn)
+    return nums
 
-def _extract_gen_number(s: str) -> Optional[int]:
-    t = s.lower()
+def canonical_gen_set(label: str | None) -> set[str]:
+    if not label: return set()
+    s = normalize_generation(label)
+    parts = re.split(r"\s*[\/|,&]\s*", s)
+    nums: set[int] = set()
+    for part in parts:
+        stripped = part.strip()
+        if re.fullmatch(r"[ivxlcdm]+", stripped, flags=re.I):
+            rn = _roman_to_int_any(stripped)
+            if rn: nums.add(rn)
+        elif re.fullmatch(r"\d{1,3}", stripped):
+            nums.add(int(stripped))
+        for n in _extract_all_gen_numbers_from_token(stripped):
+            nums.add(n)
+    return {f"gen{n}" for n in sorted(nums)}
 
-    # mk/mark N
-    m = re.search(r'\b(?:mk|mark)\s*([ivx]+|\d{1,2})\b', t)
-    if m:
-        tok = m.group(1)
-        return int(tok) if tok.isdigit() else _roman_to_int(tok)
+def same_generation(a: str | None, b: str | None) -> bool:
+    if not a or not b: return False
+    A, B = canonical_gen_set(a), canonical_gen_set(b)
+    return bool(A and B and (A & B))
 
-    # gen/generation N
-    m = re.search(r'\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx]+|\d{1,2})\b', t)
-    if m:
-        tok = m.group(1)
-        return int(tok) if tok.isdigit() else _roman_to_int(tok)
+def canonical_gen_label(g: str | None) -> str:
+    S = canonical_gen_set(g)
+    if not S: return (normalize_generation(g) if g else "")
+    def _n(x: str) -> int: return int(x.replace("gen",""))
+    return sorted(S, key=_n)[0]
 
-    # ordinal word + generation
-    m = re.search(r'\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)\s+gen(?:eration)?\b', t)
-    if m:
-        return _ORD.get(m.group(1))
-
-    # 2nd/3rd/4th gen
-    m = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\s+gen(?:eration)?\b', t)
-    if m:
-        return int(m.group(1))
-
-    # bare 'gen2'
-    m = re.search(r'\bgen\s*([ivx]+|\d{1,2})\b', t)
-    if m:
-        tok = m.group(1)
-        return int(tok) if tok.isdigit() else _roman_to_int(tok)
-
-    return None
-
-def canonical_gen_label(g: Optional[str]) -> str:
-    """
-    Map any generation label to a numeric identity like 'gen2'.
-    Removes year/range decorations and unifies different naming styles.
-    """
-    if not g:
-        return ""
-    s = normalize_generation(g)
-    # strip year decorations / ranges
-    s = re.sub(r'\b(?:since|from)\s*20\d{2}\b', '', s)
-    s = re.sub(r'\b20\d{2}\s*(?:[–-]\s*20\d{2})?\b', '', s)
-    s = s.replace('—', '-').replace('–', '-').strip()
-    s = re.sub(r'[–-]+$', '', s)
-    s = re.sub(r'\s{2,}', ' ', s)
-
-    n = _extract_gen_number(s)
-    if n:
-        return f"gen{n}"
-    return s.strip()
-
-# ------------------ Local DB loaders ---------------
-def _load_json_array(path: str) -> Optional[List[dict]]:
-    try:
-        return json.load(open(path, "r", encoding="utf-8"))
-    except Exception:
-        return None
-
-def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
-    db: Dict[str, Dict[int, Dict[str, Any]]] = {}
-    for path in sorted(glob.glob(os.path.join(folder, "Top100_*.txt"))):
-        if "_World_" in os.path.basename(path): continue
-        m = re.search(r"(\d{4})", os.path.basename(path)); 
-        if not m: continue
-        year = int(m.group(1))
-        arr = _load_json_array(path)
-        if not arr: continue
-        for rec in arr:
-            model = rec.get("model") or rec.get("name") or ""
-            if not model: continue
-            gen   = rec.get("generation")
-            units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int): continue
-            key = normalize_name(model)
-            db.setdefault(key, {})
-            db[key][year] = {
-                "model": model, "generation": gen,
-                "units_europe": int(units),
-                "estimated": bool(rec.get("estimated", False)),
-            }
-    return db
-
-def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
-    db: Dict[str, Dict[int, Dict[str, Any]]] = {}
-    for path in sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt"))):
-        m = re.search(r"(\d{4})", os.path.basename(path))
-        if not m: continue
-        year = int(m.group(1))
-        arr = _load_json_array(path)
-        if not arr: continue
-        for rec in arr:
-            model = rec.get("model") or rec.get("name") or ""
-            if not model: continue
-            gen   = rec.get("generation")
-            units = rec.get("units_sold", rec.get("projected_units_2025"))
-            if not isinstance(units, int): continue
-            key = normalize_name(model)
-            db.setdefault(key, {})
-            db[key][year] = {
-                "model": model, "generation": gen,
-                "units_world": int(units),
-                "estimated": bool(rec.get("estimated", False)),
-            }
-    return db
-
-# ------------------ Safer model matching -----------
-def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
-    """
-    Safer, digit-aware matching:
-    - Try exact normalized key.
-    - Prefer candidates with identical digit-bearing tokens (e.g., 'q5' vs 'q3').
-    - Only accept a fuzzy match with high confidence (>=0.88).
-    - Otherwise return None.
-    """
-    key = normalize_name(user_model)
-
-    # exact
-    for db in dbs:
-        if key in db:
-            return key
-
-    # collect candidates
-    all_keys = sorted(set(k for db in dbs for k in db.keys()))
-    if not all_keys:
-        return None
-
-    def digit_tokens(s: str) -> set[str]:
-        toks = s.split()
-        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
-
-    target_digits = digit_tokens(key)
-    filtered = all_keys
-
-    if target_digits:
-        same = [k for k in all_keys if digit_tokens(k) == target_digits]
-        if same:
-            filtered = same
-
-    best, best_r = None, -1.0
-    for cand in filtered:
-        r = difflib.SequenceMatcher(None, key, cand).ratio()
-        if r > best_r:
-            best, best_r = cand, r
-    if best and best_r >= 0.88:
-        return best
-    return None
-
-def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
-    if not hist: return None
-    years = [h["year"] for h in hist]
-    return (min(years), max(years))
-
-# ------------------ Serp helpers -------------------
-SERP_ENDPOINT = "https://serpapi.com/search.json"
-SALES_WORDS = ["sales","sold","units","registrations","deliveries","volume","shipments"]
-CURRENCY_TOKENS = ["€","$","£"]
-def looks_like_price(text: str) -> bool:
-    t = text.lower()
-    return any(sym in text for sym in CURRENCY_TOKENS) or "msrp" in t or "price" in t
-
-def has_sales_context(text: str) -> bool:
-    t = text.lower()
-    return any(w in t for w in SALES_WORDS)
-
-def extract_candidate_numbers(text: str) -> List[int]:
-    NUM_PATTERN = re.compile(r"(?<![A-Z0-9])(\d{1,3}(?:[,\.\s]\d{3})+|\d{4,})(?![A-Z0-9])")
-    def _to_int(s: str):
-        s = re.sub(r"[,\.\s]", "", s)
-        return int(s) if s.isdigit() else None
-    out = []
-    for m in NUM_PATTERN.finditer(text or ""):
-        v = _to_int(m.group(1))
-        if v is not None: out.append(v)
-    return [n for n in out if 10 <= n <= 5_000_000]
-
-def serp_search(query: str) -> Dict[str, Any]:
-    params = {"engine":"google","q":query,"api_key":SERPAPI_KEY,"hl":"en","num":"10","safe":"active"}
-    try:
-        r = requests.get(SERP_ENDPOINT, params=params, timeout=SEARCH_TIMEOUT)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        return {"error": str(e), "query": query}
-
-def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
-    blobs = []
-    def add(source, text, url):
-        if not text: return
-        if looks_like_price(text): return
-        blobs.append({"source": source, "text": text, "url": url})
-    for key in ("answer_box","knowledge_graph"):
-        box = serp_json.get(key)
-        if isinstance(box, dict):
-            for _, v in box.items():
-                if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
-    for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        # FIXED: quoting inside f-string
-        add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
-    return blobs
-
-def build_generation_aliases(gen: str) -> List[str]:
-    g = (gen or "").strip()
-    if not g: return []
-    out = {g}
-    can = canonical_gen_label(g)  # e.g., 'gen2'
-    m = re.match(r'gen(\d+)$', can)
-    if m:
-        n = int(m.group(1))
+def build_generation_aliases(gen: str | None) -> List[str]:
+    if not gen: return []
+    can_set = canonical_gen_set(gen)
+    if not can_set:
+        return [gen]
+    out: set[str] = set()
+    ord_map = {1:"first",2:"second",3:"third",4:"fourth",5:"fifth",6:"sixth",
+               7:"seventh",8:"eighth",9:"ninth",10:"tenth",11:"eleventh",12:"twelfth",
+               13:"thirteenth",14:"fourteenth",15:"fifteenth",16:"sixteenth",
+               17:"seventeenth",18:"eighteenth",19:"nineteenth",20:"twentieth"}
+    for can in can_set:
+        n = int(can.replace("gen",""))
         out.update({
             f"mk{n}", f"mk {n}", f"mark {n}",
-            f"{n}th generation", f"{n} gen", f"gen {n}"
+            f"{n} gen", f"gen {n}", f"gen{n}",
+            f"{n}th generation",
         })
-        ord_map = {1:"first",2:"second",3:"third",4:"fourth",5:"fifth",6:"sixth",
-                   7:"seventh",8:"eighth",9:"ninth",10:"tenth",11:"eleventh",12:"twelfth"}
         if n in ord_map:
             out.add(f"{ord_map[n]} generation")
+        # crude roman converter up to 20
+        roman_pairs = [(10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+        rn, m = "", n
+        while m >= 10: rn += "X"; m -= 10
+        for val, sym in roman_pairs:
+            while m >= val:
+                rn += sym; m -= val
+        if rn:
+            out.update({rn, f"mk{rn.lower()}", f"mk {rn.lower()}", f"gen {rn.lower()}"})
+    raw = normalize_generation(gen)
+    if re.search(r"\b[A-Z]{1,3}\d{1,3}\b", raw, flags=re.I):
+        out.add(raw)
     return sorted(a for a in out if a)
 
 def best_number_for_region(blobs: List[Dict[str,str]], region: str, model: str, gen: str, year: int) -> Optional[Dict[str,Any]]:
