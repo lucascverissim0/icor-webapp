@@ -82,6 +82,7 @@ def _roman_to_int_any(s: str) -> int | None:
 def normalize_generation(s: str | None) -> str:
     if not s: return ""
     g = str(s)
+    # strip pure year decorations like "(2018–2024)" or "(2014-)"
     g = re.sub(r"\((?:\s*(?:c\.\s*)?\d{3,4}(?:\s*[–\-\/]\s*(?:\d{2,4})?)?\s*)\)\s*$", "", g)
     g = g.replace("—", "-").replace("–", "-").strip()
     g = re.sub(r"[/|]", " / ", g)
@@ -119,7 +120,7 @@ def _extract_all_gen_numbers_from_token(tok: str) -> list[int]:
 def canonical_gen_set(label: str | None) -> set[str]:
     if not label: return set()
     s = normalize_generation(label)
-    parts = re.split(r"\s*[\/|,&]\s*", s)
+    parts = re.split(r"\s*[\/|,&]\s*", s)  # handle "XV / XVI", "II & III"
     nums: set[int] = set()
     for part in parts:
         stripped = part.strip()
@@ -176,6 +177,172 @@ def build_generation_aliases(gen: str | None) -> List[str]:
         out.add(raw)
     return sorted(a for a in out if a)
 
+# ------------------ Local DB loaders ---------------
+def _load_json_array(path: str) -> Optional[List[dict]]:
+    try:
+        return json.load(open(path, "r", encoding="utf-8"))
+    except Exception:
+        return None
+
+def load_local_database_eu(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
+    db: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for path in sorted(glob.glob(os.path.join(folder, "Top100_*.txt"))):
+        if "_World_" in os.path.basename(path): continue
+        m = re.search(r"(\d{4})", os.path.basename(path)); 
+        if not m: continue
+        year = int(m.group(1))
+        arr = _load_json_array(path)
+        if not arr: continue
+        for rec in arr:
+            model = rec.get("model") or rec.get("name") or ""
+            if not model: continue
+            gen   = rec.get("generation")
+            units = rec.get("units_sold", rec.get("projected_units_2025"))
+            if not isinstance(units, int): continue
+            key = normalize_name(model)
+            db.setdefault(key, {})
+            db[key][year] = {
+                "model": model, "generation": gen,
+                "units_europe": int(units),
+                "estimated": bool(rec.get("estimated", False)),
+            }
+    return db
+
+def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]]]:
+    db: Dict[str, Dict[int, Dict[str, Any]]] = {}
+    for path in sorted(glob.glob(os.path.join(folder, "Top100_World_*.txt"))):
+        m = re.search(r"(\d{4})", os.path.basename(path))
+        if not m: continue
+        year = int(m.group(1))
+        arr = _load_json_array(path)
+        if not arr: continue
+        for rec in arr:
+            model = rec.get("model") or rec.get("name") or ""
+            if not model: continue
+            gen   = rec.get("generation")
+            units = rec.get("units_sold", rec.get("projected_units_2025"))
+            if not isinstance(units, int): continue
+            key = normalize_name(model)
+            db.setdefault(key, {})
+            db[key][year] = {
+                "model": model, "generation": gen,
+                "units_world": int(units),
+                "estimated": bool(rec.get("estimated", False)),
+            }
+    return db
+
+# ------------------ Safer model matching -----------
+def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
+    """
+    Safer, digit-aware matching:
+    - Try exact normalized key.
+    - Prefer candidates with identical digit-bearing tokens (e.g., 'q5' vs 'q3').
+    - Only accept a fuzzy match with high confidence (>=0.88).
+    - Otherwise return None.
+    """
+    key = normalize_name(user_model)
+
+    # exact
+    for db in dbs:
+        if key in db:
+            return key
+
+    # collect candidates
+    all_keys = sorted(set(k for db in dbs for k in db.keys()))
+    if not all_keys:
+        return None
+
+    def digit_tokens(s: str) -> set[str]:
+        toks = s.split()
+        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
+
+    target_digits = digit_tokens(key)
+    filtered = all_keys
+
+    if target_digits:
+        same = [k for k in all_keys if digit_tokens(k) == target_digits]
+        if same:
+            filtered = same
+
+    best, best_r = None, -1.0
+    for cand in filtered:
+        r = difflib.SequenceMatcher(None, key, cand).ratio()
+        if r > best_r:
+            best, best_r = cand, r
+    if best and best_r >= 0.88:
+        return best
+    return None
+
+def window_from_local_history(hist: List[Dict[str, Any]]) -> Optional[Tuple[int, int]]:
+    if not hist: return None
+    years = [h["year"] for h in hist]
+    return (min(years), max(years))
+
+# ------------------ Serp helpers -------------------
+SERP_ENDPOINT = "https://serpapi.com/search.json"
+SALES_WORDS = ["sales","sold","units","registrations","deliveries","volume","shipments"]
+CURRENCY_TOKENS = ["€","$","£"]
+
+def looks_like_price(text: str) -> bool:
+    t = text.lower()
+    return any(sym in text for sym in CURRENCY_TOKENS) or "msrp" in t or "price" in t
+
+def has_sales_context(text: str) -> bool:
+    t = text.lower()
+    return any(w in t for w in SALES_WORDS)
+
+def extract_candidate_numbers(text: str) -> List[int]:
+    NUM_PATTERN = re.compile(r"(?<![A-Z0-9])(\d{1,3}(?:[,\.\s]\d{3})+|\d{4,})(?![A-Z0-9])")
+    def _to_int(s: str):
+        s = re.sub(r"[,\.\s]", "", s)
+        return int(s) if s.isdigit() else None
+    out = []
+    for m in NUM_PATTERN.finditer(text or ""):
+        v = _to_int(m.group(1))
+        if v is not None: out.append(v)
+    return [n for n in out if 10 <= n <= 5_000_000]
+
+def serp_search(query: str) -> Dict[str, Any]:
+    params = {"engine":"google","q":query,"api_key":SERPAPI_KEY,"hl":"en","num":"10","safe":"active"}
+    try:
+        r = requests.get(SERP_ENDPOINT, params=params, timeout=SEARCH_TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e), "query": query}
+
+def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
+    blobs = []
+    def add(source, text, url):
+        if not text: return
+        if looks_like_price(text): return
+        blobs.append({"source": source, "text": text, "url": url})
+    for key in ("answer_box","knowledge_graph"):
+        box = serp_json.get(key)
+        if isinstance(box, dict):
+            for _, v in box.items():
+                if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
+    for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
+        add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
+    return blobs
+
+def build_search_queries(model: str, gen: str, year: int) -> List[str]:
+    gen_alias = " OR ".join(f'"{a}"' for a in build_generation_aliases(gen)) if gen else ""
+    base = [
+        f'"{model}" {year} sales europe -price -msrp -€ -$',
+        f'"{model}" {year} registrations europe -price -msrp -€ -$',
+        f'"{model}" {year} global sales -price -msrp -€ -$',
+        f'"{model}" {year} worldwide sales -price -msrp -€ -$',
+    ]
+    if gen_alias:
+        base = [q.replace(f'"{model}"', f'"{model}" ({gen_alias})') for q in base]
+    preferred = [
+        f'site:carsalesbase.com "{model}" {year} sales',
+        f'site:acea.auto "{model}" {year} registrations',
+        f'site:marklines.com "{model}" {year} sales',
+    ]
+    return base + preferred
+
 def best_number_for_region(blobs: List[Dict[str,str]], region: str, model: str, gen: str, year: int) -> Optional[Dict[str,Any]]:
     region_aliases = {
         "europe": ["europe","eu","efta","european","eu27","eu28","eu+efta","eu/efta","eu+uk"],
@@ -222,29 +389,11 @@ def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
     w  = best_number_for_region(blobs_all, "world",  model, gen, year)
     return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w}
 
-def build_search_queries(model: str, gen: str, year: int) -> List[str]:
-    gen_alias = " OR ".join(f'"{a}"' for a in build_generation_aliases(gen)) if gen else ""
-    base = [
-        f'"{model}" {year} sales europe -price -msrp -€ -$',
-        f'"{model}" {year} registrations europe -price -msrp -€ -$',
-        f'"{model}" {year} global sales -price -msrp -€ -$',
-        f'"{model}" {year} worldwide sales -price -msrp -€ -$',
-    ]
-    if gen_alias:
-        base = [q.replace(f'"{model}"', f'"{model}" ({gen_alias})') for q in base]
-    preferred = [
-        f'site:carsalesbase.com "{model}" {year} sales',
-        f'site:acea.auto "{model}" {year} registrations',
-        f'site:marklines.com "{model}" {year} sales',
-    ]
-    return base + preferred
-
 # ------------------ Local seeds/history -------------
 def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int,int]) -> Optional[str]:
     mk = find_best_model_key(db_eu, db_world, user_model=user_model)
     if not mk: return None
     lo, hi = gen_window
-    det_can = canonical_gen_label(detected_gen)
     labels = []
     for db in (db_eu, db_world):
         for y, rec in db.get(mk, {}).items():
@@ -254,6 +403,7 @@ def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, g
     labels = [g for g in labels if g]
     if not labels: return None
     c = Counter(labels)
+    det_can = canonical_gen_label(detected_gen)
     if det_can in c: return None
     top, cnt = c.most_common(1)[0]
     if len(c)==1 or cnt/sum(c.values())>=0.7: return top
@@ -267,8 +417,15 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
     if not mk: return out
     out["found_model"] = True; out["model_key"] = mk
 
-    accepted = {canonical_gen_label(target_gen)}
-    if accepted_alias: accepted.add(canonical_gen_label(accepted_alias))
+    # Accept canonical set from both target_gen and alias
+    accepted: set[str] = set()
+    accepted |= canonical_gen_set(target_gen)
+    if accepted_alias:
+        accepted |= canonical_gen_set(accepted_alias)
+
+    def _accept(g: Optional[str]) -> bool:
+        if not g: return True  # unlabeled inside window is accepted
+        return any(same_generation(g, lab) for lab in accepted) if accepted else True
 
     def _hist(db, units_field):
         hist = []
@@ -276,8 +433,7 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
             if window and not (window[0] <= y <= window[1]): 
                 continue
             g = rec.get("generation")
-            # Accept unlabeled rows inside the computed window
-            if g and canonical_gen_label(g) not in accepted:
+            if not _accept(g): 
                 continue
             hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
         return sorted(hist, key=lambda r: r["year"])
@@ -299,11 +455,11 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
     # seeds at start year (accept unlabeled rows inside window)
     if mk in db_eu and start_year in db_eu[mk]:
         g = db_eu[mk][start_year].get("generation")
-        if (not g) or (canonical_gen_label(g) in accepted):
+        if _accept(g):
             out["eu"] = {"value": int(db_eu[mk][start_year]["units_europe"]), "source": "local-db", "is_model_level": True}
     if mk in db_world and start_year in db_world[mk]:
         g = db_world[mk][start_year].get("generation")
-        if (not g) or (canonical_gen_label(g) in accepted):
+        if _accept(g):
             out["world"] = {"value": int(db_world[mk][start_year]["units_world"]), "source": "local-db", "is_model_level": True}
     return out
 
@@ -318,11 +474,11 @@ def _combined_rec(db_eu, db_world, mk, y):
         return rec_eu
     return rec_eu or rec_w
 
-def _expand_window_by_contiguity(db_eu, db_world, mk, pivot_year, det_can):
+def _expand_window_by_contiguity(db_eu, db_world, mk, pivot_year, det_can: str):
     """
     Starting from pivot_year (where we saw this generation), walk backward/forward
     across years where the model exists and the generation is either:
-      - same canonical label (== det_can), or
+      - same generation (via same_generation), or
       - missing/empty (treated as same-gen),
     stopping when we hit a conflicting labeled generation.
     """
@@ -338,8 +494,7 @@ def _expand_window_by_contiguity(db_eu, db_world, mk, pivot_year, det_can):
         if not rec: break
         g = rec.get("generation")
         if g:
-            can = canonical_gen_label(g)
-            if can == det_can:
+            if same_generation(g, det_can):
                 lo = y
             else:
                 break
@@ -355,8 +510,7 @@ def _expand_window_by_contiguity(db_eu, db_world, mk, pivot_year, det_can):
         if not rec: break
         g = rec.get("generation")
         if g:
-            can = canonical_gen_label(g)
-            if can == det_can:
+            if same_generation(g, det_can):
                 hi = y
             else:
                 break
@@ -375,7 +529,6 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
     We expand across unlabeled contiguous years to avoid window collapse.
     """
     def _window_from_local_for_label(gen_label: str):
-        det_can = canonical_gen_label(gen_label)
         mk = find_best_model_key(db_eu, db_world, user_model=model)
         years_same = []
         years_labeled = []
@@ -385,16 +538,16 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
                     g = rec.get("generation")
                     if g:
                         years_labeled.append(y)
-                        if canonical_gen_label(g) == det_can:
+                        if same_generation(g, gen_label):
                             years_same.append(y)
 
         if years_same:
             pivot = min(years_same)  # earliest labeled occurrence
-            lo, hi = _expand_window_by_contiguity(db_eu, db_world, mk, pivot, det_can)
+            lo, hi = _expand_window_by_contiguity(db_eu, db_world, mk, pivot, canonical_gen_label(gen_label))
             return (lo, hi)
         if years_labeled:
             pivot = min(years_labeled, key=lambda y: abs(y - user_year))
-            lo, hi = _expand_window_by_contiguity(db_eu, db_world, mk, pivot, det_can)
+            lo, hi = _expand_window_by_contiguity(db_eu, db_world, mk, pivot, canonical_gen_label(gen_label))
             return (lo, hi)
         return None
 
@@ -471,7 +624,7 @@ def prior_generation_avg_eu(db_eu, user_model, detected_gen: str, start_year: in
         rec = db_eu.get(mk, {}).get(y)
         if not rec: continue
         g = rec.get("generation")
-        if g and canonical_gen_label(g) == det_can:  # same-gen -> skip
+        if g and same_generation(g, det_can):  # same-gen -> skip
             continue
         units = rec.get("units_europe")
         if isinstance(units, int): vals.append(units)
