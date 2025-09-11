@@ -8,5 +8,5 @@ font = "sans serif"
 [server]
 # Robust ignore: match “data” or “logs” anywhere in the full path
 folderWatchBlacklist = [".*/data/.*", ".*/logs/.*"]
-fileWatcherType = "auto"
+fileWatcherType = "none"
 runOnSave = false
