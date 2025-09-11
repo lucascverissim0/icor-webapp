@@ -1,9 +1,12 @@
 [theme]
-primaryColor = "#2AA7C9"             # ICOR cyan accent
-backgroundColor = "#0D2B3E"          # deep navy
-secondaryBackgroundColor = "#12344A" # card/sidebar navy
-textColor = "#EAF6FD"                # very light text
+primaryColor = "#2AA7C9"
+backgroundColor = "#0D2B3E"
+secondaryBackgroundColor = "#12344A"
+textColor = "#EAF6FD"
 font = "sans serif"
 
 [server]
-fileWatcherType = "none"
+# Robust ignore: match “data” or “logs” anywhere in the full path
+folderWatchBlacklist = [".*/data/.*", ".*/logs/.*"]
+fileWatcherType = "auto"
+runOnSave = false
