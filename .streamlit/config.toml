@@ -6,5 +6,4 @@ textColor = "#EAF6FD"                # very light text
 font = "sans serif"
 
 [server]
-folderWatchBlacklist = ["data/.*", "logs/.*"]
-fileWatcherType = "auto"  # ("auto" | "watchdog" | "poll" | "none")
+fileWatcherType = "none"
