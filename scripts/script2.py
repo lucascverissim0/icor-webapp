@@ -3,30 +3,32 @@
 """
 Web-first generation detector + window finder + sales filler (EU + World)
 
+Usage examples (non-interactive safe):
+  python script_web_first_v2.py --model "Volkswagen Golf" --year 2021
+  MODEL="Volkswagen Golf" YEAR=2021 python script_web_first_v2.py
+
 Flow:
-1) Ask user for model + reference year.
+1) Read model + reference year (CLI flags > env vars > interactive if TTY).
 2) Web search (SerpAPI → Wikipedia first). Find which generation is active in that year.
-3) From the same page text, parse the generation's launch year and end year.
-4) If end year == 2025, estimate whether sales continue. If yes, extend window.
-5) Build per-year estimates only for years the generation is active:
+3) Parse the generation's launch year and end year from the Wikipedia page text.
+4) If end year == 2025, optionally estimate continuation using local EU sales heuristic.
+5) Build predictions for each active year in the window:
    - Use local DB numbers when available (authoritative).
-   - Fill missing years with lifecycle growth/decay (configurable).
-6) Save CSV + Excel (Estimates, Fleet_Repairs, Summary).
+   - Fill gaps with a lifecycle growth/decay profile.
+6) Save CSV + Excel (Estimates, Fleet_Repairs).
 
 Local DB is used ONLY for sales numbers and the 2025 continuation heuristic.
 """
 
-import os, re, json, glob, csv, time, math, sys
+import os, re, json, glob, csv, time, math, sys, argparse
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import requests
 import pandas as pd
 from tabulate import tabulate
-from collections import Counter
 
 # ------------------ Secrets (env) ------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # not used in this version
-SERPAPI_KEY    = os.getenv("SERPAPI_KEY")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 if not SERPAPI_KEY:
     print("⚠️  SERPAPI_KEY not set — web search will fail. Set SERPAPI_KEY in your environment.", file=sys.stderr)
 
@@ -162,13 +164,9 @@ def roman_to_int(tok: str) -> Optional[int]:
 def extract_year_ranges(text: str) -> List[Tuple[int, Optional[int], str]]:
     """
     Returns list of tuples: (start_year, end_year_or_None, nearby_label_text)
-    We consider patterns like:
-      "(Mk4; 2019–2025)", "(2019–present)", "Production 2019–2025", "Model years 2020–present"
     """
     ranges: List[Tuple[int, Optional[int], str]] = []
-    # common separators: – — - to
     sep = r"(?:–|—|-|to)"
-    # 'present' markers
     present = r"(?:present|ongoing|current)"
     pat1 = re.compile(rf"(?:Production|Produced|Model years|Years)\s*[:]?\s*(20\d{{2}})\s*{sep}\s*(20\d{{2}}|{present})", re.I)
     pat2 = re.compile(rf"\(\s*(?:Mk\s*[ivx\d]+;?\s*)?(20\d{{2}})\s*{sep}\s*(20\d{{2}}|{present})\s*\)", re.I)
@@ -185,16 +183,12 @@ def extract_year_ranges(text: str) -> List[Tuple[int, Optional[int], str]]:
 
 def extract_generation_labels(text: str) -> List[Tuple[str,str]]:
     """
-    Find phrases that look like 'Fourth generation (Mk4; 2019–2025)',
-    'Mk V (2016–2021)', 'Second generation (2013–present)', etc.
+    Find phrases like 'Fourth generation (Mk4; 2019–2025)', 'Mk V (2016–2021)', etc.
     Returns list of (label, raw_snippet).
     """
     labels: List[Tuple[str,str]] = []
-    # e.g., "Fourth generation (Mk4; 2019–2025)" or "Fifth generation (2018–present)"
     patA = re.compile(r"((?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)\s+generation)\s*\((.*?)\)", re.I)
-    # e.g., "Mk4 (2019–2025)" or "Mk V (2016–2021)"
     patB = re.compile(r"\b(Mk\s*(?:[ivx]+|\d{1,2}))\s*\((.*?)\)", re.I)
-    # e.g., "Generation 4 (2019–2026)"
     patC = re.compile(r"\b(gen(?:eration)?\s*(?:no\.?\s*)?(?:[ivx]+|\d{1,2}))\s*\((.*?)\)", re.I)
     for pat in (patA, patB, patC):
         for m in pat.finditer(text):
@@ -203,17 +197,14 @@ def extract_generation_labels(text: str) -> List[Tuple[str,str]]:
 
 def generation_number_from_label(label: str) -> Optional[int]:
     t = label.lower()
-    # mk/mark
     m = re.search(r"\b(?:mk|mark)\s*([ivx]+|\d{1,2})\b", t)
     if m:
         tok = m.group(1)
         return int(tok) if tok.isdigit() else roman_to_int(tok)
-    # generation N
     m = re.search(r"\bgen(?:eration)?\s*(?:no\.?\s*)?([ivx]+|\d{1,2})\b", t)
     if m:
         tok = m.group(1)
         return int(tok) if tok.isdigit() else roman_to_int(tok)
-    # ordinal word
     m = re.search(r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth)\s+generation\b", t)
     if m:
         return _ORD.get(m.group(1))
@@ -221,9 +212,8 @@ def generation_number_from_label(label: str) -> Optional[int]:
 
 def find_active_generation_from_wikipedia(model: str, ref_year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[str]]:
     """
-    Search Wikipedia for the model and parse which generation was active in ref_year.
-    Returns: (generation_label, (start, end_or_ongoing), source_url)
-             If ongoing, end is set to None.
+    Returns: (generation_label, (start, end_or_None), source_url)
+             If ongoing, end is None.
     """
     queries = [
         f'site:wikipedia.org "{model}" generation',
@@ -249,19 +239,13 @@ def find_active_generation_from_wikipedia(model: str, ref_year: int) -> Tuple[Op
         text = fetch_text(url)
         if not text: continue
 
-        # 1) Pull labeled generation blocks and ranges nearby
         labels = extract_generation_labels(text)
         ranges = extract_year_ranges(text)
 
-        # score blocks that contain a range matching ref_year
-        # tie-breaker: label with explicit generation number
         for (label, raw) in labels:
-            # search for the closest range near this label occurrence
-            # simple approach: use all ranges; choose those covering ref_year
             for (y1, y2, snip) in ranges:
                 y_end = y2 if y2 is not None else current_year()
                 if y1 <= ref_year <= y_end:
-                    # prefer matching where raw+snip appear close (crude check)
                     near = 1 if snip in raw or label in snip else 0
                     has_num = 1 if generation_number_from_label(label) else 0
                     ongoing_bonus = 1 if y2 is None else 0
@@ -270,7 +254,6 @@ def find_active_generation_from_wikipedia(model: str, ref_year: int) -> Tuple[Op
                         best_score = score
                         best = (label, (y1, (y2 if y2 is not None else None)), url)
 
-        # 2) If nothing matched, consider bare ranges without labels
         if best_score < 0 and ranges:
             for (y1, y2, _snip) in ranges:
                 y_end = y2 if y2 is not None else current_year()
@@ -284,10 +267,6 @@ def find_active_generation_from_wikipedia(model: str, ref_year: int) -> Tuple[Op
 
 # ------------------ Continuation heuristic ---------
 def should_continue_after_2025(model_key: str, db_eu: Dict[str,Dict[int,Dict[str,Any]]]) -> bool:
-    """
-    If the average EU sales of the last two available years (<=2025) >= threshold,
-    assume the generation will continue beyond 2025 for a few years.
-    """
     if model_key not in db_eu: return False
     ys = sorted([y for y in db_eu[model_key].keys() if y <= 2025])
     if len(ys) < 2: return False
@@ -302,7 +281,6 @@ def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: 
     for db in dbs:
         if key in db:
             return key
-    # fuzzy pass: pick highest token overlap (very conservative)
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
     best, best_score = None, -1
     key_tokens = set(key.split())
@@ -320,19 +298,13 @@ def build_generation_sales_series(
     db_world: Dict[str,Dict[int,Dict[str,Any]]],
     extend_if_2025: bool
 ) -> Tuple[List[Dict[str,Any]], Tuple[int,int]]:
-    """
-    Returns rows with Europe+World per year inside active window.
-    Missing years are filled with lifecycle model based on nearest available local value.
-    """
     mk = find_best_model_key(db_eu, db_world, user_model=model)
     start, end = gen_window[0], gen_window[1]
-    # extension if needed
     if end is None:
         end = min(DEADLINE_YEAR, current_year())
     if extend_if_2025 and end == 2025 and mk and should_continue_after_2025(mk, db_eu):
         end = min(2025 + CONTINUE_EXTENSION_YEARS, DEADLINE_YEAR)
 
-    # collect local seeds
     eu_local: Dict[int,int] = {}
     world_local: Dict[int,int] = {}
     if mk and mk in db_eu:
@@ -344,44 +316,35 @@ def build_generation_sales_series(
             if start <= y <= end and isinstance(rec.get("units_world"), int):
                 world_local[y] = int(rec["units_world"])
 
-    # base series by EU (priority) else World
     years = list(range(start, end+1))
     rows: List[Dict[str,Any]] = []
-    # find an anchor value (prefer EU)
+
     anchor_year = None
     anchor_val_eu = None
     for y in years:
         if y in eu_local:
             anchor_year = y; anchor_val_eu = eu_local[y]; break
     if anchor_year is None:
-        # fallback to world → we will copy to EU with cap
         for y in years:
             if y in world_local:
-                anchor_year = y; anchor_val_eu = int(world_local[y]*0.5)  # assume EU ~50% if only World exists
+                anchor_year = y; anchor_val_eu = int(world_local[y]*0.5)
                 break
 
     def lifecycle_value(year_idx_from_anchor: int, base: int) -> int:
-        """
-        Simple lifecycle growth/decay from the anchor.
-        """
         if year_idx_from_anchor < 0:
-            # going backward: mirror late decay
             steps = -year_idx_from_anchor
             v = base
             for _ in range(steps):
                 v = int(max(0, v * (1 + LATE_DECAY_RATE)))
             return v
         v = base
-        # early growth
-        for i in range(min(year_idx_from_anchor, EARLY_GROWTH_YEARS)):
+        for _ in range(min(year_idx_from_anchor, EARLY_GROWTH_YEARS)):
             v = int(max(0, v * (1 + EARLY_GROWTH_RATE)))
-        # mid growth
         rem = max(0, year_idx_from_anchor - EARLY_GROWTH_YEARS)
-        for i in range(min(rem, MID_GROWTH_YEARS)):
+        for _ in range(min(rem, MID_GROWTH_YEARS)):
             v = int(max(0, v * (1 + MID_GROWTH_RATE)))
-        # late decay
         rem2 = max(0, year_idx_from_anchor - EARLY_GROWTH_YEARS - MID_GROWTH_YEARS)
-        for i in range(rem2):
+        for _ in range(rem2):
             v = int(max(0, v * (1 + LATE_DECAY_RATE)))
         return v
 
@@ -392,11 +355,9 @@ def build_generation_sales_series(
             eu_val = lifecycle_value(y - anchor_year, anchor_val_eu)
         if eu_val is None: eu_val = 0
         if w_val is None:
-            # naive EU→World band: 25%..85% share; pick center to synthesize
             lo_share, hi_share = 0.25, 0.85
             share = (lo_share + hi_share)/2.0
             w_val = max(eu_val, int(eu_val / max(share,1e-6)))
-        # caps and Europe ≤ World
         w_val = min(w_val, WORLD_MAX_CAP)
         if eu_val > w_val: w_val = eu_val
         rows.append({"year": y, "world_sales_units": int(w_val), "europe_sales_units": int(eu_val), "rationale": "local db + lifecycle fill"})
@@ -450,20 +411,48 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]], base: str
         fr.to_excel(writer, sheet_name="Fleet_Repairs", index=False)
     return xlsx
 
-# ------------------ CLI inputs ---------------------
-def ask_user_inputs() -> Dict[str,Any]:
-    model = input("Enter the car model: ").strip()
-    year = int(input("Enter the reference year (we will detect the active generation for that year): ").strip())
-    if year < USER_PROMPT_MIN_YEAR or year > DEADLINE_YEAR:
-        print(f"Year must be between {USER_PROMPT_MIN_YEAR} and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
-    return {"car_model": model, "ref_year": year}
+# ------------------ Inputs (CLI/env/interactive) ---
+def parse_args_env_or_prompt() -> Dict[str, Any]:
+    parser = argparse.ArgumentParser(description="Web-first generation/window detector + sales filler")
+    parser.add_argument("--model", type=str, help="Car model name (e.g., 'Volkswagen Golf')")
+    parser.add_argument("--year", type=int, help=f"Reference year ({USER_PROMPT_MIN_YEAR}..{DEADLINE_YEAR})")
+    args = parser.parse_args()
+
+    model = args.model or os.getenv("MODEL")
+    year  = args.year  if args.year is not None else (int(os.getenv("YEAR")) if os.getenv("YEAR", "").isdigit() else None)
+
+    if model and year is not None:
+        return {"car_model": model.strip(), "ref_year": year}
+
+    # If missing and TTY, prompt interactively with validation
+    if sys.stdin.isatty():
+        if not model:
+            model = input("Enter the car model: ").strip()
+        while year is None:
+            raw = input(f"Enter the reference year ({USER_PROMPT_MIN_YEAR}..{DEADLINE_YEAR}): ").strip()
+            if raw.isdigit():
+                y = int(raw)
+                if USER_PROMPT_MIN_YEAR <= y <= DEADLINE_YEAR:
+                    year = y
+                else:
+                    print(f"Year must be between {USER_PROMPT_MIN_YEAR} and {DEADLINE_YEAR}.")
+            else:
+                print("Please enter a numeric year.")
+        return {"car_model": model, "ref_year": year}
+
+    # Non-interactive and missing inputs → fail clearly
+    msg = ("Missing inputs. Provide --model and --year flags or set env vars MODEL and YEAR.\n"
+           "Example:  python script_web_first_v2.py --model \"Volkswagen Golf\" --year 2021")
+    print(msg, file=sys.stderr)
+    sys.exit(1)
 
 # ------------------ Main ---------------------------
 def main():
     if not SERPAPI_KEY:
+        print("SerpAPI key missing. Set SERPAPI_KEY and retry.", file=sys.stderr)
         sys.exit(2)
 
-    user = ask_user_inputs()
+    user = parse_args_env_or_prompt()
 
     # 1) WEB FIRST: detect active generation + window from Wikipedia
     label, window, source_url = find_active_generation_from_wikipedia(user["car_model"], user["ref_year"])
@@ -523,8 +512,8 @@ def main():
     print("\nNotes:")
     print("- Generation/window detected from Wikipedia text (via SerpAPI search).")
     print("- Local DB used only for sales values; lifecycle fills gaps.")
-    print(f"- If detected end=2025 and recent EU avg ≥ {CONTINUE_SINCE_2025_MIN_AVG_EU:,}, window extends by {CONTINUE_EXTENSION_YEARS} yr(s) with {int(CONTINUE_DECAY_PER_YEAR*100)}%/yr decay.")
-    print("- You can tune thresholds at the top of the script.")
+    print(f"- If detected end=2025 and recent EU avg ≥ {CONTINUE_SINCE_2025_MIN_AVG_EU:,}, window extends by {CONTINUE_EXTENSION_YEARS} yr(s).")
+    print("- Tune thresholds at the top of the script.")
 
 if __name__ == "__main__":
     main()
