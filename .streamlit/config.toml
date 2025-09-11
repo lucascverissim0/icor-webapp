@@ -4,3 +4,7 @@ backgroundColor = "#0D2B3E"          # deep navy
 secondaryBackgroundColor = "#12344A" # card/sidebar navy
 textColor = "#EAF6FD"                # very light text
 font = "sans serif"
+
+[server]
+folderWatchBlacklist = ["data/.*", "logs/.*"]
+fileWatcherType = "auto"  # ("auto" | "watchdog" | "poll" | "none")
