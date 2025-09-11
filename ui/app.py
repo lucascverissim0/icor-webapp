@@ -1,3 +1,4 @@
+# app.py
 import os
 import re
 import glob
@@ -9,7 +10,7 @@ import streamlit as st
 import posthog
 import sys  # for sys.executable
 
-# =============== PAGE META + THEME ===============
+# =================== PAGE META + THEME ===================
 st.set_page_config(page_title="ICOR – Strategic Opportunities", layout="wide")
 print("[CHECKPOINT] Page config set")
 
@@ -37,7 +38,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# =============== PATHS ===============
+# =================== ONE-SHOT RERUN GUARDS ===================
+# We set a flag before st.rerun() and pop it at the next render to avoid loops.
+def _consume_flag(flag_key: str) -> bool:
+    """Pop and return True if a one-shot flag was present."""
+    return bool(st.session_state.pop(flag_key, False))
+
+# Consume any one-shot flags set just before a rerun
+_just_logged_in  = _consume_flag("_just_logged_in")
+_just_logged_out = _consume_flag("_just_logged_out")
+_just_ran_script1 = _consume_flag("_just_ran_script1")
+
+# =================== PATHS ===================
 HERE = os.path.abspath(os.path.dirname(__file__))
 
 def find_project_root(start: str) -> str:
@@ -62,11 +74,10 @@ SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
 
-# ---- Logo: try multiple likely locations (root/ui, ui/, root/)
 def find_logo_path() -> str | None:
     candidates = [
         os.path.join(PROJECT_ROOT, "ui", "assets", "icor-logo.png"),
-        os.path.join(HERE, "assets", "icor-logo.png"),
+        os.path.join(PROJECT_ROOT, "assets", "icor-logo.png"),
         os.path.join(PROJECT_ROOT, "icor-logo.png"),
     ]
     for p in candidates:
@@ -75,28 +86,9 @@ def find_logo_path() -> str | None:
     return None
 
 LOGO_PATH = find_logo_path()
-print(f"[CHECKPOINT] Paths | ROOT={PROJECT_ROOT} | DATA={DATA_DIR} | SCRIPTS={SCRIPTS_DIR} | LOGO={LOGO_PATH}")
+print(f"[CHECKPOINT] Paths | ROOT={PROJECT_ROOT} | DATA={DATA_DIR} | SCRIPTS={SCRIPTS_DIR} | LOGO={LOGO_PATH if LOGO_PATH else 'None'}")
 
-
-# ---- Logo: try multiple likely locations
-def find_logo_path() -> str | None:
-    candidates = [
-        os.path.join(HERE, "ui", "assets", "icor-logo.png"),
-        os.path.join(HERE, "assets", "icor-logo.png"),
-        os.path.join(HERE, "icor-logo.png"),
-    ]
-    for p in candidates:
-        if os.path.exists(p):
-            return p
-    return None
-
-LOGO_PATH = find_logo_path()
-if LOGO_PATH:
-    print(f"[CHECKPOINT] Using logo at {LOGO_PATH}")
-else:
-    print("[CHECKPOINT] Logo not found")
-
-# =============== OPTIONAL: POSTHOG ===============
+# =================== OPTIONAL: POSTHOG ===================
 def _safe_get(dict_like, dotted, default=None):
     try:
         cur = dict_like
@@ -124,7 +116,7 @@ def track(event: str, props: dict | None = None):
     except Exception:
         pass
 
-# =============== AUTH (CUSTOM LOGIN) ===============
+# =================== AUTH (CUSTOM LOGIN) ===================
 USERS = st.secrets.get("users", {})
 print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
@@ -167,6 +159,8 @@ def login_form():
             st.session_state["user_id"] = username
             st.session_state["user_name"] = name
             track("login_success", {"user": username})
+            # One-shot rerun guard
+            st.session_state["_just_logged_in"] = True
             st.rerun()
             return True
         else:
@@ -180,7 +174,7 @@ if "user_id" not in st.session_state:
     login_form()
     st.stop()
 
-# =============== HEADER (logo + title + logout) ===============
+# =================== HEADER (logo + title + logout) ===================
 col_logo, col_title, col_logout = st.columns([1, 5, 1])
 with col_logo:
     if LOGO_PATH:
@@ -194,10 +188,22 @@ with col_logout:
         for k in ("user_id", "user_name"):
             if k in st.session_state:
                 del st.session_state[k]
+        st.session_state["_just_logged_out"] = True  # one-shot guard
         st.rerun()
 
-# =============== HELPERS ===============
+# =================== HELPERS ===================
+
+def _timeout_communicate(proc: subprocess.Popen, timeout_sec: int = 420):
+    """communicate() with timeout and friendly capture."""
+    try:
+        out, _ = proc.communicate(timeout=timeout_sec)
+        return out, proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return "[ERROR] Script timed out.", 124
+
 def run_script1():
+    """Run backend Script 1 in DATA_DIR as a child process; capture combined stdout/stderr."""
     path = os.path.join(SCRIPTS_DIR, SCRIPT1_FILENAME)
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
@@ -209,27 +215,31 @@ def run_script1():
         stderr=subprocess.STDOUT,
         text=True,
     )
-    out, _ = proc.communicate()
-    print("[CHECKPOINT] Script 1 finished with code", proc.returncode)
-    return proc.returncode, out
+    out, code = _timeout_communicate(proc, timeout_sec=420)
+    print("[CHECKPOINT] Script 1 finished with code", code)
+    return code, out
+
+@st.cache_data(show_spinner=False)
+def _excel_sheet_names(xlsx_path: str) -> list[str]:
+    """Cached list of sheet names (closes file handle)."""
+    if not os.path.exists(xlsx_path):
+        return []
+    try:
+        with pd.ExcelFile(xlsx_path) as xf:
+            return xf.sheet_names
+    except Exception:
+        return []
 
 def sheet_exists(name: str) -> bool:
-    if not os.path.exists(EXCEL_PATH):
-        return False
-    try:
-        return name in pd.ExcelFile(EXCEL_PATH).sheet_names
-    except Exception:
-        return False
+    return name in _excel_sheet_names(EXCEL_PATH)
 
 def read_sheet(name: str) -> pd.DataFrame:
     return pd.read_excel(EXCEL_PATH, sheet_name=name)
 
 def detect_year_sheets(region: str) -> list[str]:
-    if not os.path.exists(EXCEL_PATH):
-        return []
-    xf = pd.ExcelFile(EXCEL_PATH)
+    names = _excel_sheet_names(EXCEL_PATH)
     pat = re.compile(r"^(20\d{2})\s+(EU|World)$")
-    return sorted([s for s in xf.sheet_names if pat.match(s) and s.endswith(region)])
+    return sorted([s for s in names if pat.match(s) and s.endswith(region)])
 
 def nice_table(df: pd.DataFrame):
     st.dataframe(df, use_container_width=True, height=550)
@@ -240,7 +250,7 @@ def first_available_icor() -> str | None:
             return s
     return None
 
-# =============== SIDEBAR ===============
+# =================== SIDEBAR ===================
 with st.sidebar:
     st.header("Strategic Opportunities")
     st.caption(f"Logged in as **{st.session_state.get('user_name','')}**")
@@ -256,16 +266,19 @@ with st.sidebar:
             st.error("Backend failed. See log below.")
         else:
             st.success("Backend finished. Reloading…")
+            # One-shot guard to avoid rerun loops
+            st.session_state["_just_ran_script1"] = True
             st.rerun()
 
     if os.path.exists(EXCEL_PATH):
         try:
-            st.download_button(
-                "Download workbook",
-                data=open(EXCEL_PATH, "rb").read(),
-                file_name="passenger_car_data.xlsx",
-                use_container_width=True,
-            )
+            with open(EXCEL_PATH, "rb") as fh:
+                st.download_button(
+                    "Download workbook",
+                    data=fh.read(),
+                    file_name="passenger_car_data.xlsx",
+                    use_container_width=True,
+                )
         except Exception:
             pass
 
@@ -274,7 +287,7 @@ if log:
     with st.expander("Backend run log", expanded=False):
         st.code(log)
 
-# =============== LANDING: STRATEGIC TABLE ===============
+# =================== LANDING: STRATEGIC TABLE ===================
 if not os.path.exists(EXCEL_PATH):
     st.warning("No workbook found. Click **Run backend (Script 1)** in the sidebar.")
 else:
@@ -296,7 +309,7 @@ else:
         except Exception as e:
             st.error(f"Could not read `{chosen_sheet}`: {e}")
 
-# =============== NAV CARDS (styled buttons) ===============
+# =================== NAV CARDS (styled buttons) ===================
 st.markdown(" ")
 st.markdown("### Explore more")
 
@@ -316,7 +329,7 @@ with col3:
 
 section = st.session_state.get("section")
 
-# =============== SECTION: FLEET ===============
+# =================== SECTION: FLEET ===================
 if section == "fleet":
     st.markdown("---")
     st.subheader("Fleet by Model / Year")
@@ -331,7 +344,7 @@ if section == "fleet":
         except Exception as e:
             st.error(f"Could not read `{sheet_name}`: {e}")
 
-# =============== SECTION: REPLACEMENTS ===============
+# =================== SECTION: REPLACEMENTS ===================
 elif section == "repl":
     st.markdown("---")
     st.subheader("Windshield Replacements by Year")
@@ -346,7 +359,7 @@ elif section == "repl":
         except Exception as e:
             st.error(f"Could not read `{sheet_name}`: {e}")
 
-# =============== SECTION: HISTORY ===============
+# =================== SECTION: HISTORY ===================
 elif section == "history":
     st.markdown("---")
     st.subheader("Historical Sales (Top 100)")
@@ -363,3 +376,8 @@ elif section == "history":
             track("view_history", {"region": region, "year": year})
         except Exception as e:
             st.error(f"Could not read `{sheet_name}`: {e}")
+
+# =================== OPTIONAL: DEBUG HEARTBEAT ===================
+# Uncomment to see if the script is truly rerendering too often.
+# st.caption(f"Render #{st.session_state.setdefault('_renders', 0)}")
+# st.session_state['_renders'] += 1
