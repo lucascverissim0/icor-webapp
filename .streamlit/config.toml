@@ -4,3 +4,8 @@ backgroundColor = "#0D2B3E"          # deep navy
 secondaryBackgroundColor = "#12344A" # card/sidebar navy
 textColor = "#EAF6FD"                # very light text
 font = "sans serif"
+
+[server]
+fileWatcherType = "poll"
+folderWatchBlacklist = ["data", "scripts", "ui/assets"]
+
