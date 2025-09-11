@@ -57,7 +57,12 @@ def find_project_root(start: str) -> str:
         cur = parent
 
 PROJECT_ROOT = find_project_root(HERE)
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+
+# --- IMPORTANT: write outputs OUTSIDE the repo so Streamlit's watcher won't reload
+# Override with env var ICOR_DATA_DIR if you want a custom location
+DATA_DIR = os.getenv("ICOR_DATA_DIR", os.path.join("/", "tmp", "icor-data"))
+os.makedirs(DATA_DIR, exist_ok=True)
+
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
@@ -76,7 +81,6 @@ def find_logo_path() -> str | None:
 
 LOGO_PATH = find_logo_path()
 print(f"[CHECKPOINT] Paths | ROOT={PROJECT_ROOT} | DATA={DATA_DIR} | SCRIPTS={SCRIPTS_DIR} | LOGO={LOGO_PATH}")
-
 
 # ---- Logo: try multiple likely locations
 def find_logo_path() -> str | None:
