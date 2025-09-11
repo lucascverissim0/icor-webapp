@@ -57,12 +57,7 @@ def find_project_root(start: str) -> str:
         cur = parent
 
 PROJECT_ROOT = find_project_root(HERE)
-
-# --- IMPORTANT: write outputs OUTSIDE the repo so Streamlit's watcher won't reload
-# Override with env var ICOR_DATA_DIR if you want a custom location
-DATA_DIR = os.getenv("ICOR_DATA_DIR", os.path.join("/", "tmp", "icor-data"))
-os.makedirs(DATA_DIR, exist_ok=True)
-
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 EXCEL_PATH = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
 SCRIPT1_FILENAME = "script1.py"
@@ -81,6 +76,7 @@ def find_logo_path() -> str | None:
 
 LOGO_PATH = find_logo_path()
 print(f"[CHECKPOINT] Paths | ROOT={PROJECT_ROOT} | DATA={DATA_DIR} | SCRIPTS={SCRIPTS_DIR} | LOGO={LOGO_PATH}")
+
 
 # ---- Logo: try multiple likely locations
 def find_logo_path() -> str | None:
@@ -206,46 +202,16 @@ def run_script1():
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
     print("[CHECKPOINT] Running Script 1…")
-
-    # 1) Run the script where the Top100 files actually are (repo /data)
-    input_cwd = os.path.join(PROJECT_ROOT, "data")
-
-    # 2) Ensure the external DATA_DIR exists for the app outputs
-    os.makedirs(DATA_DIR, exist_ok=True)
-
-    # 3) Pass the OPENAI key down via env so script1 can read os.getenv(...)
-    env = os.environ.copy()
-    try:
-        env["OPENAI_API_KEY"] = st.secrets["openai"]["api_key"]
-    except Exception:
-        # keep whatever is in the env if not in secrets
-        env["OPENAI_API_KEY"] = env.get("OPENAI_API_KEY", "")
-
     proc = subprocess.Popen(
         [sys.executable, path],
-        cwd=input_cwd,  # <— where Top100_*.txt and Top100_World_*.txt live
+        cwd=DATA_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        env=env,
     )
     out, _ = proc.communicate()
-    code = proc.returncode
-    print("[CHECKPOINT] Script 1 finished with code", code)
-
-    # 4) Move/copy the produced workbook into the app’s DATA_DIR (e.g. /tmp/icor-data)
-    #    script1 writes 'passenger_car_data.xlsx' in input_cwd
-    src = os.path.join(input_cwd, "passenger_car_data.xlsx")
-    if code == 0 and os.path.exists(src):
-        try:
-            import shutil
-            dst = os.path.join(DATA_DIR, "passenger_car_data.xlsx")
-            shutil.copy2(src, dst)
-            print(f"[CHECKPOINT] Copied workbook to {dst}")
-        except Exception as e:
-            out += f"\n[WARN] Could not copy workbook to {DATA_DIR}: {e}\n"
-
-    return code, out
+    print("[CHECKPOINT] Script 1 finished with code", proc.returncode)
+    return proc.returncode, out
 
 def sheet_exists(name: str) -> bool:
     if not os.path.exists(EXCEL_PATH):
