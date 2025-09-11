@@ -22,7 +22,12 @@ PREFERRED_SCRIPT2 = "script2.py"  # preferred filename in /scripts
 # === PATHS (go up TWO levels from ui/pages/ to the repo root) ===
 HERE = os.path.dirname(__file__)
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-DATA_DIR = os.path.join(ROOT, "data")
+
+# --- IMPORTANT: write outputs OUTSIDE the repo so Streamlit's watcher won't reload
+# Override with env var ICOR_DATA_DIR if you want a custom location
+DATA_DIR = os.getenv("ICOR_DATA_DIR", os.path.join("/", "tmp", "icor-data"))
+os.makedirs(DATA_DIR, exist_ok=True)
+
 SCRIPTS_DIR = os.path.join(ROOT, "scripts")
 
 # --- Logo path (robust to where the page runs from)
@@ -180,7 +185,7 @@ def load_latest_output():
     matches = sorted(glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")))
     if not matches:
         return None
-    latest = max(matches, key=os.path.getmtime)
+    latest = max(matches, os.path.getmtime)
     return latest
 
 def parse_seed_badges(xlsx_path: str):
@@ -403,7 +408,12 @@ if submitted:
                 candidates.append(p)
 
             # 3) last resort: newest sales_estimates_*.xlsx in DATA_DIR
-            fallback = load_latest_output()
+            fallback = None
+            try:
+                matches = sorted(glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")))
+                fallback = max(matches, key=os.path.getmtime) if matches else None
+            except Exception:
+                pass
             if fallback:
                 candidates.append(fallback)
 
@@ -465,4 +475,3 @@ if submitted:
                     "status": "success",
                     "timestamp": int(time.time()),
                 })
-
