@@ -139,9 +139,6 @@ with c2:
     st.title("ICOR – Model Researcher")
     st.caption("automatically perfect")
 
-# === DEBUG MODE (hide backlog/logs unless explicitly enabled) ===
-DEBUG_MODE = bool(_safe_get(st.secrets, "app.debug", False)) or bool(st.session_state.get("debug", False))
-
 # === HELPERS ===
 def localize_bools(df: pd.DataFrame, prefer_cols=None, true_txt="VRAI", false_txt="FAUX") -> pd.DataFrame:
     d = df.copy()
@@ -305,6 +302,7 @@ def run_script2_with_env(input_text: str):
     env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
     env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
 
+    # 👇 use the same interpreter Streamlit is running
     proc = subprocess.Popen(
         [sys.executable, script_path],
         cwd=DATA_DIR,
@@ -353,23 +351,22 @@ if submitted:
         st.error("Please enter a car model.")
     else:
         input_text = f"{model}\n{generation}\n{start_year}\n"
-        # Use a compact status indicator; don't show raw logs to users
-        with st.spinner("Running the estimator…"):
+        with st.status("Running Script 2…", expanded=False):
             code, out = run_script2_with_env(input_text)
 
-        # Friendly setup hints (no raw backlog)
+        # Surface common setup issues
         if "OPENAI_API_KEY not set" in (out or ""):
-            st.warning("OpenAI access isn’t configured. Ask your workspace admin to set `openai.api_key`.")
+            st.warning("OPENAI_API_KEY isn’t configured for Script 2. Set it in `st.secrets` or environment.")
         if "SERPAPI_KEY not set" in (out or ""):
-            st.info("Web seeding is limited (no SERP API key). Results may rely on local data.")
+            st.info("SERPAPI_KEY isn’t set; web seeding will be limited to local data.")
+
+        # Always show the last lines for debugging context
+        tail = "\n".join((out or "").splitlines()[-50:])
+        with st.expander("Run log", expanded=False):
+            st.code(tail)
 
         if code != 0:
-            st.error("The estimator could not complete. Please try again or contact support.")
-            # In DEBUG mode, expose the last lines for troubleshooting (hidden for regular users)
-            if DEBUG_MODE:
-                tail = "\n".join((out or "").splitlines()[-80:])
-                with st.expander("Run log (admin only)", expanded=False):
-                    st.code(tail)
+            st.error("Script 2 failed. See diagnostic above.")
             track("run_script2", {
                 "model": model,
                 "generation": generation or "",
@@ -413,25 +410,24 @@ if submitted:
             # Pick the first that exists
             xlsx = next((p for p in candidates if p and os.path.exists(p)), None)
 
-            # Admin-only diagnostics; hide backlog for users
-            if DEBUG_MODE:
-                with st.expander("Data folder contents (admin only)", expanded=False):
-                    st.write("DATA_DIR:", DATA_DIR)
-                    try:
-                        files = sorted(
-                            glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")),
-                            key=os.path.getmtime,
-                            reverse=True,
-                        )
-                        if not files:
-                            st.write("No sales_estimates_*.xlsx files found.")
-                        else:
-                            st.write("\n".join(os.path.basename(f) for f in files[:15]))
-                    except Exception as e:
-                        st.write(f"(Could not list files: {e})")
+            # Extra diagnostics: list DATA_DIR contents so it's obvious what's there
+            with st.expander("Data folder contents", expanded=False):
+                st.write("DATA_DIR:", DATA_DIR)
+                try:
+                    files = sorted(
+                        glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")),
+                        key=os.path.getmtime,
+                        reverse=True,
+                    )
+                    if not files:
+                        st.write("No sales_estimates_*.xlsx files found.")
+                    else:
+                        st.write("\n".join(os.path.basename(f) for f in files[:15]))
+                except Exception as e:
+                    st.write(f"(Could not list files: {e})")
 
             if not xlsx:
-                st.error("We couldn’t find the output workbook. Please re-run the estimator.")
+                st.error("No output Excel found. The estimator ran but the file wasn’t found at the expected paths.")
             else:
                 # Badges (safe if Summary missing: function already guards)
                 confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
@@ -441,10 +437,7 @@ if submitted:
                 try:
                     est = pd.read_excel(xlsx, sheet_name="Estimates")
                 except Exception as e:
-                    st.error("The workbook was created, but the 'Estimates' sheet could not be read.")
-                    if DEBUG_MODE:
-                        with st.expander("Details (admin only)", expanded=False):
-                            st.code(str(e))
+                    st.error(f"Could not read the 'Estimates' sheet from:\n{xlsx}\n\nError: {e}")
                     est = None
 
                 if est is not None and not est.empty:
@@ -461,10 +454,9 @@ if submitted:
                             use_container_width=True,
                         )
                     except Exception:
-                        if DEBUG_MODE:
-                            st.info("Download button could not be rendered (admin-only notice).")
+                        pass
                 else:
-                    st.warning("The workbook is missing data in 'Estimates'.")
+                    st.warning("The workbook was created, but the 'Estimates' sheet appears to be missing or empty.")
 
                 track("run_script2", {
                     "model": model,
