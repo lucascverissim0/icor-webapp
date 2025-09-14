@@ -9,8 +9,10 @@ Generation-specific sales estimator (EU + World)
 - Web seeds get plausibility checks vs. prior-gen EU avg and model-level EU totals.
 - Exports Estimates, Fleet_Repairs, Summary, Seeds_Constraints with plausibility fields.
 
-This version adds:
-- Direct Wikipedia API scraping to detect generation windows (launch/end years) reliably.
+This version adds (stabilized):
+- Robust Wikipedia API scraping (with retry) to detect generation windows (launch/end years).
+- Safer window chooser: prefer windows covering the user's year; when multiple cover, prefer latest start.
+- SERP fallback hardened to avoid “facelift trap” (e.g., picking 2014–2017 for a 2023 query).
 - Continuation/stop decision if end is “present” or exactly 2025 (estimate continuation or clip).
 - Digit-aware strict model matching (Q5 will not match Q3).
 - Safer filenames (use the user's typed model).
@@ -26,8 +28,7 @@ import pandas as pd
 from tabulate import tabulate
 from collections import Counter
 
-# NEW: for Wikipedia HTML parsing
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup  # Wikipedia HTML parsing
 
 # ------------------ Secrets (env) ------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -217,7 +218,7 @@ def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
             for _, v in box.items():
                 if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        # FIXED QUOTING INSIDE F-STRING
+        # QUOTING FIXED: single quotes inside f-string
         add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
     return blobs
 
@@ -294,14 +295,12 @@ def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
     w  = best_number_for_region(blobs_all, "world",  model, gen, year)
     return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w}
 
-# ------------------ Wikipedia API helpers (NEW) ---------------
+# ------------------ Wikipedia API helpers ---------------
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 
-# Year range regex to capture “1998–2005”, “1998-2005”, “1998—2005”, “1998–present”, etc.
 YEAR_RANGE_RE = re.compile(
     r"(?P<start>\b\d{4}\b)\s*[–—-]\s*(?P<end>\b\d{4}\b|present|current|ongoing|to\s+present)", re.IGNORECASE
 )
-# Headings like “First generation (E10; 1966–1970)”
 PARENS_RANGE_RE = re.compile(
     r"\((?:[^()]*?;?\s*)?(?P<start>\d{4})\s*[–—-]\s*(?P<end>\d{4}|present|current|ongoing)\)", re.IGNORECASE
 )
@@ -351,11 +350,16 @@ def _clean_text(s: str) -> str:
     return " ".join((s or "").split())
 
 def _extract_generation_headings(soup: BeautifulSoup) -> List[Tuple[str, str]]:
+    """
+    Accept headings that look like generation titles, including:
+    - "First generation (...)" (contains 'generation')
+    - "Mk I", "Mk 7", "Mark II", "Mark 5", etc. (roman or digits)
+    """
     gens = []
+    GEN_HDR_RE = re.compile(r'\b(generation|mk\.?\s*[ivx\d]+|mark\s*[ivx\d]+)\b', re.I)
     for tag in soup.find_all(["h2", "h3", "h4"]):
         heading = tag.get_text(" ", strip=True)
-        lower = heading.lower()
-        if ("generation" in lower) or re.search(r"\bmk\d+\b", lower):
+        if GEN_HDR_RE.search(heading):
             gens.append((tag.name, heading))
     return gens
 
@@ -371,10 +375,11 @@ def parse_generations_from_wikipedia_html(html_content: str) -> List[Dict[str, A
     soup = BeautifulSoup(html_content, "html.parser")
     gens = _extract_generation_headings(soup)
 
+    # Fallback: scan headings for year ranges (include h4)
     if not gens:
-        for tag in soup.find_all(["h2", "h3"]):
+        for tag in soup.find_all(["h2", "h3", "h4"]):
             txt = tag.get_text(" ", strip=True)
-            if YEAR_RANGE_RE.search(txt):
+            if YEAR_RANGE_RE.search(_normalize_dash(txt)):
                 gens.append((tag.name, txt))
 
     out = []
@@ -404,17 +409,23 @@ def parse_generations_from_wikipedia_html(html_content: str) -> List[Dict[str, A
 
 def detect_generation_via_wikipedia_api(model: str, view_year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
     """
-    Wikipedia-first generation detector.
-    Tries to pick the generation window whose [start, end] covers the view_year,
-    otherwise the closest active window around it.
-    Returns: (gen_label, (start,end), diagnostics)
+    Wikipedia-first generation detector. (With light retries for robustness.)
+    Prefers windows that cover the view_year; if multiple cover, prefers the latest start.
     """
     pageid, title = wiki_search_page(model)
-    if not pageid: 
-        return None, None, {"basis": "wikipedia_api", "status": "no_page"}
+    if not pageid:
+        time.sleep(0.25)  # quick retry on search
+        pageid, title = wiki_search_page(model)
+        if not pageid:
+            return None, None, {"basis": "wikipedia_api", "status": "no_page"}
+
     html = wiki_fetch_page_html(pageid)
     if not html:
-        return None, None, {"basis": "wikipedia_api", "status": "no_html", "pageid": pageid, "title": title}
+        time.sleep(0.25)  # quick retry on parse/html
+        html = wiki_fetch_page_html(pageid)
+        if not html:
+            return None, None, {"basis": "wikipedia_api", "status": "no_html", "pageid": pageid, "title": title}
+
     gens = parse_generations_from_wikipedia_html(html)
     if not gens:
         return None, None, {"basis": "wikipedia_api", "status": "no_generations", "pageid": pageid, "title": title}
@@ -440,15 +451,13 @@ def detect_generation_via_wikipedia_api(model: str, view_year: int) -> Tuple[Opt
     if not windows: 
         return None, None, {"basis": "wikipedia_api", "status": "no_windows_parsed", "pageid": pageid, "title": title}
 
-    # Prefer window covering the view_year, else nearest (by distance)
     covering = [(s,e,h) for (s,e,h) in windows if (s-1) <= view_year <= (e+1)]
-    pick = None
     if covering:
-        # If multiple cover, choose the narrowest (more precise) then latest start
-        covering.sort(key=lambda t: ((t[1]-t[0]), -t[0]))
+        # Prefer the newest generation among covering ones; if tie, prefer precise (non-present) end
+        covering.sort(key=lambda t: (-t[0], (t[1] == DEADLINE_YEAR)))
         pick = covering[0]
     else:
-        # choose the window with minimal distance to view_year
+        # choose minimal distance to view_year; tie-breaker prefers later start
         def dist(s,e):
             if view_year < s: return s - view_year
             if view_year > e: return view_year - e
@@ -457,22 +466,14 @@ def detect_generation_via_wikipedia_api(model: str, view_year: int) -> Tuple[Opt
         pick = windows[0]
 
     start, end, heading = pick
-    # Try to infer a "MkN" label from heading; fallback to "GEN"
     m = re.search(r'\b(?:mk|mark|gen(?:eration)?)\s*([ivx\d]{1,3})\b', heading, flags=re.I)
     gen_label = f"Mk{m.group(1).upper()}" if m else "GEN"
 
     diag = {"basis":"wikipedia_api","pageid":pageid,"title":title,"heading":heading}
     return gen_label, (start, end), diag
 
-# ------------------ Continuation decisions (UPDATED) ------------
+# ------------------ Continuation decisions ------------
 def decide_continuation_if_present(model: str, window: Tuple[int,int], ref_year: int = 2025) -> Tuple[int, Dict[str, Any]]:
-    """
-    If window end == DEADLINE_YEAR due to 'present', probe web for end/continuation signals.
-    Heuristics:
-    - If we find "final edition", "production ended", "successor unveiled" with dates ≤ ref_year, clip to that year.
-    - Else, assume continuation through ref_year+2 with gentle decay (handled later in smoothing/estimation).
-    Returns: (resolved_end_year, diagnostics)
-    """
     start, end = window
     if end != DEADLINE_YEAR:
         return end, {"basis": "fixed_range", "signals": []}
@@ -505,21 +506,10 @@ def decide_continuation_if_present(model: str, window: Tuple[int,int], ref_year:
     if stop_hit_years:
         return max(min(ref_year, max(stop_hit_years)), start), diag
 
-    # No explicit stop → assume keeps selling modestly beyond ref_year
-    assumed = max(ref_year + 2, start + 4)  # at least a normal tail
+    assumed = max(ref_year + 2, start + 4)
     return min(assumed, DEADLINE_YEAR), diag
 
 def decide_continuation_if_exact_2025(model: str, window: Tuple[int,int], ref_year: int = 2025) -> Tuple[int, Dict[str, Any]]:
-    """
-    If the detected window ends exactly in 2025 (not 'present'), try to infer whether production
-    continues beyond 2025 or truly stops in 2025.
-
-    Heuristics:
-    - Search for continuation signals (e.g., "MY2026", "2026 model year", "facelift 2026").
-      If found and no explicit "production ended" ≤ 2025, extend to 2027 (ref_year+2).
-    - If explicit stop/discontinue in 2025 is found, keep 2025.
-    - Else, conservatively extend by +1 year (2026) to model sell-down / continued production drift.
-    """
     start, end = window
     if end != ref_year:
         return end, {"basis":"not_2025_end","signals":[]}
@@ -551,8 +541,7 @@ def decide_continuation_if_exact_2025(model: str, window: Tuple[int,int], ref_ye
         return end, diag  # keep 2025
     if cont_signal:
         return min(ref_year + 2, DEADLINE_YEAR), diag  # extend to 2027
-    # uncertain → mild extension to 2026
-    return min(ref_year + 1, DEADLINE_YEAR), diag
+    return min(ref_year + 1, DEADLINE_YEAR), diag  # mild extension to 2026
 
 # ------------------ Local seeds/history -------------
 def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int,int]) -> Optional[str]:
@@ -617,9 +606,8 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
     Generation detection with WEB-FIRST policy (Wikipedia API first, then SERP fallback, then local).
     Returns 4-tuple: (gen_label: str, window:(start,end), basis: str, note: str)
 
-    IMPORTANT:
-    - We return the full window (min..max) so we can start at the launch year.
-    - If end is 'present' or exactly 2025, we resolve continuation/stop.
+    We return the full window so we can start at the launch year.
+    If end is 'present' or exactly 2025, we resolve continuation/stop.
     """
     def _window_from_local_for_label(gen_label: str):
         det_norm = normalize_generation(gen_label)
@@ -636,16 +624,16 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
         gs, ge = window
         return (max(1990, gs), min(ge, DEADLINE_YEAR))
 
-    # --- WEB FIRST (Wikipedia API) ---
+    # --- WEB FIRST (Wikipedia API, sticky) ---
     if GEN_WINDOW_SOURCE == "web_first":
         gen_label_wiki, win_wiki, wiki_diag = detect_generation_via_wikipedia_api(model, user_year)
         if win_wiki:
             start, end = win_wiki
-            # If 'present' was inferred to DEADLINE_YEAR by parser (no numeric end), treat as 'present' and resolve
-            end_resolved, diag_present = decide_continuation_if_present(model, (start, end), ref_year=2025)
-            # If Wikipedia gave an exact 2025 end, try to extend/confirm
+            # Resolve 'present'
+            end_resolved, _diag_present = decide_continuation_if_present(model, (start, end), ref_year=2025)
+            # If exact 2025, refine
             if end != DEADLINE_YEAR and end == 2025:
-                end_resolved, diag_2025 = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
+                end_resolved, _diag_2025 = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
                 basis = "wikipedia_api_end_2025_resolved"
                 note = "Wikipedia window; end=2025 resolved via web signals."
                 return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
@@ -653,7 +641,7 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
             note = "Window from Wikipedia headings; 'present' resolved vs 2025." if end == DEADLINE_YEAR else "Window from Wikipedia headings."
             return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
 
-    # --- SERP fallback for window ---
+    # --- SERP fallback for window (hardened against facelift trap) ---
     def detect_generation_via_serp(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
         queries = [
             f'site:wikipedia.org "{model}" generation production',
@@ -691,8 +679,12 @@ def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, u
                 y2 = m.group(2)
                 y2i = DEADLINE_YEAR if isinstance(y2, str) and y2.lower()=="present" else int(y2)
                 if not (1990 <= y1 <= 2100 and y1 <= y2i <= 2100): continue
-                in_view_bonus = 8 if (y1-1) <= year <= (y2i+1) else 0
-                sc = score_blob(t) + in_view_bonus
+
+                covers_view = (y1 - 1) <= year <= (y2i + 1)
+                cover_bonus = 50 if covers_view else 0
+                past_penalty = - (year - y2i) * 3 if (y2i < year - 1) else 0  # penalize windows far before view year
+
+                sc = score_blob(t) + cover_bonus + past_penalty
                 if sc > best_score:
                     best_score = sc
                     best_window = (y1, y2i)
@@ -836,7 +828,6 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
         seed["world"] = {"value": world_val, "source": local["world"]["source"], "is_model_level": True}
         constraints["world"]["exact"] = {start_year: min(world_val, WORLD_MAX_CAP)}
 
-    # If local misses seeds entirely → consider web
     if (eu_val is None and world_val is None
         and not seed["history_europe"] and not seed["history_world"]):
         if web and web.get("europe"):
@@ -848,7 +839,6 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
             seed["world"] = {"value": world_val, "source": "web-serp", "is_model_level": bool(web["world"].get("is_model_level"))}
             constraints.setdefault("world",{}).setdefault("exact",{})[start_year] = min(world_val, WORLD_MAX_CAP)
 
-    # Plausibility check for EU seed (if present and came from web)
     if seed.get("europe") and str(seed["europe"].get("source","")).startswith("web"):
         prior_avg  = prior_generation_avg_eu(db_eu, display_model, target_gen, start_year)
         model_tot  = model_total_eu_for_year(db_eu, display_model, start_year)
@@ -869,7 +859,6 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
     elif seed.get("europe") and str(seed["europe"].get("source","")).startswith("local"):
         plaus["source_note"] = "EU seed from local Top100"
 
-    # If World exact missing but EU exists → build EU→World range
     if world_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, local.get("model_key"), start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
@@ -1231,7 +1220,6 @@ def main():
     icor_status["plausibility"] = plaus
 
     # -------------------- SAVE --------------------
-    # Filenames now use the *user's* typed model to avoid fuzzy-mismatch naming.
     safe_model_for_name = user["car_model"].replace(" ", "_")
     safe_gen = normalize_generation(gen_label or "GEN").replace(" ", "_")
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
