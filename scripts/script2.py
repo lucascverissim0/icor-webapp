@@ -15,6 +15,12 @@ This version adds:
 - Digit-aware strict model matching (Q5 will not match Q3).
 - Safer filenames (use the user's typed model).
 - Estimation starts at generation launch year (window start), not the user's year.
+
+And now **revised** to ensure the chosen generation window is relevant to the user's year:
+- Sanitize the Wikipedia search query to the base model (strip years/Mk tokens).
+- Prefer main model pages over single-generation pages.
+- If the first hit is a per-generation page, also fetch the main page and merge windows.
+- Select the window that covers the user's year; else choose the nearest one.
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -217,7 +223,6 @@ def pull_text_blobs(serp_json: Dict[str, Any]) -> List[Dict[str, str]]:
             for _, v in box.items():
                 if isinstance(v, str): add(key, v, serp_json.get("search_metadata",{}).get("google_url",""))
     for item in serp_json.get("organic_results", [])[:MAX_RESULTS_TO_SCAN]:
-        # FIXED QUOTING INSIDE F-STRING
         add("organic", f"{item.get('title','')}\n{item.get('snippet','')}".strip(), item.get("link",""))
     return blobs
 
@@ -294,7 +299,7 @@ def serp_seed(model: str, gen: str, year: int) -> Dict[str, Any]:
     w  = best_number_for_region(blobs_all, "world",  model, gen, year)
     return {"model": model, "gen": gen, "year": year, "europe": eu, "world": w}
 
-# ------------------ Wikipedia API helpers (NEW) ---------------
+# ------------------ Wikipedia API helpers (REVISED) ---------------
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 
 # Year range regex to capture “1998–2005”, “1998-2005”, “1998—2005”, “1998–present”, etc.
@@ -306,22 +311,54 @@ PARENS_RANGE_RE = re.compile(
     r"\((?:[^()]*?;?\s*)?(?P<start>\d{4})\s*[–—-]\s*(?P<end>\d{4}|present|current|ongoing)\)", re.IGNORECASE
 )
 
+# NEW: tokens & helpers to steer search toward main model page
+GEN_TOKENS_RE = re.compile(r'\b(mk\s*\d+|mark\s*\d+|gen(?:eration)?\s*\w+|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b', re.I)
+YEAR_TOKEN_RE = re.compile(r'\b(19\d{2}|20\d{2})\b')
+
+def sanitize_model_for_wiki(q: str) -> str:
+    s = q.strip()
+    s = GEN_TOKENS_RE.sub('', s)
+    s = YEAR_TOKEN_RE.sub('', s)
+    s = re.sub(r'\s+', ' ', s).strip(' -–—')
+    return s
+
+def looks_like_generation_page(title: str) -> bool:
+    t = title.lower()
+    if re.search(r'\bmk\s*\d+\b', t): return True
+    if 'generation' in t: return True
+    if re.search(r'\([^)0-9]*\d{4}', t): return True  # heuristic for per-gen titles with years/chassis
+    return False
+
 def wiki_search_page(query: str) -> Tuple[Optional[int], Optional[str]]:
-    """Return the best pageid + title for a query using Wikipedia search."""
+    """
+    Prefer the *main model* page (not a single-generation page).
+    Strategy:
+      1) Search with a sanitized query (no years/Mk tokens), using intitle bias.
+      2) Among results, pick the first title that does NOT look like a generation page.
+      3) Fallback to the top result if nothing else found.
+    """
     try:
+        base_q = sanitize_model_for_wiki(query)
         params = {
             "action": "query",
             "list": "search",
-            "srsearch": query,
-            "srlimit": 1,
             "format": "json",
+            "srlimit": 5,
+            "srsearch": f'intitle:"{base_q}" {base_q}',
             "srnamespace": 0,
         }
         r = requests.get(WIKI_API, params=params, timeout=SEARCH_TIMEOUT)
         r.raise_for_status()
         data = r.json()
         results = data.get("query", {}).get("search", [])
-        if not results: return None, None
+        if not results:
+            return None, None
+        # Prefer a non-generation page
+        for res in results:
+            title = res.get("title", "")
+            if title and not looks_like_generation_page(title):
+                return res["pageid"], title
+        # Else fallback to top hit
         top = results[0]
         return top["pageid"], top["title"]
     except Exception:
@@ -404,30 +441,51 @@ def parse_generations_from_wikipedia_html(html_content: str) -> List[Dict[str, A
 
 def detect_generation_via_wikipedia_api(model: str, view_year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
     """
-    Wikipedia-first generation detector.
-    Tries to pick the generation window whose [start, end] covers the view_year,
-    otherwise the closest active window around it.
-    Returns: (gen_label, (start,end), diagnostics)
+    Wikipedia-first generation detector with relevance to 'view_year'.
+    If the initial page looks like a single-generation page (e.g., 'Mk7'),
+    we also fetch the main model page and merge generation windows before choosing.
     """
+    # 1) Search & parse first page
     pageid, title = wiki_search_page(model)
     if not pageid: 
         return None, None, {"basis": "wikipedia_api", "status": "no_page"}
     html = wiki_fetch_page_html(pageid)
     if not html:
         return None, None, {"basis": "wikipedia_api", "status": "no_html", "pageid": pageid, "title": title}
-    gens = parse_generations_from_wikipedia_html(html)
-    if not gens:
-        return None, None, {"basis": "wikipedia_api", "status": "no_generations", "pageid": pageid, "title": title}
+    gens_primary = parse_generations_from_wikipedia_html(html)
 
-    # Convert to numeric windows
+    # 2) If this looks like a per-generation page, also load the main model page
+    gens_extra = []
+    diag_merge = {"merged": False, "extra_title": None}
+    if looks_like_generation_page(title):
+        base_q = sanitize_model_for_wiki(model)
+        pid2, title2 = wiki_search_page(base_q)
+        if pid2 and title2 and title2 != title and not looks_like_generation_page(title2):
+            html2 = wiki_fetch_page_html(pid2)
+            if html2:
+                gens_extra = parse_generations_from_wikipedia_html(html2)
+                diag_merge = {"merged": True, "extra_title": title2}
+
+    # 3) Merge windows (dedupe by (start,end,heading))
+    all_gens = {(g.get("launch_year"), g.get("end_year"), g.get("generation_heading")) for g in (gens_primary + gens_extra)}
+    gens = [{"launch_year": a, "end_year": b, "generation_heading": c} for (a,b,c) in all_gens if a or b]
+
+    if not gens:
+        return None, None, {"basis": "wikipedia_api", "status": "no_generations", "pageid": pageid, "title": title, **diag_merge}
+
+    # 4) Build numeric windows
     windows = []
     for g in gens:
         try:
             start = int(g["launch_year"]) if g["launch_year"] else None
         except Exception:
             start = None
-        end_raw = g["end_year"]
-        if end_raw == "present" or end_raw is None:
+        end_raw = g.get("end_year")
+        if isinstance(end_raw, str):
+            end_raw_l = end_raw.lower()
+        else:
+            end_raw_l = ""
+        if end_raw_l in {"present","current","ongoing"} or not end_raw_l:
             end = DEADLINE_YEAR
         else:
             try:
@@ -438,17 +496,14 @@ def detect_generation_via_wikipedia_api(model: str, view_year: int) -> Tuple[Opt
             windows.append((start, end, g["generation_heading"]))
 
     if not windows: 
-        return None, None, {"basis": "wikipedia_api", "status": "no_windows_parsed", "pageid": pageid, "title": title}
+        return None, None, {"basis": "wikipedia_api", "status": "no_windows_parsed", "pageid": pageid, "title": title, **diag_merge}
 
-    # Prefer window covering the view_year, else nearest (by distance)
+    # 5) Choose the window *most relevant* to view_year
     covering = [(s,e,h) for (s,e,h) in windows if (s-1) <= view_year <= (e+1)]
-    pick = None
     if covering:
-        # If multiple cover, choose the narrowest (more precise) then latest start
-        covering.sort(key=lambda t: ((t[1]-t[0]), -t[0]))
+        covering.sort(key=lambda t: ((t[1]-t[0]), -t[0]))  # narrowest, then latest start
         pick = covering[0]
     else:
-        # choose the window with minimal distance to view_year
         def dist(s,e):
             if view_year < s: return s - view_year
             if view_year > e: return view_year - e
@@ -457,14 +512,24 @@ def detect_generation_via_wikipedia_api(model: str, view_year: int) -> Tuple[Opt
         pick = windows[0]
 
     start, end, heading = pick
-    # Try to infer a "MkN" label from heading; fallback to "GEN"
+
+    # 6) Resolve "present"/2025 ends as before
+    end_resolved, diag_present = decide_continuation_if_present(model, (start, end), ref_year=2025)
+    basis = "wikipedia_api_present_resolved" if end == DEADLINE_YEAR else "wikipedia_api_fixed"
+    note = "Window from Wikipedia headings; 'present' resolved vs 2025." if end == DEADLINE_YEAR else "Window from Wikipedia headings."
+    if end != DEADLINE_YEAR and end == 2025:
+        end_resolved, diag_2025 = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
+        basis = "wikipedia_api_end_2025_resolved"
+        note = "Wikipedia window; end=2025 resolved via web signals."
+
+    # 7) Make a friendly gen label (MkN if discoverable)
     m = re.search(r'\b(?:mk|mark|gen(?:eration)?)\s*([ivx\d]{1,3})\b', heading, flags=re.I)
     gen_label = f"Mk{m.group(1).upper()}" if m else "GEN"
 
-    diag = {"basis":"wikipedia_api","pageid":pageid,"title":title,"heading":heading}
-    return gen_label, (start, end), diag
+    diag = {"basis": basis, "pageid": pageid, "title": title, "heading": heading, **diag_merge, "note": note}
+    return gen_label, (start, min(end_resolved, DEADLINE_YEAR)), diag
 
-# ------------------ Continuation decisions (UPDATED) ------------
+# ------------------ Continuation decisions (UNCHANGED) ------------
 def decide_continuation_if_present(model: str, window: Tuple[int,int], ref_year: int = 2025) -> Tuple[int, Dict[str, Any]]:
     """
     If window end == DEADLINE_YEAR due to 'present', probe web for end/continuation signals.
