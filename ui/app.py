@@ -12,7 +12,6 @@ import sys  # for sys.executable
 
 # =================== PAGE META + THEME ===================
 st.set_page_config(page_title="ICOR – Strategic Opportunities", layout="wide")
-print("[CHECKPOINT] Page config set")
 
 # ICOR styling for cards & tables
 st.markdown("""
@@ -45,8 +44,8 @@ def _consume_flag(flag_key: str) -> bool:
     return bool(st.session_state.pop(flag_key, False))
 
 # Consume any one-shot flags set just before a rerun
-_just_logged_in  = _consume_flag("_just_logged_in")
-_just_logged_out = _consume_flag("_just_logged_out")
+_just_logged_in   = _consume_flag("_just_logged_in")
+_just_logged_out  = _consume_flag("_just_logged_out")
 _just_ran_script1 = _consume_flag("_just_ran_script1")
 
 # =================== PATHS ===================
@@ -86,7 +85,6 @@ def find_logo_path() -> str | None:
     return None
 
 LOGO_PATH = find_logo_path()
-print(f"[CHECKPOINT] Paths | ROOT={PROJECT_ROOT} | DATA={DATA_DIR} | SCRIPTS={SCRIPTS_DIR} | LOGO={LOGO_PATH if LOGO_PATH else 'None'}")
 
 # =================== OPTIONAL: POSTHOG ===================
 def _safe_get(dict_like, dotted, default=None):
@@ -103,9 +101,6 @@ PH_HOST = _safe_get(st.secrets, "posthog.host", "https://app.posthog.com")
 if PH_KEY:
     posthog.project_api_key = PH_KEY
     posthog.host = PH_HOST
-    print("[CHECKPOINT] PostHog configured")
-else:
-    print("[CHECKPOINT] PostHog not configured")
 
 def track(event: str, props: dict | None = None):
     if not PH_KEY:
@@ -116,9 +111,12 @@ def track(event: str, props: dict | None = None):
     except Exception:
         pass
 
+# =================== DEBUG MODE (HIDE BACKLOG BY DEFAULT) ===================
+# Only show logs/backlog to admins when explicitly enabled.
+DEBUG_MODE = bool(_safe_get(st.secrets, "app.debug", False)) or bool(st.session_state.get("debug", False))
+
 # =================== AUTH (CUSTOM LOGIN) ===================
 USERS = st.secrets.get("users", {})
-print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
 def _verify_password(input_password: str, stored_password: str) -> bool:
     if not isinstance(stored_password, str):
@@ -207,7 +205,6 @@ def run_script1():
     path = os.path.join(SCRIPTS_DIR, SCRIPT1_FILENAME)
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
-    print("[CHECKPOINT] Running Script 1…")
     proc = subprocess.Popen(
         [sys.executable, path],
         cwd=DATA_DIR,
@@ -216,7 +213,6 @@ def run_script1():
         text=True,
     )
     out, code = _timeout_communicate(proc, timeout_sec=420)
-    print("[CHECKPOINT] Script 1 finished with code", code)
     return code, out
 
 @st.cache_data(show_spinner=False)
@@ -257,15 +253,21 @@ with st.sidebar:
     st.markdown("---")
     if st.button("Run backend (Script 1)"):
         started_at = int(time.time())
-        with st.status("Running backend…", expanded=False):
+        # Hide backlog: show a simple spinner to users
+        with st.spinner("Running backend…"):
             code, log = run_script1()
+        # Store full log in session for optional admin view
         st.session_state["_script1_log"] = log
         outcome = "success" if code == 0 else "error"
-        track("run_script1", {"status": outcome})
+        track("run_script1", {"status": outcome, "ts": started_at})
         if code != 0:
-            st.error("Backend failed. See log below.")
+            st.error("Backend failed to complete. Please try again or contact support.")
+            if DEBUG_MODE:
+                tail = "\n".join((log or "").splitlines()[-120:])
+                with st.expander("Backend run log (admin only)", expanded=False):
+                    st.code(tail)
         else:
-            st.success("Backend finished. Reloading…")
+            st.success("Backend finished.")
             # One-shot guard to avoid rerun loops
             st.session_state["_just_ran_script1"] = True
             st.rerun()
@@ -282,10 +284,12 @@ with st.sidebar:
         except Exception:
             pass
 
+# Only show logs to admins when debug is enabled
 log = st.session_state.get("_script1_log")
-if log:
-    with st.expander("Backend run log", expanded=False):
-        st.code(log)
+if log and DEBUG_MODE:
+    with st.expander("Backend run log (admin only)", expanded=False):
+        tail = "\n".join((log or "").splitlines()[-200:])
+        st.code(tail)
 
 # =================== LANDING: STRATEGIC TABLE ===================
 if not os.path.exists(EXCEL_PATH):
@@ -297,8 +301,11 @@ else:
     chosen_sheet = sheet_map[view]
     fallback = first_available_icor()
     if not sheet_exists(chosen_sheet):
-        st.caption(f"`{chosen_sheet}` not found. Showing `{fallback}` instead.")
-        chosen_sheet = fallback
+        if fallback:
+            st.caption(f"`{chosen_sheet}` not found. Showing `{fallback}` instead.")
+            chosen_sheet = fallback
+        else:
+            chosen_sheet = None
     if not chosen_sheet:
         st.error("No ICOR strategic sheets found in workbook.")
     else:
@@ -307,7 +314,10 @@ else:
             nice_table(df_icor)
             track("view_icor_sheet", {"sheet": chosen_sheet})
         except Exception as e:
-            st.error(f"Could not read `{chosen_sheet}`: {e}")
+            st.error("Could not load the selected sheet.")
+            if DEBUG_MODE:
+                with st.expander("Details (admin only)", expanded=False):
+                    st.code(str(e))
 
 # =================== NAV CARDS (styled buttons) ===================
 st.markdown(" ")
@@ -342,7 +352,10 @@ if section == "fleet":
             nice_table(read_sheet(sheet_name))
             track("view_fleet", {"region": region})
         except Exception as e:
-            st.error(f"Could not read `{sheet_name}`: {e}")
+            st.error(f"Could not read `{sheet_name}`.")
+            if DEBUG_MODE:
+                with st.expander("Details (admin only)", expanded=False):
+                    st.code(str(e))
 
 # =================== SECTION: REPLACEMENTS ===================
 elif section == "repl":
@@ -357,7 +370,10 @@ elif section == "repl":
             nice_table(read_sheet(sheet_name))
             track("view_repl", {"region": region})
         except Exception as e:
-            st.error(f"Could not read `{sheet_name}`: {e}")
+            st.error(f"Could not read `{sheet_name}`.")
+            if DEBUG_MODE:
+                with st.expander("Details (admin only)", expanded=False):
+                    st.code(str(e))
 
 # =================== SECTION: HISTORY ===================
 elif section == "history":
@@ -375,7 +391,10 @@ elif section == "history":
             nice_table(read_sheet(sheet_name))
             track("view_history", {"region": region, "year": year})
         except Exception as e:
-            st.error(f"Could not read `{sheet_name}`: {e}")
+            st.error(f"Could not read `{sheet_name}`.")
+            if DEBUG_MODE:
+                with st.expander("Details (admin only)", expanded=False):
+                    st.code(str(e))
 
 # =================== OPTIONAL: DEBUG HEARTBEAT ===================
 # Uncomment to see if the script is truly rerendering too often.
