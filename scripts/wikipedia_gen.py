@@ -3,115 +3,173 @@
 """
 wikipedia_gen.py
 ----------------
-High-accuracy generation window detector for car models using Wikipedia.
+High-accuracy generation window detector used by script2.py.
 
-Public API:
-    detect_via_wikipedia(model: str, user_year: int)
-        -> (gen_label: str|None, window: (start:int,end:int)|None, diag: dict)
+Public API (what script2 imports):
+    detect_via_wikipedia(model: str, user_year: int, lang: str = "en")
+      -> (gen_label: str | None,
+          window: tuple[int, int] | None,
+          diag: dict)
 
-Key behavior:
-- Uses a descriptive User-Agent (avoids 403).
-- Prefers the model's main page (not per-generation) when searching.
-- Parses BOTH generation sections and the page infobox.
-- NEW: Looks into the text **after each generation/Mk heading** to find year
-  ranges like "since 2019" when they are not inside the heading itself.
-- Selector **prefers generation/Mk windows**; only falls back to infobox if
-  no generation window covers `user_year`.
+- Reuses your robust scraping:
+  * Descriptive User-Agent + retries (avoids 403).
+  * Multilingual parsing (EN/FR/ES/DE/IT/PT).
+  * Parses main page headings + infobox.
+  * Discovers & parses Mk/“generation” subpages if the main page is too broad.
+  * Normalizes open-ended ranges to "present" and infers missing end years
+    as (next launch year - 1).
+- Selection prefers per-generation/Mk windows over broad infobox spans.
+
+You can also run this file directly as a CLI:
+    python scripts/wikipedia_gen.py --year 2022 "Volkswagen Golf"
 """
 
 from __future__ import annotations
+import sys
 import re
 import html
+import time
 import json
+import urllib.parse
+import argparse
 from typing import Optional, Tuple, List, Dict
 
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter, Retry
 
-# ------------------ Config -------------------------
-WIKI_API = "https://en.wikipedia.org/w/api.php"
-SEARCH_TIMEOUT = 20
-DEADLINE_YEAR = 2035  # caller may clip further
+# ---------- Constants ----------
+DEADLINE_YEAR = 2035
+REQUEST_DELAY_SEC = 0.2
 
-# Wikipedia requires a descriptive UA
-WIKI_HEADERS = {
-    "User-Agent": "ICOR-GenWindow/1.2 (+contact: your-email@your-domain.com)"
+# ---------- HTTP session (polite UA + retries) ----------
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "ICOR-GenWindow/2.6 (+contact: your-email@your-domain.com)"
+})
+retries = Retry(
+    total=4,
+    backoff_factor=1.0,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+SESSION.mount("https://", HTTPAdapter(max_retries=retries))
+SESSION.mount("http://", HTTPAdapter(max_retries=retries))
+
+def _get(url: str, params: dict) -> requests.Response:
+    time.sleep(REQUEST_DELAY_SEC)
+    r = SESSION.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    return r
+
+# ------------- Regexes & i18n -------------
+PRESENT_WORDS = {
+    "present", "current", "ongoing",
+    "présent", "actuel", "en cours",
+    "presente", "attuale", "oggi",
+    "atual", "em curso",
+    "aktuell", "heute", "bis heute"
 }
 
-# ------------------ Regexes ------------------------
-YEAR_RANGE_RE = re.compile(
-    r"(?P<start>\b\d{4}\b)\s*[–—-]\s*(?P<end>\b\d{4}\b|present|current|ongoing|to\s+present)",
-    re.IGNORECASE,
+# (2012–2019), (2012-2019), (2012–), (2012-)
+PARENS_RANGE_FLEX_RE = re.compile(
+    r"\((?:[^()]*?;?\s*)?(?P<start>\d{4})\s*[–—-]\s*(?P<end>\d{4}|"
+    r"(?:present|current|ongoing|"
+    r"présent|actuel|en cours|"
+    r"presente|attuale|oggi|"
+    r"atual|em curso|"
+    r"aktuell|heute|bis heute"
+    r"))?\)", re.IGNORECASE
 )
-PARENS_RANGE_RE = re.compile(
-    r"\((?:[^()]*?;?\s*)?(?P<start>\d{4})\s*[–—-]\s*(?P<end>\d{4}|present|current|ongoing|to\s+present)\)",
-    re.IGNORECASE,
-)
-SINCE_RE = re.compile(r"\bsince\s+(?P<start>\d{4})\b", re.IGNORECASE)
-FROM_TO_RE = re.compile(
-    r"\bfrom\s+(?P<start>\d{4})\s+(?:to|-|until)\s+(?P<end>\d{4}|present|current|ongoing)\b",
-    re.IGNORECASE,
-)
-GEN_TOKEN_RE = re.compile(
-    r'\b(mk\s*\d+|mark\s*\d+|gen(?:eration)?\s*\w+|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b',
-    re.IGNORECASE,
-)
-YEAR_TOKEN_RE = re.compile(r'\b(19\d{2}|20\d{2})\b')
 
-# ------------------ Helpers ------------------------
-def _normalize_dash(s: str) -> str:
-    return s.replace("—", "–").replace("-", "–")
+# 2012–2019 or 2012–present (no parentheses)
+YEAR_RANGE_FLEX_RE = re.compile(
+    r"(?P<start>\b\d{4}\b)\s*[–—-]\s*(?P<end>\b\d{4}\b|"
+    r"(?:present|current|ongoing|"
+    r"présent|actuel|en cours|"
+    r"presente|attuale|oggi|"
+    r"atual|em curso|"
+    r"aktuell|heute|bis heute"
+    r"))", re.IGNORECASE
+)
 
-def _clean_text(s: str) -> str:
-    return " ".join((s or "").split())
+# Mk / Mark detection
+MK_TEXT_RE = re.compile(r"\b(?:mk|mark)\s*(?:[ivxlcdm]+|\d+)\b", re.IGNORECASE)
 
-def _to_int(x: str) -> Optional[int]:
+# “generation” keywords (multi-lingual)
+GEN_KEYWORDS = [
+    "generation", "génération", "generación", "geração", "generazione"
+]
+
+# ---------- Helpers ----------
+def _to_int(x):
     try:
         return int(x)
     except Exception:
         return None
 
 def _is_open_end(token: str) -> bool:
-    return token.lower() in {"present", "current", "ongoing", "to present"}
+    return (token or "").strip().lower() in PRESENT_WORDS
 
-def _looks_like_generation_title(title: str) -> bool:
-    t = title.lower()
-    if re.search(r'\bmk\s*\d+\b', t): return True
-    if "generation" in t: return True
-    if re.search(r'\([^)0-9]*\d{4}', t): return True
+def normalize_dash(s: str) -> str:
+    return (s or "").replace("—", "–").replace("-", "–")
+
+def clean_text(s: str) -> str:
+    return " ".join((s or "").split())
+
+def heading_looks_like_generation(text: str) -> bool:
+    low = text.lower()
+    if MK_TEXT_RE.search(low): return True
+    if any(kw in low for kw in GEN_KEYWORDS): return True
+    if PARENS_RANGE_FLEX_RE.search(low): return True
     return False
 
-def _sanitize_query(model: str) -> str:
-    s = model.strip()
-    s = GEN_TOKEN_RE.sub("", s)
-    s = YEAR_TOKEN_RE.sub("", s)
-    s = re.sub(r"\s+", " ", s).strip(" -–—")
-    return s
+# ---------- Wikipedia API wrapper ----------
+def _api_base(lang: str) -> str:
+    return f"https://{lang}.wikipedia.org/w/api.php"
 
-# ------------------ Wikipedia fetchers --------------
-def _search_wikipedia_page(query: str) -> tuple[Optional[int], Optional[str]]:
-    q = _sanitize_query(query)
+def search_wikipedia_page(model: str, lang: str) -> tuple[Optional[int], Optional[str]]:
     params = {
         "action": "query",
         "list": "search",
-        "format": "json",
+        "srsearch": model,
         "srlimit": 5,
-        "srsearch": f'intitle:"{q}" {q}',
+        "format": "json",
         "srnamespace": 0,
     }
-    r = requests.get(WIKI_API, params=params, headers=WIKI_HEADERS, timeout=SEARCH_TIMEOUT)
-    r.raise_for_status()
+    r = _get(_api_base(lang), params)
     results = r.json().get("query", {}).get("search", [])
     if not results:
         return None, None
-    for res in results:
-        title = res.get("title", "")
-        if title and not _looks_like_generation_title(title):
-            return res.get("pageid"), html.unescape(title)
-    top = results[0]
-    return top.get("pageid"), html.unescape(top.get("title", ""))
 
-def _parse_page_html(pageid: int) -> str:
+    # Filter out disambiguation pages
+    pageids = [str(res["pageid"]) for res in results]
+    titles = [html.unescape(res["title"]) for res in results]
+    props_params = {
+        "action": "query", "pageids": "|".join(pageids),
+        "prop": "pageprops", "format": "json",
+    }
+    r2 = _get(_api_base(lang), props_params)
+    pageinfo = r2.json().get("query", {}).get("pages", {})
+
+    for pid, title in zip(pageids, titles):
+        page = pageinfo.get(pid, {})
+        if "disambiguation" not in page.get("pageprops", {}):
+            return int(pid), title
+
+    top = results[0]
+    return top["pageid"], html.unescape(top["title"])
+
+def get_pageid_by_title(title: str, lang: str) -> Optional[int]:
+    params = {"action": "query", "titles": title, "format": "json"}
+    r = _get(_api_base(lang), params)
+    pages = r.json().get("query", {}).get("pages", {})
+    for pid, page in pages.items():
+        if pid != "-1":
+            return int(pid)
+    return None
+
+def fetch_page_html_by_pageid(pageid: int, lang: str) -> str:
     params = {
         "action": "parse",
         "pageid": pageid,
@@ -119,240 +177,257 @@ def _parse_page_html(pageid: int) -> str:
         "format": "json",
         "disableeditsection": 1,
     }
-    r = requests.get(WIKI_API, params=params, headers=WIKI_HEADERS, timeout=SEARCH_TIMEOUT)
-    r.raise_for_status()
+    r = _get(_api_base(lang), params)
     return r.json().get("parse", {}).get("text", {}).get("*", "") or ""
 
-# ------------------ Extractors ----------------------
-def _extract_infobox_years(soup: BeautifulSoup) -> List[tuple[int, int, str]]:
-    windows: List[tuple[int, int, str]] = []
+# ---------- Parsing ----------
+def extract_years_any(text: str) -> tuple[Optional[str], Optional[str]]:
+    t = normalize_dash(text)
+    m = PARENS_RANGE_FLEX_RE.search(t) or YEAR_RANGE_FLEX_RE.search(t)
+    if not m:
+        # also catch “since 2019 / seit / depuis”
+        m2 = re.search(r"\b(depuis|seit|since)\s+(?P<start>\d{4})\b", t, re.IGNORECASE)
+        if m2: return m2.group("start"), "present"
+        return None, None
+    start = m.group("start")
+    end = m.group("end")
+    if (not end) or _is_open_end(end):
+        end = "present"
+    return start, end
+
+def extract_generation_headings(soup: BeautifulSoup) -> List[str]:
+    return [
+        tag.get_text(" ", strip=True)
+        for tag in soup.find_all(["h2","h3","h4"])
+        if heading_looks_like_generation(tag.get_text(" ", strip=True))
+    ]
+
+def extract_infobox_years(soup: BeautifulSoup) -> tuple[Optional[str], Optional[str]]:
     infobox = soup.find("table", class_=lambda c: c and "infobox" in c)
     if not infobox:
-        return windows
-
-    def parse_value_text(text: str) -> List[tuple[int, int]]:
-        text = _normalize_dash(html.unescape(text or ""))
-        wins: List[tuple[int, int]] = []
-
-        for m in PARENS_RANGE_RE.finditer(text):
-            s = _to_int(m.group("start")); e_s = m.group("end")
-            if not s: continue
-            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
-            if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
-                wins.append((s, e))
-
-        for m in YEAR_RANGE_RE.finditer(text):
-            s = _to_int(m.group("start")); e_s = m.group("end")
-            if not s: continue
-            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
-            if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
-                wins.append((s, e))
-        return wins
-
+        return None, None
     for row in infobox.find_all("tr"):
-        th = row.find("th")
-        if not th: continue
-        label = _clean_text(th.get_text(" ", strip=True))
-        ll = label.lower()
-        if "production" in ll or "model years" in ll:
-            td = row.find("td")
-            if not td: continue
-            val_text = _clean_text(td.get_text(" ", strip=True))
-            for (s, e) in parse_value_text(val_text):
-                windows.append((s, e, f"Infobox {label}"))
+        th, td = row.find("th"), row.find("td")
+        if not th or not td:
+            continue
+        label = th.get_text(" ", strip=True).lower()
+        if label in (
+            "production","model years","production years",
+            "années de production","años de producción",
+            "produktionszeitraum","anni di produzione","anos de produção"
+        ):
+            return extract_years_any(td.get_text(" ", strip=True))
+    return None, None
 
-    return windows
+def parse_generations_from_html(html_content: str) -> List[Dict]:
+    soup = BeautifulSoup(html_content, "html.parser")
+    out, seen = [], set()
 
-def _scan_following_for_years(h: Tag, max_nodes: int = 10) -> Optional[tuple[int,int]]:
-    """
-    Look at the first few siblings after a heading until the next heading of the
-    same or higher level; try to spot year ranges or 'since YYYY'.
-    """
-    # Determine levels (h2=2, h3=3, h4=4)
-    level = int(h.name[-1]) if h.name and h.name[-1].isdigit() else 7
-    count = 0
-    for sib in h.next_siblings:
-        if isinstance(sib, Tag):
-            if sib.name in ("h2", "h3", "h4"):
-                # Stop at next heading of same or higher hierarchy
-                nxt_level = int(sib.name[-1])
-                if nxt_level <= level:
-                    break
-            text = _normalize_dash(_clean_text(sib.get_text(" ", strip=True)))
-            if not text:
-                continue
-            # Try patterns
-            m = PARENS_RANGE_RE.search(text) or YEAR_RANGE_RE.search(text)
-            if m:
-                s = _to_int(m.group("start")); e_s = m.group("end")
-                if s:
-                    e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
-                    return (s, e)
-            m = FROM_TO_RE.search(text)
-            if m:
-                s = _to_int(m.group("start")); e_s = m.group("end")
-                if s:
-                    e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
-                    return (s, e)
-            m = SINCE_RE.search(text)
-            if m:
-                s = _to_int(m.group("start"))
-                if s:
-                    return (s, DEADLINE_YEAR)
-            count += 1
-            if count >= max_nodes:
-                break
-    return None
+    # Headings first
+    for heading in extract_generation_headings(soup):
+        s, e = extract_years_any(heading)
+        if s or e:
+            key = (s or "", e or "", heading)
+            if key in seen: continue
+            seen.add(key)
+            out.append({
+                "source": "heading",
+                "title_hint": None,
+                "generation_heading": clean_text(heading),
+                "launch_year": s,
+                "end_year": e,
+            })
 
-def _extract_generation_sections(soup: BeautifulSoup) -> List[tuple[int, int, str]]:
-    """
-    Gather windows around headings that look like "generation" or "MkN".
-    Looks in the heading AND the immediate section content after it.
-    """
-    windows: List[tuple[int, int, str]] = []
-    for tag in soup.find_all(["h2", "h3", "h4"]):
-        heading = tag.get_text(" ", strip=True)
-        h_norm = _normalize_dash(heading)
-        lower = h_norm.lower()
-        if ("generation" in lower) or re.search(r"\bmk\s*\d+\b", lower):
-            # Inside heading
-            m = PARENS_RANGE_RE.search(h_norm) or YEAR_RANGE_RE.search(h_norm)
-            if m:
-                s = _to_int(m.group("start")); e_s = m.group("end")
-                if s:
-                    e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
-                    if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
-                        windows.append((s, e, _clean_text(heading)))
-                        continue
-            # Not in heading → look just after it
-            se = _scan_following_for_years(tag)
-            if se:
-                windows.append((se[0], se[1], _clean_text(heading)))
-    return windows
+    # Infobox fallback
+    if not out:
+        s, e = extract_infobox_years(soup)
+        if s or e:
+            out.append({
+                "source": "infobox",
+                "title_hint": None,
+                "generation_heading": "Infobox production/model years",
+                "launch_year": s,
+                "end_year": e,
+            })
 
-def _label_from_heading(heading: str) -> Optional[str]:
-    m = re.search(r'\b(?:mk|mark|gen(?:eration)?)\s*([ivx\d]{1,3})\b', heading, flags=re.IGNORECASE)
-    if m:
-        return f"Mk{m.group(1).upper()}"
-    ord_map = {
-        "first":"Mk1","second":"Mk2","third":"Mk3","fourth":"Mk4","fifth":"Mk5",
-        "sixth":"Mk6","seventh":"Mk7","eighth":"Mk8","ninth":"Mk9","tenth":"Mk10"
-    }
-    for k,v in ord_map.items():
-        if re.search(rf'\b{k}\b', heading, re.IGNORECASE):
-            return v
-    return None
-
-# ------------------ Selection logic -----------------
-def _merge_and_dedupe(windows: List[tuple[int,int,str]]) -> List[tuple[int,int,str]]:
-    seen = set()
-    out: List[tuple[int,int,str]] = []
-    for s,e,h in windows:
-        key = (s,e,_clean_text(h))
-        if key in seen: continue
-        seen.add(key)
-        out.append((s,e,_clean_text(h)))
-    out.sort(key=lambda t: (t[0], t[1]))
+    def sort_key(item):
+        try: return int(item["launch_year"]) if item["launch_year"] else 99999
+        except Exception: return 99999
+    out.sort(sort_key)
     return out
 
-def _select_window_for_year(windows: List[tuple[int,int,str]], user_year: int) -> tuple[int,int,str]:
+# ---------- Subpage discovery ----------
+def discover_generation_subpages_from_links(main_html: str, main_title: str) -> List[str]:
+    soup = BeautifulSoup(main_html, "html.parser")
+    content_root = soup.find(id="mw-content-text") or soup
+    candidates = set()
+    base = main_title.split("(")[0].strip().lower()
+
+    for a in content_root.find_all("a", href=True):
+        text = a.get_text(" ", strip=True)
+        if not text: continue
+        href = a["href"]
+        if not href.startswith("/wiki/"): continue
+        if any(prefix in href for prefix in ("/wiki/Help:","/wiki/Special:","/wiki/Talk:","/wiki/Category:","/wiki/File:","/wiki/Portal:","/wiki/Template:")):
+            continue
+        if heading_looks_like_generation(text):
+            title = a.get("title") or urllib.parse.unquote(href.split("/wiki/")[-1]).replace("_"," ")
+            if base.split()[0] in title.lower() or base in title.lower():
+                candidates.add(title)
+
+    return sorted(candidates)
+
+def discover_generation_subpages_via_search(main_title: str, lang: str) -> List[str]:
+    queries = [
+        f'intitle:"{main_title}" intitle:Mk',
+        f'intitle:"{main_title}" intitle:Mark',
+        f'"{main_title}" Mk',
+        f'"{main_title}" "first generation"',
+        f'"{main_title}" "second generation"',
+        f'"{main_title}" "première génération"',
+        f'"{main_title}" "seconde génération"',
+    ]
+    titles = set()
+    for q in queries:
+        params = {"action":"query","list":"search","srsearch":q,"srlimit":20,"format":"json","srnamespace":0}
+        r = _get(_api_base(lang), params)
+        for hit in r.json().get("query",{}).get("search",[]):
+            title = html.unescape(hit["title"])
+            low = title.lower()
+            if (" mk" in low or "mk" in low or "génération" in low or "generation" in low) and main_title.split("(")[0].strip().split()[0].lower() in low:
+                titles.add(title)
+    return sorted(titles)
+
+# ---------- Inference & selection ----------
+def infer_end_years_inplace(items: List[Dict]) -> None:
+    items.sort(key=lambda g: _to_int(g.get("launch_year")) or 99999)
+    for i in range(len(items)-1):
+        curr, nxt = items[i], items[i+1]
+        s_curr = _to_int(curr.get("launch_year"))
+        e_curr = _to_int(curr.get("end_year"))
+        s_next = _to_int(nxt.get("launch_year"))
+        if not s_curr or not s_next: continue
+        needs = (curr.get("end_year") in (None,"","present")) or (e_curr is not None and e_curr >= s_next)
+        if needs:
+            curr["end_year"] = str(max(s_curr, s_next-1))
+            curr["end_year_inferred"] = True
+
+def year_in_span(year: int, start_str, end_str) -> bool:
+    s = _to_int(start_str)
+    e = _to_int(end_str) if (end_str and not _is_open_end(end_str)) else 9999
+    return s is not None and s <= year <= e
+
+def _label_from_text(txt: str) -> Optional[str]:
+    m = re.search(r'\b(?:mk|mark)\s*([ivxlcdm]+|\d+)\b', txt or "", re.IGNORECASE)
+    if not m: return None
+    val = m.group(1)
+    return f"Mk{val.upper()}"
+
+# ---------- Public API ----------
+def detect_via_wikipedia(model: str, user_year: int, lang: str = "en") -> tuple[Optional[str], Optional[tuple[int,int]], Dict]:
     """
-    Prefer generation/Mk sections over infobox windows.
+    Return (gen_label, (start,end), diag). End is numeric; 'present' -> DEADLINE_YEAR.
     """
-    def is_infobox(h: str) -> bool:
-        return h.lower().startswith("infobox")
-
-    covering_head = [(s,e,h) for (s,e,h) in windows
-                     if not is_infobox(h) and (s - 1) <= user_year <= (e + 1)]
-    covering_any  = [(s,e,h) for (s,e,h) in windows
-                     if (s - 1) <= user_year <= (e + 1)]
-
-    if covering_head:
-        covering_head.sort(key=lambda t: ((t[1]-t[0]), -t[0]))
-        return covering_head[0]
-
-    if covering_any:
-        covering_any.sort(key=lambda t: ((t[1]-t[0]), -t[0]))
-        return covering_any[0]
-
-    # Nearest-by-gap fallback; still prefer headings
-    def dist(s,e):
-        if user_year < s: return s - user_year
-        if user_year > e: return user_year - e
-        return 0
-    heads = [(s,e,h) for (s,e,h) in windows if not is_infobox(h)]
-    pool = heads or windows
-    pool.sort(key=lambda t: (dist(t[0], t[1]), -t[0]))
-    return pool[0]
-
-# ------------------ Public API ----------------------
-def find_generation_windows(model: str) -> tuple[Optional[str], List[tuple[int,int,str]], Dict]:
-    pageid, title = _search_wikipedia_page(model)
+    base_url = _api_base(lang)
+    # 1) main page
+    pageid, title = search_wikipedia_page(model, lang)
     if not pageid:
-        return None, [], {"basis":"wikipedia_search","status":"no_results","query":model}
+        return None, None, {"basis":"wikipedia","status":"no_results","query":model,"lang":lang}
 
-    html_primary = _parse_page_html(pageid)
-    soup_primary = BeautifulSoup(html_primary, "html.parser")
+    main_html = fetch_page_html_by_pageid(pageid, lang)
+    results = parse_generations_from_html(main_html)
 
-    windows: List[tuple[int,int,str]] = []
-    # Prefer generation sections; append infobox later
-    windows.extend(_extract_generation_sections(soup_primary))
-    windows.extend(_extract_infobox_years(soup_primary))
+    # 2) if only broad infobox span, pull subpages
+    only_infobox = (len(results)==1 and results[0]["source"]=="infobox")
+    subpages_merged = []
+    if (not results) or only_infobox:
+        link_titles   = discover_generation_subpages_from_links(main_html, title)
+        search_titles = discover_generation_subpages_via_search(title, lang)
+        sub_titles    = sorted(set(link_titles) | set(search_titles))
+        for t in sub_titles:
+            pid = get_pageid_by_title(t, lang)
+            if not pid: continue
+            sub_html = fetch_page_html_by_pageid(pid, lang)
+            gens = parse_generations_from_html(sub_html)
+            for g in gens:
+                g["title_hint"] = t
+                results.append(g)
+            if gens:
+                subpages_merged.append(t)
 
-    # If first page looks like a per-generation page, merge likely main page
-    extra_title = None
-    extra_added = 0
-    if _looks_like_generation_title(title):
-        base = _sanitize_query(model)
-        pid2, title2 = _search_wikipedia_page(base)
-        if pid2 and title2 and title2 != title and not _looks_like_generation_title(title2):
-            html_extra = _parse_page_html(pid2)
-            soup_extra = BeautifulSoup(html_extra, "html.parser")
-            w0 = len(windows)
-            windows.extend(_extract_generation_sections(soup_extra))
-            windows.extend(_extract_infobox_years(soup_extra))
-            extra_title = title2
-            extra_added = len(windows) - w0
+    if not results:
+        return None, None, {"basis":"wikipedia","status":"no_windows","title":title,"lang":lang}
 
-    windows = _merge_and_dedupe(windows)
+    # Deduplicate + order + infer end years
+    seen, dedup = set(), []
+    for g in results:
+        key = ((g.get("launch_year") or ""), (g.get("end_year") or ""), (g.get("title_hint") or ""), (g.get("generation_heading") or ""))
+        if key in seen: continue
+        seen.add(key); dedup.append(g)
+    dedup.sort(key=lambda it: _to_int(it.get("launch_year")) or 99999)
+    infer_end_years_inplace(dedup)
+
+    # Prefer generation/Mk items for the given year
+    def is_infobox_item(g: Dict) -> bool:
+        return (g.get("source") or "").lower() == "infobox"
+
+    covering_heads = [g for g in dedup if not is_infobox_item(g) and year_in_span(user_year, g.get("launch_year"), g.get("end_year"))]
+    covering_any   = [g for g in dedup if year_in_span(user_year, g.get("launch_year"), g.get("end_year"))]
+
+    pick = None
+    if covering_heads:
+        covering_heads.sort(key=lambda g: ((_to_int(g.get("end_year")) or 9999) - (_to_int(g.get("launch_year")) or 9999), -(_to_int(g.get("launch_year")) or 0)))
+        pick = covering_heads[0]
+    elif covering_any:
+        covering_any.sort(key=lambda g: ((_to_int(g.get("end_year")) or 9999) - (_to_int(g.get("launch_year")) or 9999), -(_to_int(g.get("launch_year")) or 0)))
+        pick = covering_any[0]
+    else:
+        # nearest-by-gap fallback (prefer non-infobox)
+        def dist(g: Dict) -> int:
+            s = _to_int(g.get("launch_year")) or 9999
+            e = _to_int(g.get("end_year")) if (g.get("end_year") and not _is_open_end(g.get("end_year"))) else 9999
+            if user_year < s: return s - user_year
+            if user_year > e: return user_year - e
+            return 0
+        heads = [g for g in dedup if not is_infobox_item(g)]
+        pool = heads or dedup
+        pool.sort(key=lambda g: (dist(g), -(_to_int(g.get("launch_year")) or 0)))
+        pick = pool[0]
+
+    s = _to_int(pick.get("launch_year"))
+    e = _to_int(pick.get("end_year")) if (pick.get("end_year") and not _is_open_end(pick.get("end_year"))) else DEADLINE_YEAR
+    heading = pick.get("title_hint") or pick.get("generation_heading") or ""
+    gen_label = _label_from_text(heading) or _label_from_text(title) or "GEN"
 
     diag = {
         "basis": "wikipedia",
         "title": title,
-        "extra_title": extra_title,
-        "extra_added": extra_added,
-        "windows_found": [{"start": s, "end": e, "label": h} for (s,e,h) in windows],
+        "lang": lang,
+        "subpages_merged": subpages_merged,
+        "windows_found": [
+            {"start": g.get("launch_year"), "end": g.get("end_year"),
+             "label": g.get("title_hint") or g.get("generation_heading"),
+             "source": g.get("source")} for g in dedup
+        ],
+        "picked": {"start": s, "end": e, "label_text": heading, "gen_label": gen_label},
+        "note": f"Active selection for {user_year} (generation pages preferred)."
     }
-    return title, windows, diag
+    return gen_label, (s, e), diag
 
-def detect_via_wikipedia(model: str, user_year: int) -> tuple[Optional[str], Optional[tuple[int,int]], Dict]:
-    title, wins, diag0 = find_generation_windows(model)
-    if not wins:
-        return None, None, {**diag0, "status":"no_windows"}
+# ---------- Optional CLI (for debugging) ----------
+def _parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("model", help='Car model, e.g. "Volkswagen Golf"')
+    p.add_argument("--year", type=int, required=True, help="Target year, e.g. 2022")
+    p.add_argument("--lang", default="en", help="Wikipedia language (default: en)")
+    return p.parse_args()
 
-    s, e, heading = _select_window_for_year(wins, user_year)
-    gen_label = _label_from_heading(heading) or "GEN"
-    start, end = int(s), int(e)
-
-    diag = {
-        **diag0,
-        "picked": {"start": start, "end": end, "heading": heading, "label": gen_label},
-        "note": f"Active selection for {user_year} (generation sections preferred).",
-    }
-    return gen_label, (start, end), diag
-
-# ------------------ CLI debug -----------------------
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 3:
-        print("Usage: python scripts/wikipedia_gen.py \"Volkswagen Golf\" 2022")
-        sys.exit(1)
-    model = sys.argv[1]
-    year = int(sys.argv[2])
-    label, window, diag = detect_via_wikipedia(model, year)
+    args = _parse_args()
+    label, window, diag = detect_via_wikipedia(args.model, args.year, args.lang)
     print(json.dumps({
-        "model": model,
-        "year": year,
+        "model": args.model,
+        "year": args.year,
         "label": label,
         "window": window,
         "diag": diag
