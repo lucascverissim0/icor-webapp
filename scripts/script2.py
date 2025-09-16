@@ -663,116 +663,42 @@ def detect_generation_via_serp(model: str, year: int) -> Tuple[Optional[str], Op
 # ------------------ Gen detection orchestrator (UPDATED) --
 def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
     """
-    Generation detection order:
-      1) wikipedia_gen.detect_via_wikipedia  (NEW – best)
-      2) Existing Wikipedia API parser
-      3) SERP fallback (must cover requested year)
-      4) User/local/default fallbacks
+    Generation detection: Wikipedia module ONLY.
+    - Uses scripts.wikipedia_gen.detect_via_wikipedia(model, user_year)
+    - If it returns a window, we keep it (resolving 'present'/2025 as before).
+    - If it fails, we raise a clear error (no SERP/local/default fallbacks).
     Returns: (gen_label, (start,end), basis, note)
     """
-
-    def _window_from_local_for_label(gen_label: str):
-        det_norm = normalize_generation(gen_label)
-        mk = find_best_model_key(db_eu, db_world, user_model=model)
-        years = []
-        if mk:
-            for db in (db_eu, db_world):
-                for y, rec in db.get(mk, {}).items():
-                    if normalize_generation(rec.get("generation")) == det_norm:
-                        years.append(y)
-        return (min(years), max(years)) if years else None
-
     def _clip(window):
         gs, ge = window
         return (max(1990, gs), min(ge, DEADLINE_YEAR))
 
-    # --- 1) WIKIPEDIA MODULE FIRST (high-accuracy) ---
-    wm_label = wm_window = None
     try:
-        wm_label, wm_window, wm_diag = detect_via_wikipedia(model, user_year)
+        gen_label, window, diag = detect_via_wikipedia(model, user_year)
     except Exception as e:
-        wm_diag = {"basis":"wikipedia_module","status":"exception","error":repr(e)}
-        print(f"[WARN] wikipedia_gen failed: {wm_diag}", file=sys.stderr)
+        msg = f"[FATAL] wikipedia_gen failed for '{model}' @ {user_year}: {e}"
+        print(msg, file=sys.stderr)
+        raise RuntimeError(msg)
 
-    if wm_window:
-        start, end = wm_window
-        # Resolve open end / exact 2025 if needed
-        end_resolved = end
-        if end >= DEADLINE_YEAR:
-            end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
-            basis = "wikipedia_module_present_resolved"; note = "Window from wikipedia_gen; 'present' resolved."
-        elif end == 2025:
-            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
-            basis = "wikipedia_module_end_2025_resolved"; note = "Window from wikipedia_gen; 2025 end resolved."
-        else:
-            basis = "wikipedia_module_fixed"; note = "Window from wikipedia_gen."
-        return wm_label or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
+    if not window:
+        msg = f"[FATAL] wikipedia_gen returned no generation window for '{model}' @ {user_year}."
+        print(msg, file=sys.stderr)
+        raise RuntimeError(msg)
 
-    # --- 2) Wikipedia API fallback ---
-    gen_label_wiki, win_wiki, wiki_diag = detect_generation_via_wikipedia_api(model, user_year)
-    if win_wiki:
-        start, end = win_wiki
+    start, end = window
+
+    # If the page signals 'present'/open end (wikipedia_gen may normalize), allow our resolver to clip sensibly.
+    end_resolved = end
+    if end >= DEADLINE_YEAR:
         end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
-        basis = "wikipedia_api_present_resolved" if end == DEADLINE_YEAR else "wikipedia_api_fixed"
-        note = "Wikipedia API window; resolved 'present' vs 2025." if end == DEADLINE_YEAR else "Window from Wikipedia API."
-        return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
+        basis = "wikipedia_module_present_resolved"; note = "Window from wikipedia_gen; 'present' resolved."
+    elif end == 2025:
+        end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
+        basis = "wikipedia_module_end_2025_resolved"; note = "Window from wikipedia_gen; 2025 end resolved."
+    else:
+        basis = "wikipedia_module_fixed"; note = "Window from wikipedia_gen."
 
-    # --- 3) SERP fallback for window (STRICT coverage) ---
-    web_gen, win_serp, _ = detect_generation_via_serp(model, user_year)
-    if win_serp:
-        start, end = win_serp
-        end_resolved = end
-        if end == DEADLINE_YEAR:
-            end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
-            return web_gen or (user_gen or "GEN"), _clip((start, end_resolved)), "web_serp_present_resolved", "SERP window; 'present' resolved."
-        if end == 2025:
-            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
-            return web_gen or (user_gen or "GEN"), _clip((start, end_resolved)), "web_serp_end_2025_resolved", "SERP window; 2025 end resolved."
-        return web_gen or (user_gen or "GEN"), _clip((start, end)), "web_serp_fixed", "Window from SERP."
-
-    # --- 4) USER INPUT fallback ---
-    if user_gen:
-        gen_label = user_gen
-        win_local = _window_from_local_for_label(gen_label)
-        if win_local:
-            return gen_label, _clip(win_local), "user_input", "Generation provided by user (window from local DB)."
-        return gen_label, (max(1990, user_year-1), min(user_year+7, DEADLINE_YEAR)), "user_input_default", "User gen; default 8y window."
-
-    mk = find_best_model_key(db_eu, db_world, user_model=model)
-
-    # --- LOCAL fallback heuristics ---
-    if mk:
-        for db in (db_eu, db_world):
-            if mk in db and user_year in db[mk] and db[mk][user_year].get("generation"):
-                gen_label = db[mk][user_year]["generation"]
-                win_local = _window_from_local_for_label(gen_label)
-                if win_local:
-                    return gen_label, _clip(win_local), "local_top100", "Detected from Top100 at the user year."
-        years = sorted(set(list(db_eu.get(mk, {}).keys()) + list(db_world.get(mk, {}).keys())))
-        prev_years = [y for y in years if y <= user_year and (
-            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
-            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
-        )]
-        if prev_years:
-            y0 = prev_years[-1]
-            gen_label = db_eu.get(mk, {}).get(y0, db_world.get(mk, {}).get(y0))["generation"]
-            win_local = _window_from_local_for_label(gen_label)
-            if win_local:
-                return gen_label, _clip(win_local), "local_top100", f"Detected from Top100 nearest ≤ year ({y0})."
-        next_years = [y for y in years if y >= user_year and (
-            (mk in db_eu and y in db_eu[mk] and db_eu[mk][y].get("generation")) or
-            (mk in db_world and y in db_world[mk] and db_world[mk][y].get("generation"))
-        )]
-        if next_years and (next_years[0] - user_year) <= MAX_FUTURE_GAP:
-            y1 = next_years[0]
-            gen_label = db_eu.get(mk, {}).get(y1, db_world.get(mk, {}).get(y1))["generation"]
-            win_local = _window_from_local_for_label(gen_label)
-            if win_local:
-                return gen_label, _clip(win_local), "future_top100", f"Detected from Top100 nearest ≥ year ({y1})."
-
-    # --- DEFAULT ---
-    gen_label = "GEN"
-    return gen_label, (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
+    return gen_label or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
 
 # ------------------ Priors & constraints ------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
