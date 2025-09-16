@@ -6,19 +6,17 @@ wikipedia_gen.py
 High-accuracy generation window detector for car models using Wikipedia.
 
 Public API:
-    detect_via_wikipedia(model: str, user_year: int) -> tuple[str|None, tuple[int,int]|None, dict]
-
-Returns:
-    gen_label: str | None             e.g., "Mk8" (best-effort), or "GEN" if unknown
-    window:    (start, end) | None    inclusive window; 'present' resolved to DEADLINE_YEAR
-    diag:      dict                   diagnostics
+    detect_via_wikipedia(model: str, user_year: int)
+        -> (gen_label: str|None, window: (start:int,end:int)|None, diag: dict)
 
 Key behavior:
 - Uses a descriptive User-Agent (avoids 403).
 - Prefers the model's main page (not per-generation) when searching.
-- Parses BOTH infobox ("Production", "Model years") and headings ("Mk7 (2012–2019)").
-- **Selector prefers generation headings over infobox** when choosing the window
-  that covers `user_year`. If none cover, picks the nearest (still preferring headings).
+- Parses BOTH generation sections and the page infobox.
+- NEW: Looks into the text **after each generation/Mk heading** to find year
+  ranges like "since 2019" when they are not inside the heading itself.
+- Selector **prefers generation/Mk windows**; only falls back to infobox if
+  no generation window covers `user_year`.
 """
 
 from __future__ import annotations
@@ -28,16 +26,16 @@ import json
 from typing import Optional, Tuple, List, Dict
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 # ------------------ Config -------------------------
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 SEARCH_TIMEOUT = 20
-DEADLINE_YEAR = 2035
+DEADLINE_YEAR = 2035  # caller may clip further
 
-# Wikipedia needs a real UA
+# Wikipedia requires a descriptive UA
 WIKI_HEADERS = {
-    "User-Agent": "ICOR-GenWindow/1.1 (+contact: your-email@your-domain.com)"
+    "User-Agent": "ICOR-GenWindow/1.2 (+contact: your-email@your-domain.com)"
 }
 
 # ------------------ Regexes ------------------------
@@ -47,6 +45,11 @@ YEAR_RANGE_RE = re.compile(
 )
 PARENS_RANGE_RE = re.compile(
     r"\((?:[^()]*?;?\s*)?(?P<start>\d{4})\s*[–—-]\s*(?P<end>\d{4}|present|current|ongoing|to\s+present)\)",
+    re.IGNORECASE,
+)
+SINCE_RE = re.compile(r"\bsince\s+(?P<start>\d{4})\b", re.IGNORECASE)
+FROM_TO_RE = re.compile(
+    r"\bfrom\s+(?P<start>\d{4})\s+(?:to|-|until)\s+(?P<end>\d{4}|present|current|ongoing)\b",
     re.IGNORECASE,
 )
 GEN_TOKEN_RE = re.compile(
@@ -62,7 +65,7 @@ def _normalize_dash(s: str) -> str:
 def _clean_text(s: str) -> str:
     return " ".join((s or "").split())
 
-def _to_int_safe(x: str) -> Optional[int]:
+def _to_int(x: str) -> Optional[int]:
     try:
         return int(x)
     except Exception:
@@ -130,18 +133,18 @@ def _extract_infobox_years(soup: BeautifulSoup) -> List[tuple[int, int, str]]:
     def parse_value_text(text: str) -> List[tuple[int, int]]:
         text = _normalize_dash(html.unescape(text or ""))
         wins: List[tuple[int, int]] = []
+
         for m in PARENS_RANGE_RE.finditer(text):
-            s = _to_int_safe(m.group("start"))
-            e_s = m.group("end")
+            s = _to_int(m.group("start")); e_s = m.group("end")
             if not s: continue
-            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int_safe(e_s) or DEADLINE_YEAR)
+            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
             if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
                 wins.append((s, e))
+
         for m in YEAR_RANGE_RE.finditer(text):
-            s = _to_int_safe(m.group("start"))
-            e_s = m.group("end")
+            s = _to_int(m.group("start")); e_s = m.group("end")
             if not s: continue
-            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int_safe(e_s) or DEADLINE_YEAR)
+            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
             if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
                 wins.append((s, e))
         return wins
@@ -160,21 +163,71 @@ def _extract_infobox_years(soup: BeautifulSoup) -> List[tuple[int, int, str]]:
 
     return windows
 
-def _extract_generation_headings(soup: BeautifulSoup) -> List[tuple[int, int, str]]:
+def _scan_following_for_years(h: Tag, max_nodes: int = 10) -> Optional[tuple[int,int]]:
+    """
+    Look at the first few siblings after a heading until the next heading of the
+    same or higher level; try to spot year ranges or 'since YYYY'.
+    """
+    # Determine levels (h2=2, h3=3, h4=4)
+    level = int(h.name[-1]) if h.name and h.name[-1].isdigit() else 7
+    count = 0
+    for sib in h.next_siblings:
+        if isinstance(sib, Tag):
+            if sib.name in ("h2", "h3", "h4"):
+                # Stop at next heading of same or higher hierarchy
+                nxt_level = int(sib.name[-1])
+                if nxt_level <= level:
+                    break
+            text = _normalize_dash(_clean_text(sib.get_text(" ", strip=True)))
+            if not text:
+                continue
+            # Try patterns
+            m = PARENS_RANGE_RE.search(text) or YEAR_RANGE_RE.search(text)
+            if m:
+                s = _to_int(m.group("start")); e_s = m.group("end")
+                if s:
+                    e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
+                    return (s, e)
+            m = FROM_TO_RE.search(text)
+            if m:
+                s = _to_int(m.group("start")); e_s = m.group("end")
+                if s:
+                    e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
+                    return (s, e)
+            m = SINCE_RE.search(text)
+            if m:
+                s = _to_int(m.group("start"))
+                if s:
+                    return (s, DEADLINE_YEAR)
+            count += 1
+            if count >= max_nodes:
+                break
+    return None
+
+def _extract_generation_sections(soup: BeautifulSoup) -> List[tuple[int, int, str]]:
+    """
+    Gather windows around headings that look like "generation" or "MkN".
+    Looks in the heading AND the immediate section content after it.
+    """
     windows: List[tuple[int, int, str]] = []
     for tag in soup.find_all(["h2", "h3", "h4"]):
         heading = tag.get_text(" ", strip=True)
         h_norm = _normalize_dash(heading)
         lower = h_norm.lower()
         if ("generation" in lower) or re.search(r"\bmk\s*\d+\b", lower):
+            # Inside heading
             m = PARENS_RANGE_RE.search(h_norm) or YEAR_RANGE_RE.search(h_norm)
-            if not m: continue
-            s = _to_int_safe(m.group("start"))
-            e_s = m.group("end")
-            if not s: continue
-            e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int_safe(e_s) or DEADLINE_YEAR)
-            if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
-                windows.append((s, e, _clean_text(heading)))
+            if m:
+                s = _to_int(m.group("start")); e_s = m.group("end")
+                if s:
+                    e = DEADLINE_YEAR if _is_open_end(e_s) else (_to_int(e_s) or DEADLINE_YEAR)
+                    if 1900 <= s <= 2100 and 1900 <= e <= 2100 and s <= e:
+                        windows.append((s, e, _clean_text(heading)))
+                        continue
+            # Not in heading → look just after it
+            se = _scan_following_for_years(tag)
+            if se:
+                windows.append((se[0], se[1], _clean_text(heading)))
     return windows
 
 def _label_from_heading(heading: str) -> Optional[str]:
@@ -204,7 +257,7 @@ def _merge_and_dedupe(windows: List[tuple[int,int,str]]) -> List[tuple[int,int,s
 
 def _select_window_for_year(windows: List[tuple[int,int,str]], user_year: int) -> tuple[int,int,str]:
     """
-    Prefer generation/Mk headings over infobox windows when selecting.
+    Prefer generation/Mk sections over infobox windows.
     """
     def is_infobox(h: str) -> bool:
         return h.lower().startswith("infobox")
@@ -222,7 +275,7 @@ def _select_window_for_year(windows: List[tuple[int,int,str]], user_year: int) -
         covering_any.sort(key=lambda t: ((t[1]-t[0]), -t[0]))
         return covering_any[0]
 
-    # Nearest-by-gap fallback, still prefer headings
+    # Nearest-by-gap fallback; still prefer headings
     def dist(s,e):
         if user_year < s: return s - user_year
         if user_year > e: return user_year - e
@@ -242,10 +295,11 @@ def find_generation_windows(model: str) -> tuple[Optional[str], List[tuple[int,i
     soup_primary = BeautifulSoup(html_primary, "html.parser")
 
     windows: List[tuple[int,int,str]] = []
-    windows.extend(_extract_generation_headings(soup_primary))
-    windows.extend(_extract_infobox_years(soup_primary))  # appended after headings
+    # Prefer generation sections; append infobox later
+    windows.extend(_extract_generation_sections(soup_primary))
+    windows.extend(_extract_infobox_years(soup_primary))
 
-    # If the chosen page looks like a single-generation page, also merge main page
+    # If first page looks like a per-generation page, merge likely main page
     extra_title = None
     extra_added = 0
     if _looks_like_generation_title(title):
@@ -255,7 +309,7 @@ def find_generation_windows(model: str) -> tuple[Optional[str], List[tuple[int,i
             html_extra = _parse_page_html(pid2)
             soup_extra = BeautifulSoup(html_extra, "html.parser")
             w0 = len(windows)
-            windows.extend(_extract_generation_headings(soup_extra))
+            windows.extend(_extract_generation_sections(soup_extra))
             windows.extend(_extract_infobox_years(soup_extra))
             extra_title = title2
             extra_added = len(windows) - w0
@@ -283,7 +337,7 @@ def detect_via_wikipedia(model: str, user_year: int) -> tuple[Optional[str], Opt
     diag = {
         **diag0,
         "picked": {"start": start, "end": end, "heading": heading, "label": gen_label},
-        "note": f"Active selection for {user_year} (headings preferred over infobox).",
+        "note": f"Active selection for {user_year} (generation sections preferred).",
     }
     return gen_label, (start, end), diag
 
