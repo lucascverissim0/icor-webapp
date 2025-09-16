@@ -253,7 +253,7 @@ def parse_generations_from_html(html_content: str) -> List[Dict]:
     def sort_key(item):
         try: return int(item["launch_year"]) if item["launch_year"] else 99999
         except Exception: return 99999
-    out.sort(sort_key)
+    out.sort(key=sort_key)
     return out
 
 # ---------- Subpage discovery ----------
