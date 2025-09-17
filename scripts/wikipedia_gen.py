@@ -189,6 +189,87 @@ def main():
             "start": pick["start"], "end": pick["end"],
             "diag": {"basis":"cache","lang":cached["lang"],"scraped_at":cached["scraped_at"]}
         }))
+# ---------- Lightweight API for other modules ----------
+def _cache_path_for(model: str, cache_dir: str = CACHE_DIR) -> str:
+    return os.path.join(cache_dir, f"{_safe_slug(model)}.json")
+
+def read_generation_cache(model: str, cache_dir: str = CACHE_DIR) -> Optional[dict]:
+    path = _cache_path_for(model, cache_dir)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _pick_window_for_year(payload: dict, year: int) -> Optional[dict]:
+    wins = payload.get("windows") or []
+    if not wins:
+        return None
+    # Prefer the window covering the year; else pick the closest (by distance)
+    covering = [w for w in wins if w["start"] <= year <= (w["end"] if w["end"] != 9999 else 9999)]
+    if covering:
+        # If multiple cover, choose the narrowest, then latest start
+        covering.sort(key=lambda w: ( ( (w["end"] if w["end"] != 9999 else 9999) - w["start"] ), -w["start"] ))
+        return covering[0]
+    # No covering window: choose the nearest by boundary distance
+    def dist(w):
+        s, e = w["start"], (w["end"] if w["end"] != 9999 else 9999)
+        if year < s: return s - year
+        if year > e: return year - e
+        return 0
+    wins_sorted = sorted(wins, key=lambda w: (dist(w), -w["start"]))
+    return wins_sorted[0]
+
+def _mk_label_from_text(label_text: str) -> str:
+    # Extract a compact generation tag like Mk7, MkVII, etc., else "GEN"
+    m = re.search(r'\b(?:mk|mark|gen(?:eration)?)\s*([ivxlcdm\d]{1,4})\b', str(label_text), flags=re.I)
+    if m:
+        val = m.group(1).upper()
+        return f"Mk{val}"
+    return "GEN"
+
+def detect_via_wikipedia(model: str, year: int, lang: str = "en",
+                         cache_dir: str = CACHE_DIR) -> tuple[Optional[str], Optional[tuple[int,int]], dict]:
+    """
+    Public function used by script2.
+    Returns: (gen_label, (start, end), diag)
+      - end may be 9999 when the generation is 'present' (open-ended).
+    Behavior:
+      1) Try cache (cache/gen_windows/<model>.json)
+      2) If missing, call scrape_and_cache(...) to build it, then re-read
+    """
+    # 1) Try cache
+    cached = read_generation_cache(model, cache_dir)
+    basis = "cache"
+    if not cached:
+        # 2) Build cache
+        path, _ = scrape_and_cache(model, year, lang, cache_dir)
+        cached = read_generation_cache(model, cache_dir)
+        basis = "scraped"
+        if not cached:
+            # Unexpected: scraper ran but nothing could be read
+            return None, None, {"basis": "wikipedia_gen", "status": "no_cache_after_scrape"}
+
+    pick = _pick_window_for_year(cached, year)
+    if not pick:
+        return None, None, {"basis": "wikipedia_gen", "status": "no_window_in_cache", "cache_model": cached.get("model")}
+
+    start = int(pick["start"])
+    end = int(pick["end"])  # may be 9999
+    label_text = pick.get("label") or ""
+    gen_label = _mk_label_from_text(label_text)
+
+    diag = {
+        "basis": "wikipedia_gen",
+        "source": basis,
+        "cache_lang": cached.get("lang"),
+        "scraped_at": cached.get("scraped_at"),
+        "picked_label": label_text,
+        "picked_source": pick.get("source"),
+    }
+    return gen_label, (start, end), diag
 
 if __name__ == "__main__":
     main()
