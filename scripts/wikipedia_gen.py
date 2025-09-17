@@ -17,6 +17,7 @@ Features:
 """
 
 import sys, re, html, os, json, time, argparse, datetime, urllib.parse
+from typing import Optional, Tuple
 import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter, Retry
@@ -176,19 +177,6 @@ def parse_args():
     ap.add_argument("--json", action="store_true")
     return ap.parse_args()
 
-def main():
-    args = parse_args()
-    path, gens = scrape_and_cache(args.model, args.year, args.lang, args.cache_dir)
-    print(f"[cache] wrote: {path}")
-    if args.json:
-        cached = json.load(open(path,"r",encoding="utf-8"))
-        wins = cached["windows"]; yr = args.year
-        pick = next((w for w in wins if w["start"] <= yr <= (w["end"] if w["end"]!=9999 else 9999)), wins[0])
-        print(json.dumps({
-            "model": cached["model"], "label": pick["label"],
-            "start": pick["start"], "end": pick["end"],
-            "diag": {"basis":"cache","lang":cached["lang"],"scraped_at":cached["scraped_at"]}
-        }))
 # ---------- Lightweight API for other modules ----------
 def _cache_path_for(model: str, cache_dir: str = CACHE_DIR) -> str:
     return os.path.join(cache_dir, f"{_safe_slug(model)}.json")
@@ -211,7 +199,7 @@ def _pick_window_for_year(payload: dict, year: int) -> Optional[dict]:
     covering = [w for w in wins if w["start"] <= year <= (w["end"] if w["end"] != 9999 else 9999)]
     if covering:
         # If multiple cover, choose the narrowest, then latest start
-        covering.sort(key=lambda w: ( ( (w["end"] if w["end"] != 9999 else 9999) - w["start"] ), -w["start"] ))
+        covering.sort(key=lambda w: (((w["end"] if w["end"] != 9999 else 9999) - w["start"]), -w["start"]))
         return covering[0]
     # No covering window: choose the nearest by boundary distance
     def dist(w):
@@ -220,7 +208,7 @@ def _pick_window_for_year(payload: dict, year: int) -> Optional[dict]:
         if year > e: return year - e
         return 0
     wins_sorted = sorted(wins, key=lambda w: (dist(w), -w["start"]))
-    return wins_sorted[0]
+    return wins_sorted[0] if wins_sorted else None
 
 def _mk_label_from_text(label_text: str) -> str:
     # Extract a compact generation tag like Mk7, MkVII, etc., else "GEN"
@@ -231,7 +219,7 @@ def _mk_label_from_text(label_text: str) -> str:
     return "GEN"
 
 def detect_via_wikipedia(model: str, year: int, lang: str = "en",
-                         cache_dir: str = CACHE_DIR) -> tuple[Optional[str], Optional[tuple[int,int]], dict]:
+                         cache_dir: str = CACHE_DIR) -> Tuple[Optional[str], Optional[Tuple[int, int]], dict]:
     """
     Public function used by script2.
     Returns: (gen_label, (start, end), diag)
@@ -245,7 +233,10 @@ def detect_via_wikipedia(model: str, year: int, lang: str = "en",
     basis = "cache"
     if not cached:
         # 2) Build cache
-        path, _ = scrape_and_cache(model, year, lang, cache_dir)
+        try:
+            scrape_and_cache(model, year, lang, cache_dir)
+        except Exception as e:
+            return None, None, {"basis": "wikipedia_gen", "status": "scrape_failed", "error": str(e)}
         cached = read_generation_cache(model, cache_dir)
         basis = "scraped"
         if not cached:
@@ -270,6 +261,20 @@ def detect_via_wikipedia(model: str, year: int, lang: str = "en",
         "picked_source": pick.get("source"),
     }
     return gen_label, (start, end), diag
+
+def main():
+    args = parse_args()
+    path, gens = scrape_and_cache(args.model, args.year, args.lang, args.cache_dir)
+    print(f"[cache] wrote: {path}")
+    if args.json:
+        cached = json.load(open(path,"r",encoding="utf-8"))
+        wins = cached["windows"]; yr = args.year
+        pick = next((w for w in wins if w["start"] <= yr <= (w["end"] if w["end"]!=9999 else 9999)), wins[0])
+        print(json.dumps({
+            "model": cached["model"], "label": pick["label"],
+            "start": pick["start"], "end": pick["end"],
+            "diag": {"basis":"cache","lang":cached["lang"],"scraped_at":cached["scraped_at"]}
+        }))
 
 if __name__ == "__main__":
     main()
