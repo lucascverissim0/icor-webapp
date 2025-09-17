@@ -3,19 +3,12 @@
 """
 script2.py — Generation-specific sales estimator (EU + World)
 
-Key change:
-    The generation window is taken EXCLUSIVELY from wikipedia_gen.detect_via_wikipedia().
-    No fallbacks, no reinterpretation. If wikipedia_gen fails, this script exits.
+Hard rule:
+- The generation window comes ONLY from wikipedia_gen.
+  If the module exposes detect_via_wikipedia(), we call it.
+  Otherwise, we run wikipedia_gen.py as a CLI with --json and parse its output.
 
-Notes:
-    - If wikipedia_gen returns end == 9999 (present), we cap it to DEADLINE_YEAR *only*
-      when building the modeling window (not when logging the source window).
-    - Filenames are sanitized to avoid slashes/odd characters.
-    - Everything else (seeds, constraints, smoothing, outputs) remains the same.
-
-Layout expectation:
-    - This file lives in repo_root/scripts/script2.py
-    - wikipedia_gen.py lives in repo_root/scripts/wikipedia_gen.py
+If wikipedia_gen fails, we exit with a clear error.
 
 """
 
@@ -29,6 +22,7 @@ import os
 import re
 import sys
 import time
+import subprocess
 from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -36,20 +30,75 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from tabulate import tabulate
 
-# --- path safety so we can "import scripts.wikipedia_gen" even when run directly
+# --- repo root on sys.path so "scripts.*" works when run directly
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.append(_REPO_ROOT)
 
-# The ONLY source of generation window
+# Try to import wikipedia_gen as a module; if the function isn't present,
+# we’ll call the CLI as a fallback (bridge).
+_wg_mod = None
+_wg_path = None
 try:
-    from scripts.wikipedia_gen import detect_via_wikipedia
-except Exception:  # fallback if run from scripts/ directly
-    from wikipedia_gen import detect_via_wikipedia  # type: ignore
+    import scripts.wikipedia_gen as _wg_mod  # type: ignore
+except Exception:
+    try:
+        import wikipedia_gen as _wg_mod  # type: ignore
+    except Exception:
+        _wg_mod = None
+
+if _wg_mod is not None:
+    _wg_path = getattr(_wg_mod, "__file__", None)
+
+def _detect_via_wikipedia_bridge(model: str, year: int, lang: str = "en") -> Tuple[str, Tuple[int,int], Dict[str,Any]]:
+    """
+    Bridge that prefers module API detect_via_wikipedia(); if missing,
+    executes wikipedia_gen.py CLI with --json and parses the last JSON line.
+    """
+    # 1) Module API present?
+    if _wg_mod is not None and hasattr(_wg_mod, "detect_via_wikipedia"):
+        return _wg_mod.detect_via_wikipedia(model, year, lang=lang)  # type: ignore
+
+    # 2) CLI fallback
+    if not _wg_path or not os.path.exists(_wg_path):
+        raise RuntimeError("Cannot locate wikipedia_gen.py to run as a CLI.")
+
+    py = sys.executable or "python3"
+    cmd = [py, _wg_path, "--year", str(year), "--lang", lang, "--json", model]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+    except Exception as e:
+        raise RuntimeError(f"Failed to execute wikipedia_gen CLI: {e}")
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"wikipedia_gen CLI returned {proc.returncode}:\nSTDERR:\n{proc.stderr.strip()}\nSTDOUT:\n{proc.stdout.strip()}")
+
+    # Parse last JSON line from stdout
+    lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    json_obj = None
+    for ln in reversed(lines):
+        # Heuristic: last line that looks like JSON
+        if ln.startswith("{") and ln.endswith("}"):
+            try:
+                json_obj = json.loads(ln)
+                break
+            except Exception:
+                continue
+    if not json_obj:
+        raise RuntimeError("wikipedia_gen CLI did not emit the expected JSON line (--json).")
+
+    label = json_obj.get("label")
+    start = json_obj.get("start")
+    end   = json_obj.get("end")
+    diag  = json_obj.get("diag", {})
+
+    if not isinstance(label, str) or not isinstance(start, int) or not isinstance(end, int):
+        raise RuntimeError(f"Invalid JSON payload from wikipedia_gen CLI: {json_obj}")
+
+    return label, (start, end), diag
 
 # ------------------ Secrets (env) ------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-SERPAPI_KEY    = os.getenv("SERPAPI_KEY")  # may be used for web seeding if local = none
 if not OPENAI_API_KEY:
     print("⚠️  OPENAI_API_KEY not set", file=sys.stderr)
 
@@ -225,22 +274,20 @@ def infer_eu_share_bounds(db_eu, model_key: Optional[str], start_year: int) -> T
 # ------------------ Wikipedia-only generation window ----------------
 def autodetect_generation(model: str, user_year: int, lang: str = "en") -> Tuple[str, Tuple[int,int], str, str]:
     """
-    This script ONLY trusts wikipedia_gen.detect_via_wikipedia().
-    Returns (gen_label, (start,end_capped), basis, note)
+    Window ONLY from wikipedia_gen (module function or CLI bridge).
+    Returns (gen_label, (start,end_capped), basis, note).
     """
     try:
-        label, (start, end), diag = detect_via_wikipedia(model, user_year, lang=lang)
+        label, (start, end), diag = _detect_via_wikipedia_bridge(model, user_year, lang=lang)
     except Exception as e:
         msg = f"[FATAL] wikipedia_gen failed for '{model}' @ {user_year}: {e}"
         print(msg, file=sys.stderr)
         raise RuntimeError(msg) from e
 
-    # Keep source window in diag; cap only for modeling horizon
-    end_capped = DEADLINE_YEAR if end == 9999 else min(end, DEADLINE_YEAR)
+    end_capped = 2035 if end == 9999 else min(end, 2035)
     start_capped = max(1990, start)
-
     basis = "wikipedia_only"
-    note = "Generation window taken verbatim from wikipedia_gen (end==9999 capped to horizon)."
+    note = "Generation window taken from wikipedia_gen (module or CLI). end==9999 capped to horizon."
     return label, (start_capped, end_capped), basis, note
 
 # ------------------ Constraints builder ----------------
@@ -261,7 +308,7 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
     constraints = {"world": {}, "europe": {}, "zero_years": []}
     plaus = {"flag": False, "reason": "", "source_note": ""}
 
-    zero_years = list(range(1990, gen_window[0])) + list(range(gen_window[1]+1, DEADLINE_YEAR+1))
+    zero_years = list(range(1990, gen_window[0])) + list(range(gen_window[1]+1, 2035+1))
     constraints["zero_years"] = [y for y in zero_years if y >= start_year]
 
     eu_val = None; world_val = None
@@ -274,7 +321,6 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
         seed["world"] = {"value": world_val, "source": local["world"]["source"], "is_model_level": True}
         constraints["world"]["exact"] = {start_year: min(world_val, WORLD_MAX_CAP)}
 
-    # If no seeds at all, no web fallback here (strict). Keep range from EU share if possible.
     if world_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, local.get("model_key"), start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
@@ -478,8 +524,6 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
     gen_win = seed.get("generation_window", {})
     gstart, gend = gen_win.get("start"), gen_win.get("end")
     estimates_merged["Gen_Active"] = estimates_merged["Year"].apply(lambda y: bool(gstart is not None and gend is not None and gstart <= y <= gend))
-    estimates_merged["ICOR_Supported"] = diag.get("supported_flag")
-    estimates_merged["ICOR_Match_Type"] = diag.get("match_type")
 
     summary = pd.DataFrame({
         "Model": [data.get("model")],
@@ -487,17 +531,10 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
         "Generation_Window_Start": [gstart],
         "Generation_Window_End": [gend],
         "Generation_Window_Basis": [seed.get("generation_window_basis")],
-        "Generation_Alias_Used": [seed.get("generation_alias_used")],
         "Generation_Context_From_Model": [data.get("generation_or_trim_context")],
         "Start_Year": [data.get("start_year")],
         "End_Year": [data.get("end_year")],
         "Confidence": [data.get("confidence")],
-        "Plausibility_Flag": [False],
-        "Plausibility_Reason": [""],
-        "Seed_Source_Note": [""],
-        "ICOR_Supported": [diag.get("supported_flag")],
-        "ICOR_Match_Type": [diag.get("match_type")],
-        "ICOR_Matched_Row": [json.dumps(diag.get("matched_row"), ensure_ascii=False) if diag.get("matched_row") else ""],
     })
 
     seeds_constraints = pd.DataFrame({
@@ -513,48 +550,6 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
         seeds_constraints.to_excel(writer, sheet_name="Seeds_Constraints", index=False)
     return xlsx
 
-# ------------------ ICOR (optional; left minimal) ------------
-def parse_icor_supported_txt(path: str) -> Optional[Dict[str, Dict[int, str]]]:
-    if not os.path.exists(path): return None
-    try:
-        text = open(path, "r", encoding="utf-8").read()
-    except Exception:
-        return None
-    i, n = 0, len(text); mapping={}
-    while i < n:
-        m = re.search(r'"([^"]+)"\s*:', text[i:])
-        if not m: break
-        model = m.group(1); start = i + m.end()
-        b = re.search(r'\{', text[start:])
-        if not b: break
-        brace_start = start + b.start()
-        depth, j = 0, brace_start
-        while j < n:
-            if text[j]=='{': depth += 1
-            elif text[j]=='}':
-                depth -= 1
-                if depth == 0: break
-            j += 1
-        if j >= n: break
-        inner = text[brace_start+1:j]
-        for y, gen in re.findall(r'(\d{4})\s*:\s*"([^"]+)"', inner):
-            mapping.setdefault(normalize_name(model), {})[int(y)] = gen
-        i = j + 1
-    return mapping
-
-def check_icor_support(icor_map, model_name, generation_input, start_year):
-    if not icor_map: return {"supported_flag":"unknown","match_type":"no_catalog","matched_row":None}
-    norm = normalize_name(model_name)
-    if norm in icor_map:
-        years = sorted(icor_map[norm].keys())
-        active = [y for y in years if y <= start_year]
-        if active:
-            yact = max(active); icor_gen = icor_map[norm][yact]
-            match = "by_year_exact_gen" if normalize_generation(icor_gen)==normalize_generation(generation_input) else "by_year_diff_gen_label"
-            return {"supported_flag": True, "match_type": match, "matched_row": {"model": model_name, "icor_gen_code": icor_gen, "icor_gen_from_year": yact}}
-        return {"supported_flag": False, "match_type": "model_present_no_year_coverage", "matched_row": {"model": model_name}}
-    return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
-
 # ------------------ Summary print ------------------
 def print_summary(data, seed, constraints, gen_basis, autodetect_note=""):
     print("\n=== Generation-Specific Car Sales Estimates ===")
@@ -564,10 +559,6 @@ def print_summary(data, seed, constraints, gen_basis, autodetect_note=""):
     print(f"Generation window (modeling): {gw.get('start')}–{gw.get('end')}")
     print(f"Coverage: {data.get('start_year')}–{data.get('end_year')}")
     print(f"Confidence: {data.get('confidence','N/A')}")
-    if seed.get("europe"):
-        print(f"  Europe {seed['year']}: ~{seed['europe']['value']:,}  [{seed['europe']['source']}]")
-    if seed.get("world"):
-        print(f"  World  {seed['year']}: ~{seed['world']['value']:,}  [{seed['world']['source']}]")
     rows = data.get("yearly_estimates",[])
     if rows:
         tbl = [[r["year"], r["world_sales_units"], r["europe_sales_units"]] for r in rows[:10]]
@@ -576,7 +567,7 @@ def print_summary(data, seed, constraints, gen_basis, autodetect_note=""):
 # ------------------ CLI inputs & main --------------
 def ask_user_inputs() -> Dict[str,Any]:
     model = input("Enter the car model: ").strip()
-    generation = input("Enter the generation tag (blank to auto): ").strip()  # not used to detect window; kept for display only
+    generation = input("Enter the generation tag (blank to auto): ").strip()  # display only
     year = int(input("Enter the starting year you'd like to view from (we will model from launch): ").strip())
     if year < 1990 or year > DEADLINE_YEAR:
         print(f"Year must be between 1990 and {DEADLINE_YEAR}.", file=sys.stderr); sys.exit(1)
@@ -585,40 +576,38 @@ def ask_user_inputs() -> Dict[str,Any]:
 def main():
     user = ask_user_inputs()
 
-    # Local DBs from CWD (Streamlit page sets cwd=data/)
+    # Local DBs from current working directory
     db_eu = load_local_database_eu(os.getcwd())
     db_world = load_local_database_world(os.getcwd())
 
-    # ---- Generation detection: WIKIPEDIA ONLY ----
+    # ---- Generation detection: WIKIPEDIA ONLY (API or CLI) ----
     gen_label, gen_window, gen_basis, autodetect_note = autodetect_generation(
         user["car_model"], user["start_year"], lang="en"
     )
 
-    # Launch year = window start (we model from launch, not from user's year)
+    # Model from launch
     launch_year = max(1990, gen_window[0])
 
-    # Local seeds/history for that generation AT LAUNCH YEAR
+    # Local seeds/history for that generation at launch year
     local = local_seed_for_generation(
         db_eu, db_world, user["car_model"], gen_label, launch_year,
         accepted_alias=None, window=gen_window
     )
 
-    # Build prompt seeds & constraints at LAUNCH YEAR
-    seed, constraints, _plaus = build_constraints(
+    # Build seeds & constraints at launch year
+    seed, constraints, _ = build_constraints(
         launch_year, local.get("display_model") or user["car_model"],
         gen_label, gen_window, db_eu, local, web={}
     )
 
-    # ---- Call OpenAI to estimate ----
+    # Call OpenAI
     messages = build_messages(local.get("display_model") or user["car_model"], gen_label, launch_year, seed, constraints)
     data = call_openai(messages)
 
-    # Enforce + smooth
+    # Enforce, smooth, horizon fill
     data = enforce_constraints_and_zero(data, constraints, launch_year)
     if APPLY_SMOOTHING:
         data = smooth_lifecycle(data, launch_year, set(constraints.get("zero_years", [])))
-
-    # Horizon coverage (from LAUNCH YEAR)
     need = set(range(launch_year, DEADLINE_YEAR+1))
     have = {r.get("year") for r in data.get("yearly_estimates", [])}
     for y in sorted(need - have):
@@ -628,25 +617,24 @@ def main():
     data["end_year"] = DEADLINE_YEAR
     data["model"] = local.get("display_model") or user["car_model"]
 
-    # Fleet (for repairs)
+    # Fleet/repairs
     fleet = compute_fleet_and_repairs(data["yearly_estimates"], DECAY_RATE, REPAIR_RATE)
 
-    # ---- SAVE (safe filenames) ----
-    out_dir = "."  # or "outputs"
+    # Save (safe filenames)
+    out_dir = "."
     base = os.path.join(
         out_dir,
         f"sales_estimates_{safe_slug(user['car_model'])}_{safe_slug(gen_label)}_{gen_window[0]}_{MODEL_NAME}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     )
     csv_path = save_csv(data, base)
-    xlsx_path = save_excel(data, fleet, seed, constraints, {"supported_flag":"unknown","match_type":"no_catalog","matched_row":None}, base)
+    xlsx_path = save_excel(data, fleet, seed, constraints, {}, base)
 
-    # Console summary
+    # Summary
     print_summary(data, seed, constraints, gen_basis, autodetect_note)
-    print(f"\nSaved CSV: {csv_path}")
+    print(f"\nSaved CSV:  {csv_path}")
     print(f"Saved Excel: {xlsx_path}")
     print("\nNotes:")
-    print("- Generation window is sourced strictly from wikipedia_gen.")
-    print(f"- User requested view-from year: {user['start_year']}; modeled from LAUNCH year: {launch_year}.")
+    print("- Generation window comes strictly from wikipedia_gen (module or CLI).")
 
 if __name__ == "__main__":
     main()
