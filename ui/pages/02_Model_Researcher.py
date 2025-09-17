@@ -19,6 +19,26 @@ except Exception:
 # === CONFIG ===
 PREFERRED_SCRIPT2 = "script2.py"  # preferred filename in /scripts
 
+# ---- Debug flags (OFF by default)
+def _safe_get(dict_like, dotted, default=None):
+    try:
+        cur = dict_like
+        for part in dotted.split("."):
+            cur = cur[part]
+        return cur
+    except Exception:
+        return default
+
+SHOW_RUN_LOG = (
+    os.environ.get("ICOR_SHOW_RUN_LOG", "0") == "1"
+    or bool(_safe_get(st.secrets, "debug.show_run_log", False))
+)
+
+SHOW_DATA_DIR = (
+    os.environ.get("ICOR_SHOW_DATA_DIR", "0") == "1"
+    or bool(_safe_get(st.secrets, "debug.show_data_dir", False))
+)
+
 # === PATHS (go up TWO levels from ui/pages/ to the repo root) ===
 HERE = os.path.dirname(__file__)
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -106,15 +126,6 @@ def ensure_auth():
 ensure_auth()
 
 # === POSTHOG (tracking) ===
-def _safe_get(dict_like, dotted, default=None):
-    try:
-        cur = dict_like
-        for part in dotted.split("."):
-            cur = cur[part]
-        return cur
-    except Exception:
-        return default
-
 try:
     posthog.project_api_key = _safe_get(st.secrets, "posthog.api_key")
     posthog.host = _safe_get(st.secrets, "posthog.host", "https://app.posthog.com")
@@ -187,6 +198,9 @@ def parse_seed_badges(xlsx_path: str):
     """
     Parse Summary + Seeds_Constraints to produce UI badges and metadata,
     including generation launch year.
+
+    NOTE: We intentionally DO NOT surface any 'Generation_Window_Basis'
+    to end users (kept private).
     """
     confidence = None
     eu_badge = {"style": "badge-soft", "text": "Europe seed: none"}
@@ -194,9 +208,8 @@ def parse_seed_badges(xlsx_path: str):
     plaus_badge = None
     launch_year = None
     gen_end = None
-    basis = None
 
-    # 1) Confidence + plausibility + launch year/basis from Summary
+    # 1) Confidence + plausibility + launch year from Summary
     try:
         summary = pd.read_excel(xlsx_path, sheet_name="Summary")
         if len(summary):
@@ -208,8 +221,6 @@ def parse_seed_badges(xlsx_path: str):
             if "Generation_Window_End" in summary.columns:
                 ge = summary.loc[0, "Generation_Window_End"]
                 gen_end = int(ge) if pd.notnull(ge) else None
-            if "Generation_Window_Basis" in summary.columns:
-                basis = str(summary.loc[0, "Generation_Window_Basis"] or "").strip()
 
             if "Plausibility_Flag" in summary.columns:
                 flag = bool(summary.loc[0, "Plausibility_Flag"])
@@ -264,16 +275,14 @@ def parse_seed_badges(xlsx_path: str):
         w = seed_json["world"]
         w_badge = {"style":"badge-strong", "text": f"World {seed_json.get('year')}: {int(w.get('value',0)):,}  ·  {w.get('source','seed')}"}
 
-    return confidence, eu_badge, w_badge, plaus_badge, launch_year, gen_end, basis
+    return confidence, eu_badge, w_badge, plaus_badge, launch_year, gen_end
 
 def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict,
                   plaus_badge: dict | None = None,
-                  launch_year: int | None = None,
-                  basis: str | None = None):
+                  launch_year: int | None = None):
     conf_txt = f"Confidence: <strong>{confidence}</strong>" if confidence else "Confidence: <span class='k'>n/a</span>"
     plaus_html = f"<div class='badge {plaus_badge['style']}'>{plaus_badge['text']}</div>" if plaus_badge else ""
     launch_html = f"<div class='badge badge-strong'>Launch: <strong>{launch_year}</strong></div>" if launch_year else ""
-    basis_html = f"<div class='badge'>Basis: <span class='k'>{basis}</span></div>" if basis else ""
     st.markdown(
         f"""
         <div class="badges">
@@ -282,7 +291,6 @@ def header_badges(confidence: str | None, eu_badge: dict, w_badge: dict,
           <div class="badge {eu_badge['style']}">{eu_badge['text']}</div>
           <div class="badge {w_badge['style']}">{w_badge['text']}</div>
           {plaus_html}
-          {basis_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -295,8 +303,8 @@ def run_script2_with_env(input_text: str):
     """
     script_path = find_script2()
     if not script_path:
-        files = ", ".join(sorted(os.listdir(SCRIPTS_DIR))) if os.path.exists(SCRIPTS_DIR) else "(missing)"
-        return 127, f"[ERROR] Script not found in {SCRIPTS_DIR}. Files here: {files}"
+        files = ", ".join(sorted(os.listdir(SCRIPTS_DIR)) if os.path.exists(SCRIPTS_DIR) else [])
+        return 127, f"[ERROR] Script not found in {SCRIPTS_DIR}. Files here: {files or '(none)'}"
 
     env = os.environ.copy()
     env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
@@ -351,22 +359,23 @@ if submitted:
         st.error("Please enter a car model.")
     else:
         input_text = f"{model}\n{generation}\n{start_year}\n"
-        with st.status("Running Script 2…", expanded=False):
+        with st.status("Running…", expanded=False):
             code, out = run_script2_with_env(input_text)
 
-        # Surface common setup issues
+        # Surface common setup issues (no secret leakage)
         if "OPENAI_API_KEY not set" in (out or ""):
-            st.warning("OPENAI_API_KEY isn’t configured for Script 2. Set it in `st.secrets` or environment.")
+            st.warning("OPENAI_API_KEY isn’t configured for the estimator.")
         if "SERPAPI_KEY not set" in (out or ""):
             st.info("SERPAPI_KEY isn’t set; web seeding will be limited to local data.")
 
-        # Always show the last lines for debugging context
-        tail = "\n".join((out or "").splitlines()[-50:])
-        with st.expander("Run log", expanded=False):
-            st.code(tail)
+        # Run log is hidden unless explicitly enabled
+        if SHOW_RUN_LOG:
+            tail = "\n".join((out or "").splitlines()[-80:])
+            with st.expander("Run log (debug)", expanded=False):
+                st.code(tail)
 
         if code != 0:
-            st.error("Script 2 failed. See diagnostic above.")
+            st.error("The estimator failed. (Open the debug log to see details.)")
             track("run_script2", {
                 "model": model,
                 "generation": generation or "",
@@ -410,28 +419,29 @@ if submitted:
             # Pick the first that exists
             xlsx = next((p for p in candidates if p and os.path.exists(p)), None)
 
-            # Extra diagnostics: list DATA_DIR contents so it's obvious what's there
-            with st.expander("Data folder contents", expanded=False):
-                st.write("DATA_DIR:", DATA_DIR)
-                try:
-                    files = sorted(
-                        glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")),
-                        key=os.path.getmtime,
-                        reverse=True,
-                    )
-                    if not files:
-                        st.write("No sales_estimates_*.xlsx files found.")
-                    else:
-                        st.write("\n".join(os.path.basename(f) for f in files[:15]))
-                except Exception as e:
-                    st.write(f"(Could not list files: {e})")
+            # Data folder contents pane is hidden unless debug enabled
+            if SHOW_DATA_DIR:
+                with st.expander("Data folder contents (debug)", expanded=False):
+                    st.write("DATA_DIR:", DATA_DIR)
+                    try:
+                        files = sorted(
+                            glob.glob(os.path.join(DATA_DIR, "sales_estimates_*.xlsx")),
+                            key=os.path.getmtime,
+                            reverse=True,
+                        )
+                        if not files:
+                            st.write("No sales_estimates_*.xlsx files found.")
+                        else:
+                            st.write("\n".join(os.path.basename(f) for f in files[:15]))
+                    except Exception as e:
+                        st.write(f"(Could not list files: {e})")
 
             if not xlsx:
-                st.error("No output Excel found. The estimator ran but the file wasn’t found at the expected paths.")
+                st.error("No output Excel found.")
             else:
-                # Badges (safe if Summary missing: function already guards)
-                confidence, eu_b, w_b, plaus_b, launch_year, gen_end, basis = parse_seed_badges(xlsx)
-                header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year, basis=basis)
+                # Badges (we do NOT display 'basis' anywhere)
+                confidence, eu_b, w_b, plaus_b, launch_year, gen_end = parse_seed_badges(xlsx)
+                header_badges(confidence, eu_b, w_b, plaus_b, launch_year=launch_year)
 
                 # Try to load Estimates; if it fails, show a clear error instead of blank page
                 try:
