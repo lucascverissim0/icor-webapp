@@ -15,7 +15,11 @@ Local Top100 data is STILL used for:
   - Plausibility checks & share bounds
 …but it does NOT affect / override the detected generation WINDOW or LABEL.
 
-Everything else (smoothing, outputs, ICOR support flags) unchanged.
+This version adds:
+- Accept local EU/World seed when MODEL+YEAR match, even if generation label differs.
+- Body-style → parent model fallback (e.g., "Q5 Sportback" -> "Q5").
+- Variant-share derivation from parent totals when the variant seed is missing or implausibly tiny
+  relative to the parent (no absolute floors).
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -56,8 +60,7 @@ DECAY_RATE          = 0.0556
 REPAIR_RATE         = 0.021
 MAX_FUTURE_GAP      = 1
 
-# Keep for internal fallback (Wikipedia API parsing)
-GEN_WINDOW_SOURCE   = "web_first"  # options: "web_first" | "local_first" (local is ignored for window now)
+GEN_WINDOW_SOURCE   = "web_first"  # informational
 
 SYSTEM_INSTRUCTIONS = (
     "You are an automotive market analyst. Use provided seed data and constraints as anchors. "
@@ -82,6 +85,18 @@ def normalize_generation(g: Optional[str]) -> str:
     g = re.sub(r"\bmk\s*", "mk", g)
     g = re.sub(r"\s+", " ", g).strip()
     return g
+
+# ------------------ Body-style handling ------------
+BODY_STYLE_TOKENS = {
+    "sportback","coupe","fastback","hatchback","sedan","saloon","wagon","estate",
+    "avant","touring","shooting brake","cabrio","convertible","roadster","spider",
+    "spyder","pickup","ute","suv","crossover"
+}
+
+def strip_body_style_tokens(name: str) -> str:
+    toks = normalize_name(name).split()
+    toks = [t for t in toks if t not in BODY_STYLE_TOKENS]
+    return " ".join(toks)
 
 # ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
@@ -140,29 +155,59 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
 # ------------------ Safer model matching -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
     key = normalize_name(user_model)
+    # 1) exact
     for db in dbs:
         if key in db:
             return key
+    # 2) similarity with digit-token check
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
-    if not all_keys:
-        return None
-    def digit_tokens(s: str) -> set[str]:
-        toks = s.split()
-        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
-    target_digits = digit_tokens(key)
-    filtered = all_keys
-    if target_digits:
-        same = [k for k in all_keys if digit_tokens(k) == target_digits]
-        if same:
-            filtered = same
-    best, best_r = None, -1.0
-    for cand in filtered:
-        r = difflib.SequenceMatcher(None, key, cand).ratio()
-        if r > best_r:
-            best, best_r = cand, r
-    if best and best_r >= 0.88:
-        return best
+    if all_keys:
+        def digit_tokens(s: str) -> set[str]:
+            toks = s.split()
+            return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
+        target_digits = digit_tokens(key)
+        filtered = all_keys
+        if target_digits:
+            same = [k for k in all_keys if digit_tokens(k) == target_digits]
+            if same:
+                filtered = same
+        best, best_r = None, -1.0
+        for cand in filtered:
+            r = difflib.SequenceMatcher(None, key, cand).ratio()
+            if r > best_r:
+                best, best_r = cand, r
+        if best and best_r >= 0.88:
+            return best
+    # 3) parent model fallback (strip body-style tokens)
+    parent = strip_body_style_tokens(user_model)
+    parent_key = normalize_name(parent)
+    if parent_key != key:
+        for db in dbs:
+            if parent_key in db:
+                return parent_key
     return None
+
+# ------------------ Model totals helpers -----------
+def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
+    mk = find_best_model_key(db_eu, {}, user_model=user_model)
+    if not mk: return None
+    rec = db_eu.get(mk, {}).get(year)
+    return int(rec["units_europe"]) if rec and "units_europe" in rec else None
+
+def parent_model_totals_for_year(db_eu, db_world, user_model: str, year: int) -> Dict[str, Optional[int]]:
+    """
+    Returns EU/World totals for the parent model key (body-style stripped), if present at `year`.
+    """
+    parent = strip_body_style_tokens(user_model)
+    parent_key = normalize_name(parent)
+    if not parent_key or parent_key == normalize_name(user_model):
+        return {"eu": None, "world": None}
+    eu_val = db_eu.get(parent_key, {}).get(year, {}).get("units_europe") if parent_key in db_eu else None
+    w_val  = db_world.get(parent_key, {}).get(year, {}).get("units_world") if parent_key in db_world else None
+    return {
+        "eu": (int(eu_val) if isinstance(eu_val, int) else None),
+        "world": (int(w_val) if isinstance(w_val, int) else None)
+    }
 
 # ------------------ Serp helpers -------------------
 SERP_ENDPOINT = "https://serpapi.com/search.json"
@@ -459,179 +504,7 @@ def decide_continuation_if_exact_2025(model: str, window: Tuple[int,int], ref_ye
         return min(ref_year + 2, DEADLINE_YEAR), diag
     return min(ref_year + 1, DEADLINE_YEAR), diag
 
-# ------------------ Local seeds/history -------------
-def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int,int]) -> Optional[str]:
-    """Alias ONLY for matching seed rows; does not change gen label/window."""
-    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
-    if not mk: return None
-    lo, hi = gen_window
-    det_norm = normalize_generation(detected_gen)
-    labels = []
-    for db in (db_eu, db_world):
-        for y, rec in db.get(mk, {}).items():
-            if lo <= y <= hi:
-                g = rec.get("generation")
-                if g: labels.append(normalize_generation(g))
-    labels = [g for g in labels if g]
-    if not labels: return None
-    c = Counter(labels)
-    if det_norm in c: return None
-    top, cnt = c.most_common(1)[0]
-    if len(c)==1 or cnt/sum(c.values())>=0.7: return top
-    return None
-
-def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_year, accepted_alias=None, window=None) -> Dict[str,Any]:
-    out = {"found_model": False, "model_key": None, "display_model": None,
-           "eu": None, "world": None, "history_europe": [], "history_world": []}
-    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
-    if not mk: return out
-    out["found_model"] = True; out["model_key"] = mk
-    accepted = {normalize_generation(target_gen)}
-    if accepted_alias: accepted.add(normalize_generation(accepted_alias))
-    def _hist(db, units_field):
-        hist = []
-        for y, rec in db.get(mk, {}).items():
-            if window and not (window[0] <= y <= window[1]): continue
-            if normalize_generation(rec.get("generation")) in accepted:
-                hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
-        return sorted(hist, key=lambda r: r["year"])
-    eu_hist = _hist(db_eu, "units_europe"); w_hist = _hist(db_world, "units_world")
-    out["history_europe"] = eu_hist; out["history_world"] = w_hist
-    disp = None
-    for db in (db_eu, db_world):
-        if mk in db and start_year in db[mk]:
-            disp = db[mk][start_year]["model"]; break
-    if disp is None:
-        for db in (db_eu, db_world):
-            if mk in db and db[mk]:
-                disp = db[mk][sorted(db[mk].keys())[-1]]["model"]; break
-    out["display_model"] = disp
-    if mk in db_eu and start_year in db_eu[mk]:
-        if normalize_generation(db_eu[mk][start_year].get("generation")) in accepted:
-            out["eu"] = {"value": int(db_eu[mk][start_year]["units_europe"]), "source": "local-db", "is_model_level": True}
-    if mk in db_world and start_year in db_world[mk]:
-        if normalize_generation(db_world[mk][start_year].get("generation")) in accepted:
-            out["world"] = {"value": int(db_world[mk][start_year]["units_world"]), "source": "local-db", "is_model_level": True}
-    return out
-
-# ------------------ Gen detection orchestrator (WEB-ONLY for window) --
-def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
-    """
-    Generation detection order (NO local DB influence on window/label):
-      1) wikipedia_gen.detect_via_wikipedia
-      2) Wikipedia API parser
-      3) SERP fallback
-      4) User-provided generation (default window)
-      5) Final default (8y)
-    Returns: (gen_label, (start,end), basis, note)
-    """
-
-    def _clip(window):
-        gs, ge = window
-        return (max(1990, gs), min(ge, DEADLINE_YEAR))
-
-    # --- 1) WIKIPEDIA MODULE (cache-first, preferred) ---
-    try:
-        wm_label, wm_window, wm_diag = detect_via_wikipedia(model, user_year)
-    except Exception:
-        wm_label, wm_window, wm_diag = None, None, {"basis":"wikipedia_module","status":"exception"}
-
-    if wm_window:
-        start, end = wm_window
-        # resolve open-ended or exact-2025
-        if end >= DEADLINE_YEAR:
-            end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
-            basis = "wikipedia_module_present_resolved"; note = "Window from wikipedia_gen; 'present' resolved."
-        elif end == 2025:
-            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
-            basis = "wikipedia_module_end_2025_resolved"; note = "Window from wikipedia_gen; 2025 end resolved."
-        else:
-            end_resolved = end; basis = "wikipedia_module_fixed"; note = "Window from wikipedia_gen."
-        return wm_label or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
-
-    # --- 2) Wikipedia API fallback ---
-    gen_label_wiki, win_wiki, wiki_diag = detect_generation_via_wikipedia_api(model, user_year)
-    if win_wiki:
-        start, end = win_wiki
-        end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
-        if end != DEADLINE_YEAR and end == 2025:
-            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
-            basis = "wikipedia_api_end_2025_resolved"
-            note = "Wikipedia window; end=2025 resolved via web signals."
-            return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
-        basis = "wikipedia_api_present_resolved" if end == DEADLINE_YEAR else "wikipedia_api_fixed"
-        note = "Window from Wikipedia headings; 'present' resolved vs 2025." if end == DEADLINE_YEAR else "Window from Wikipedia headings."
-        return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
-
-    # --- 3) SERP fallback for window ---
-    def detect_generation_via_serp(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
-        queries = [
-            f'site:wikipedia.org "{model}" generation production',
-            f'site:wikipedia.org "{model}" (Mk OR Mark OR generation) production',
-            f'"{model}" generation production years',
-            f'"{model}" model years generation',
-        ]
-        blobs = []
-        for q in queries:
-            res = serp_search(q)
-            if "error" in res: continue
-            blobs.extend(pull_text_blobs(res))
-            time.sleep(0.25)
-        RANGE = re.compile(r'(?:(?:Production|Model years)\s*[:\-]?\s*)?(20\d{2})\s*(?:–|-|to)\s*(20\d{2}|present)', re.I)
-        GEN = re.compile(r'\b(?:mk|mark|gen(?:eration)?)\s?([ivx\d]{1,3})\b', re.I)
-        best = None; best_score = -1e9; best_window = None; best_label = None
-        def score_blob(t: str) -> int:
-            s = 0
-            if "wikipedia.org" in t.lower(): s += 20
-            if str(year) in t: s += 5
-            if "production" in t.lower() or "model years" in t.lower(): s += 5
-            return s
-        for b in blobs:
-            t = (b.get("text") or "") + " " + (b.get("url") or "")
-            if normalize_name(model) not in normalize_name(t): continue
-            for m in RANGE.finditer(t):
-                y1 = int(m.group(1))
-                y2 = m.group(2)
-                y2i = DEADLINE_YEAR if isinstance(y2, str) and y2.lower()=="present" else int(y2)
-                if not (1990 <= y1 <= 2100 and y1 <= y2i <= 2100): continue
-                in_view_bonus = 8 if (y1-1) <= year <= (y2i+1) else 0
-                sc = score_blob(t) + in_view_bonus
-                if sc > best_score:
-                    best_score = sc
-                    best_window = (y1, y2i)
-                    g = GEN.search(t)
-                    best_label = f"Mk{g.group(1).upper()}" if g else "GEN"
-                    best = b
-        return best_label, best_window, best
-
-    web_gen, win_serp, _ = detect_generation_via_serp(model, user_year)
-    if win_serp:
-        start, end = win_serp
-        if end == DEADLINE_YEAR:
-            end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
-            return web_gen or (user_gen or "GEN"), _clip((start, end_resolved)), "web_serp_present_resolved", "SERP window; 'present' resolved vs 2025."
-        if end == 2025:
-            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
-            return web_gen or (user_gen or "GEN"), _clip((start, end_resolved)), "web_serp_end_2025_resolved", "SERP window; 2025 end resolved."
-        return web_gen or (user_gen or "GEN"), _clip((start, end)), "web_serp_fixed", "Window from web SERP."
-
-    # --- 4) USER INPUT (no local lookup for window) ---
-    if user_gen:
-        gen_label = user_gen
-        # Default 8y window around the user's year if gen provided but web failed
-        return gen_label, _clip((max(1990, user_year-1), min(user_year+7, DEADLINE_YEAR))), "user_input_default", "User gen; default 8y window."
-
-    # --- 5) FINAL DEFAULT ---
-    gen_label = "GEN"
-    return gen_label, (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
-
 # ------------------ Priors & constraints ------------
-def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
-    mk = find_best_model_key(db_eu, {}, user_model=user_model)
-    if not mk: return None
-    rec = db_eu.get(mk, {}).get(year)
-    return int(rec["units_europe"]) if rec and "units_europe" in rec else None
-
 def prior_generation_avg_eu(db_eu, user_model, detected_gen: str, start_year: int, lookback_years: int = 3) -> Optional[int]:
     mk = find_best_model_key(db_eu, {}, user_model=user_model)
     if not mk: return None
@@ -674,6 +547,23 @@ def infer_eu_share_bounds(db_eu, model_key: Optional[str], start_year: int) -> T
     else:          lo,hi=0.03,0.35; diag["bands"]="rank<=100"
     return (lo,hi), diag
 
+def infer_variant_share_prior(model_name: str) -> Tuple[float, float, float]:
+    """
+    Returns (low, mid, high) share of parent model for the variant/body-style.
+    Used only if variant seed is missing or implausibly tiny relative to the parent.
+    """
+    name = normalize_name(model_name)
+    if "sportback" in name:
+        return (0.25, 0.35, 0.45)
+    if "coupe" in name or "fastback" in name:
+        return (0.20, 0.30, 0.40)
+    if "convertible" in name or "cabrio" in name or "roadster" in name or "spider" in name or "spyder" in name:
+        return (0.08, 0.12, 0.18)
+    if "wagon" in name or "estate" in name or "avant" in name or "touring" in name:
+        return (0.20, 0.28, 0.38)
+    # default weak prior
+    return (0.15, 0.25, 0.35)
+
 def build_constraints(start_year: int, display_model: str, target_gen: str,
                       gen_window: Tuple[int,int], db_eu, local, web) -> Tuple[dict, dict, dict]:
     seed = {
@@ -696,6 +586,8 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
     constraints["zero_years"] = [y for y in zero_years if y >= start_year]
 
     eu_val = None; world_val = None
+
+    # --- prefer LOCAL seeds (may come from year-match relaxation)
     if local.get("eu"):
         eu_val = int(local["eu"]["value"])
         seed["europe"] = {"value": eu_val, "source": local["eu"]["source"], "is_model_level": True}
@@ -705,6 +597,7 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
         seed["world"] = {"value": world_val, "source": local["world"]["source"], "is_model_level": True}
         constraints["world"]["exact"] = {start_year: min(world_val, WORLD_MAX_CAP)}
 
+    # --- WEB seed if nothing local at all
     if (eu_val is None and world_val is None
         and not seed["history_europe"] and not seed["history_world"]):
         if web and web.get("europe"):
@@ -716,6 +609,37 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
             seed["world"] = {"value": world_val, "source": "web-serp", "is_model_level": bool(web["world"].get("is_model_level"))}
             constraints.setdefault("world",{}).setdefault("exact",{})[start_year] = min(world_val, WORLD_MAX_CAP)
 
+    # --- Variant-share derivation from parent (NO absolute floors)
+    parent_totals = parent_model_totals_for_year(db_eu, db_world, display_model, start_year)
+    p_eu, p_world = parent_totals.get("eu"), parent_totals.get("world")
+
+    need_variant_from_parent = False
+    reasons = []
+    if p_eu is not None and (eu_val is None or (eu_val < 0.10 * p_eu)):
+        need_variant_from_parent = True
+        reasons.append(f"EU seed {'missing' if eu_val is None else f'<10% of parent EU {p_eu:,}'}")
+    if p_world is not None and (world_val is None or (world_val < 0.08 * p_world)):
+        need_variant_from_parent = True
+        reasons.append(f"World seed {'missing' if world_val is None else f'<8% of parent World {p_world:,}'}")
+
+    if need_variant_from_parent and (p_eu is not None or p_world is not None):
+        lo, mid, hi = infer_variant_share_prior(display_model)
+        if p_eu is not None and (eu_val is None or eu_val < lo * p_eu):
+            eu_val = int(round(mid * p_eu))
+            seed["europe"] = {"value": eu_val, "source": "derived-from-parent", "is_model_level": True}
+            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
+        if p_world is not None and (world_val is None or world_val < lo * p_world):
+            # Prefer an exact mid-point; you can switch to range if you prefer
+            world_val = int(round(mid * p_world))
+            seed["world"] = {"value": world_val, "source": "derived-from-parent", "is_model_level": True}
+            constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(world_val, WORLD_MAX_CAP)
+        seed["variant_derivation_note"] = {
+            "from_parent_model": strip_body_style_tokens(display_model),
+            "prior_share_low_mid_high": [lo, mid, hi],
+            "reasons": reasons
+        }
+
+    # --- Optional: keep your web plausibility check but WITHOUT hard absolute floors
     if seed.get("europe") and str(seed["europe"].get("source","")).startswith("web"):
         prior_avg  = prior_generation_avg_eu(db_eu, display_model, target_gen, start_year)
         model_tot  = model_total_eu_for_year(db_eu, display_model, start_year)
@@ -724,18 +648,15 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
             floors.append(int(0.10 * prior_avg)); notes.append(f"10% prior-gen avg {prior_avg:,}")
         if model_tot:
             floors.append(int(0.05 * model_tot)); notes.append(f"5% model EU {model_tot:,}")
-        if floors:
-            floor_val = max(floors + [20_000])
-            if eu_val < floor_val:
-                plaus["flag"] = True
-                plaus["reason"] = f"EU seed {eu_val:,} is very small vs " + " & ".join(notes)
-                eu_val = floor_val
-                seed["europe"]["value"] = eu_val
-                constraints["europe"]["exact"][start_year] = eu_val
+        if floors and eu_val is not None and eu_val < max(floors):
+            plaus["flag"] = True
+            plaus["reason"] = f"EU seed {eu_val:,} is very small vs " + " & ".join(notes)
+            eu_val = max(floors)
+            seed["europe"]["value"] = eu_val
+            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
         plaus["source_note"] = "EU seed derived from web; checked vs local history"
-    elif seed.get("europe") and str(seed["europe"].get("source","")).startswith("local"):
-        plaus["source_note"] = "EU seed from local Top100"
 
+    # --- If world still unknown but EU known -> infer range from EU share priors
     if world_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, local.get("model_key"), start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
@@ -743,6 +664,11 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
         constraints["world"]["range"] = {start_year: (world_min, world_max)}
         seed["eu_share_prior"] = {"low": lo_share, "high": hi_share,
                                   "rank": diag["rank"], "presence_years": diag["presence_years"]}
+
+    # add some traceability
+    if local.get("used_year_match_relaxation"):
+        seed["notes"] += " | Local seed accepted via model+year match (generation label relaxed)."
+
     return seed, constraints, plaus
 
 # ------------------ OpenAI call --------------------
@@ -988,6 +914,194 @@ def check_icor_support(icor_map, icor_df, model_name, generation_input, start_ye
         return {"supported_flag": False, "match_type": "no_model_match", "matched_row": None}
     return {"supported_flag": True, "match_type": "model_present_diff_gen_no_year_map", "matched_row": {"model": rows.iloc[0][cols["model"]] }}
 
+# ------------------ Local seeds/history -------------
+def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, gen_window: Tuple[int,int]) -> Optional[str]:
+    """Alias ONLY for matching seed rows; does not change gen label/window."""
+    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
+    if not mk: return None
+    lo, hi = gen_window
+    det_norm = normalize_generation(detected_gen)
+    labels = []
+    for db in (db_eu, db_world):
+        for y, rec in db.get(mk, {}).items():
+            if lo <= y <= hi:
+                g = rec.get("generation")
+                if g: labels.append(normalize_generation(g))
+    labels = [g for g in labels if g]
+    if not labels: return None
+    c = Counter(labels)
+    if det_norm in c: return None
+    top, cnt = c.most_common(1)[0]
+    if len(c)==1 or cnt/sum(c.values())>=0.7: return top
+    return None
+
+def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_year,
+                              accepted_alias=None, window=None, allow_year_match_if_model=True) -> Dict[str,Any]:
+    """
+    Prefer local seeds/history for the detected generation.
+    If allow_year_match_if_model=True, accept an exact MODEL+YEAR seed even if the generation label differs.
+    """
+    out = {"found_model": False, "model_key": None, "display_model": None,
+           "eu": None, "world": None, "history_europe": [], "history_world": [],
+           "used_year_match_relaxation": False}
+    mk = find_best_model_key(db_eu, db_world, user_model=user_model)
+    if not mk: return out
+    out["found_model"] = True; out["model_key"] = mk
+    accepted = {normalize_generation(target_gen)}
+    if accepted_alias: accepted.add(normalize_generation(accepted_alias))
+
+    def _hist(db, units_field):
+        hist = []
+        for y, rec in db.get(mk, {}).items():
+            if window and not (window[0] <= y <= window[1]): 
+                continue
+            g_norm = normalize_generation(rec.get("generation"))
+            # relaxed: include rows even if label differs (same model+window)
+            if g_norm in accepted or allow_year_match_if_model:
+                hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
+        return sorted(hist, key=lambda r: r["year"])
+
+    eu_hist = _hist(db_eu, "units_europe"); w_hist = _hist(db_world, "units_world")
+    out["history_europe"] = eu_hist; out["history_world"] = w_hist
+
+    disp = None
+    for db in (db_eu, db_world):
+        if mk in db and start_year in db[mk]:
+            disp = db[mk][start_year]["model"]; break
+    if disp is None:
+        for db in (db_eu, db_world):
+            if mk in db and db[mk]:
+                disp = db[mk][sorted(db[mk].keys())[-1]]["model"]; break
+    out["display_model"] = disp
+
+    # Exact SEED at start_year — allow model+year even if gen label differs
+    if mk in db_eu and start_year in db_eu[mk]:
+        g_norm = normalize_generation(db_eu[mk][start_year].get("generation"))
+        if (g_norm in accepted) or (allow_year_match_if_model):
+            out["eu"] = {"value": int(db_eu[mk][start_year]["units_europe"]),
+                         "source": "local-db(year-match)" if (g_norm not in accepted) else "local-db",
+                         "is_model_level": True}
+            if g_norm not in accepted:
+                out["used_year_match_relaxation"] = True
+    if mk in db_world and start_year in db_world[mk]:
+        g_norm = normalize_generation(db_world[mk][start_year].get("generation"))
+        if (g_norm in accepted) or (allow_year_match_if_model):
+            out["world"] = {"value": int(db_world[mk][start_year]["units_world"]),
+                            "source": "local-db(year-match)" if (g_norm not in accepted) else "local-db",
+                            "is_model_level": True}
+            if g_norm not in accepted:
+                out["used_year_match_relaxation"] = True
+
+    return out
+
+# ------------------ Gen detection orchestrator (WEB-ONLY for window) --
+def autodetect_generation(db_eu, db_world, _icor_map_unused, model, user_year, user_gen):
+    """
+    Generation detection order (NO local DB influence on window/label):
+      1) wikipedia_gen.detect_via_wikipedia
+      2) Wikipedia API parser
+      3) SERP fallback
+      4) User-provided generation (default window)
+      5) Final default (8y)
+    Returns: (gen_label, (start,end), basis, note)
+    """
+    def _clip(window):
+        gs, ge = window
+        return (max(1990, gs), min(ge, DEADLINE_YEAR))
+
+    # --- 1) WIKIPEDIA MODULE (cache-first, preferred) ---
+    try:
+        wm_label, wm_window, wm_diag = detect_via_wikipedia(model, user_year)
+    except Exception:
+        wm_label, wm_window, wm_diag = None, None, {"basis":"wikipedia_module","status":"exception"}
+
+    if wm_window:
+        start, end = wm_window
+        if end >= DEADLINE_YEAR:
+            end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
+            basis = "wikipedia_module_present_resolved"; note = "Window from wikipedia_gen; 'present' resolved."
+        elif end == 2025:
+            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
+            basis = "wikipedia_module_end_2025_resolved"; note = "Window from wikipedia_gen; 2025 end resolved."
+        else:
+            end_resolved = end; basis = "wikipedia_module_fixed"; note = "Window from wikipedia_gen."
+        return wm_label or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
+
+    # --- 2) Wikipedia API fallback ---
+    gen_label_wiki, win_wiki, wiki_diag = detect_generation_via_wikipedia_api(model, user_year)
+    if win_wiki:
+        start, end = win_wiki
+        end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
+        if end != DEADLINE_YEAR and end == 2025:
+            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
+            basis = "wikipedia_api_end_2025_resolved"
+            note = "Wikipedia window; end=2025 resolved via web signals."
+            return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
+        basis = "wikipedia_api_present_resolved" if end == DEADLINE_YEAR else "wikipedia_api_fixed"
+        note = "Window from Wikipedia headings; 'present' resolved vs 2025." if end == DEADLINE_YEAR else "Window from Wikipedia headings."
+        return gen_label_wiki or (user_gen or "GEN"), _clip((start, end_resolved)), basis, note
+
+    # --- 3) SERP fallback for window ---
+    def detect_generation_via_serp(model: str, year: int) -> Tuple[Optional[str], Optional[Tuple[int,int]], Optional[Dict[str,Any]]]:
+        queries = [
+            f'site:wikipedia.org "{model}" generation production',
+            f'site:wikipedia.org "{model}" (Mk OR Mark OR generation) production',
+            f'"{model}" generation production years',
+            f'"{model}" model years generation',
+        ]
+        blobs = []
+        for q in queries:
+            res = serp_search(q)
+            if "error" in res: continue
+            blobs.extend(pull_text_blobs(res))
+            time.sleep(0.25)
+        RANGE = re.compile(r'(?:(?:Production|Model years)\s*[:\-]?\s*)?(20\d{2})\s*(?:–|-|to)\s*(20\d{2}|present)', re.I)
+        GEN = re.compile(r'\b(?:mk|mark|gen(?:eration)?)\s?([ivx\d]{1,3})\b', re.I)
+        best = None; best_score = -1e9; best_window = None; best_label = None
+        def score_blob(t: str) -> int:
+            s = 0
+            if "wikipedia.org" in t.lower(): s += 20
+            if str(year) in t: s += 5
+            if "production" in t.lower() or "model years" in t.lower(): s += 5
+            return s
+        for b in blobs:
+            t = (b.get("text") or "") + " " + (b.get("url") or "")
+            if normalize_name(model) not in normalize_name(t): continue
+            for m in RANGE.finditer(t):
+                y1 = int(m.group(1))
+                y2 = m.group(2)
+                y2i = DEADLINE_YEAR if isinstance(y2, str) and y2.lower()=="present" else int(y2)
+                if not (1990 <= y1 <= 2100 and y1 <= y2i <= 2100): continue
+                in_view_bonus = 8 if (y1-1) <= year <= (y2i+1) else 0
+                sc = score_blob(t) + in_view_bonus
+                if sc > best_score:
+                    best_score = sc
+                    best_window = (y1, y2i)
+                    g = GEN.search(t)
+                    best_label = f"Mk{g.group(1).upper()}" if g else "GEN"
+                    best = b
+        return best_label, best_window, best
+
+    web_gen, win_serp, _ = detect_generation_via_serp(model, user_year)
+    if win_serp:
+        start, end = win_serp
+        if end == DEADLINE_YEAR:
+            end_resolved, _ = decide_continuation_if_present(model, (start, end), ref_year=2025)
+            return web_gen or (user_gen or "GEN"), _clip((start, end_resolved)), "web_serp_present_resolved", "SERP window; 'present' resolved vs 2025."
+        if end == 2025:
+            end_resolved, _ = decide_continuation_if_exact_2025(model, (start, end), ref_year=2025)
+            return web_gen or (user_gen or "GEN"), _clip((start, end_resolved)), "web_serp_end_2025_resolved", "SERP window; 2025 end resolved."
+        return web_gen or (user_gen or "GEN"), _clip((start, end)), "web_serp_fixed", "Window from web SERP."
+
+    # --- 4) USER INPUT (no local lookup for window) ---
+    if user_gen:
+        gen_label = user_gen
+        return gen_label, _clip((max(1990, user_year-1), min(user_year+7, DEADLINE_YEAR))), "user_input_default", "User gen; default 8y window."
+
+    # --- 5) FINAL DEFAULT ---
+    gen_label = "GEN"
+    return gen_label, (user_year, min(user_year+8, DEADLINE_YEAR)), "default_8yr", "Fallback default 8-year window."
+
 # ------------------ Summary print ------------------
 def print_summary(data, seed, constraints, gen_basis, icor_status, autodetect_note=""):
     print("\n=== Generation-Specific Car Sales Estimates ===")
@@ -1037,10 +1151,10 @@ def main():
     # Alias (optional) — ONLY for seeding/local history lookup. Does NOT affect window/label.
     alias = infer_local_gen_alias(db_eu, db_world, user["car_model"], gen_label, gen_window)
 
-    # Local seeds/history for that generation AT LAUNCH YEAR
+    # Local seeds/history for that generation AT LAUNCH YEAR (with model+year relaxation)
     local = local_seed_for_generation(
         db_eu, db_world, user["car_model"], gen_label, launch_year,
-        accepted_alias=alias, window=gen_window
+        accepted_alias=alias, window=gen_window, allow_year_match_if_model=True
     )
 
     # Web only if no local coverage at all
