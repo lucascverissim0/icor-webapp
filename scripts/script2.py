@@ -15,11 +15,10 @@ Local Top100 data is STILL used for:
   - Plausibility checks & share bounds
 …but it does NOT affect / override the detected generation WINDOW or LABEL.
 
-This version adds:
-- Accept local EU/World seed when MODEL+YEAR match, even if generation label differs.
-- Body-style → parent model fallback (e.g., "Q5 Sportback" -> "Q5").
-- Variant-share derivation from parent totals when the variant seed is missing or implausibly tiny
-  relative to the parent (no absolute floors).
+Variant logic intent (clarified):
+- The variant (e.g., "Audi Q5 Sportback") keeps its own model identity and keys.
+- Parent model totals (e.g., "Audi Q5") are used only to derive a *logical* seed or bounds
+  when the variant seed is missing or implausibly small. No merging of histories/keys.
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -152,8 +151,12 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
             }
     return db
 
-# ------------------ Safer model matching -----------
+# ------------------ Model key resolution -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
+    """
+    Strictly resolves the model key for EXACT model identity (e.g., 'Q5 Sportback' stays distinct).
+    No parent fallbacks here. We only accept exact or very close string similarity matches.
+    """
     key = normalize_name(user_model)
     # 1) exact
     for db in dbs:
@@ -161,30 +164,36 @@ def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: 
             return key
     # 2) similarity with digit-token check
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
-    if all_keys:
-        def digit_tokens(s: str) -> set[str]:
-            toks = s.split()
-            return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
-        target_digits = digit_tokens(key)
-        filtered = all_keys
-        if target_digits:
-            same = [k for k in all_keys if digit_tokens(k) == target_digits]
-            if same:
-                filtered = same
-        best, best_r = None, -1.0
-        for cand in filtered:
-            r = difflib.SequenceMatcher(None, key, cand).ratio()
-            if r > best_r:
-                best, best_r = cand, r
-        if best and best_r >= 0.88:
-            return best
-    # 3) parent model fallback (strip body-style tokens)
+    if not all_keys:
+        return None
+    def digit_tokens(s: str) -> set[str]:
+        toks = s.split()
+        return {t for t in toks if t.isdigit() or re.fullmatch(r"[a-z]+?\d+", t)}
+    target_digits = digit_tokens(key)
+    filtered = all_keys
+    if target_digits:
+        same = [k for k in all_keys if digit_tokens(k) == target_digits]
+        if same:
+            filtered = same
+    best, best_r = None, -1.0
+    for cand in filtered:
+        r = difflib.SequenceMatcher(None, key, cand).ratio()
+        if r > best_r:
+            best, best_r = cand, r
+    if best and best_r >= 0.88:
+        return best
+    return None
+
+def find_parent_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
+    """
+    Returns the parent model key (body-style stripped) *if present*.
+    Used ONLY for deriving variant shares from parent totals; never for identity.
+    """
     parent = strip_body_style_tokens(user_model)
     parent_key = normalize_name(parent)
-    if parent_key != key:
-        for db in dbs:
-            if parent_key in db:
-                return parent_key
+    for db in dbs:
+        if parent_key in db:
+            return parent_key
     return None
 
 # ------------------ Model totals helpers -----------
@@ -196,14 +205,14 @@ def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
 
 def parent_model_totals_for_year(db_eu, db_world, user_model: str, year: int) -> Dict[str, Optional[int]]:
     """
-    Returns EU/World totals for the parent model key (body-style stripped), if present at `year`.
+    Returns EU/World totals for the *parent* model (e.g., 'Q5' for 'Q5 Sportback') at `year`.
+    Does not affect the variant model identity or keys.
     """
-    parent = strip_body_style_tokens(user_model)
-    parent_key = normalize_name(parent)
-    if not parent_key or parent_key == normalize_name(user_model):
+    pk = find_parent_model_key(db_eu, db_world, user_model=user_model)
+    if not pk:
         return {"eu": None, "world": None}
-    eu_val = db_eu.get(parent_key, {}).get(year, {}).get("units_europe") if parent_key in db_eu else None
-    w_val  = db_world.get(parent_key, {}).get(year, {}).get("units_world") if parent_key in db_world else None
+    eu_val = db_eu.get(pk, {}).get(year, {}).get("units_europe")
+    w_val  = db_world.get(pk, {}).get(year, {}).get("units_world")
     return {
         "eu": (int(eu_val) if isinstance(eu_val, int) else None),
         "world": (int(w_val) if isinstance(w_val, int) else None)
@@ -937,7 +946,7 @@ def infer_local_gen_alias(db_eu, db_world, user_model: str, detected_gen: str, g
 def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_year,
                               accepted_alias=None, window=None, allow_year_match_if_model=True) -> Dict[str,Any]:
     """
-    Prefer local seeds/history for the detected generation.
+    Prefer local seeds/history for the detected generation *for this exact model key*.
     If allow_year_match_if_model=True, accept an exact MODEL+YEAR seed even if the generation label differs.
     """
     out = {"found_model": False, "model_key": None, "display_model": None,
@@ -955,7 +964,7 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
             if window and not (window[0] <= y <= window[1]): 
                 continue
             g_norm = normalize_generation(rec.get("generation"))
-            # relaxed: include rows even if label differs (same model+window)
+            # relaxed: include rows even if label differs (same variant model+window)
             if g_norm in accepted or allow_year_match_if_model:
                 hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
         return sorted(hist, key=lambda r: r["year"])
