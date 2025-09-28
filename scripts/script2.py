@@ -565,7 +565,7 @@ def infer_variant_share_prior(model_name: str) -> Tuple[float, float, float]:
     return (0.15, 0.25, 0.35)
 
 def build_constraints(start_year: int, display_model: str, target_gen: str,
-                      gen_window: Tuple[int,int], db_eu, local, web) -> Tuple[dict, dict, dict]:
+                      gen_window: Tuple[int,int], db_eu, db_world, local, web) -> Tuple[dict, dict, dict]:
     seed = {
         "model": display_model,
         "generation": target_gen,
@@ -601,11 +601,11 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
     if (eu_val is None and world_val is None
         and not seed["history_europe"] and not seed["history_world"]):
         if web and web.get("europe"):
-            eu_val = int(web["europe"]["value"])
+            eu_val = int(web["europe"].get("value"))
             seed["europe"] = {"value": eu_val, "source": "web-serp", "is_model_level": bool(web["europe"].get("is_model_level"))}
             constraints.setdefault("europe",{}).setdefault("exact",{})[start_year] = eu_val
         if web and web.get("world"):
-            world_val = int(web["world"]["value"])
+            world_val = int(web["world"].get("value"))
             seed["world"] = {"value": world_val, "source": "web-serp", "is_model_level": bool(web["world"].get("is_model_level"))}
             constraints.setdefault("world",{}).setdefault("exact",{})[start_year] = min(world_val, WORLD_MAX_CAP)
 
@@ -629,7 +629,6 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
             seed["europe"] = {"value": eu_val, "source": "derived-from-parent", "is_model_level": True}
             constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
         if p_world is not None and (world_val is None or world_val < lo * p_world):
-            # Prefer an exact mid-point; you can switch to range if you prefer
             world_val = int(round(mid * p_world))
             seed["world"] = {"value": world_val, "source": "derived-from-parent", "is_model_level": True}
             constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(world_val, WORLD_MAX_CAP)
@@ -639,7 +638,7 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
             "reasons": reasons
         }
 
-    # --- Optional: keep your web plausibility check but WITHOUT hard absolute floors
+    # --- Optional: web plausibility check WITHOUT hard absolute floors
     if seed.get("europe") and str(seed["europe"].get("source","")).startswith("web"):
         prior_avg  = prior_generation_avg_eu(db_eu, display_model, target_gen, start_year)
         model_tot  = model_total_eu_for_year(db_eu, display_model, start_year)
@@ -1164,7 +1163,7 @@ def main():
     # Build prompt seeds & constraints (+plausibility) at LAUNCH YEAR
     seed, constraints, plaus = build_constraints(
         launch_year, local.get("display_model") or user["car_model"],
-        gen_label, gen_window, db_eu, local, web
+        gen_label, gen_window, db_eu, db_world, local, web
     )
     seed["generation_window_basis"] = gen_basis
     if alias: seed["generation_alias_used"] = alias
