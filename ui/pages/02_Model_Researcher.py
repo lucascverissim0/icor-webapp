@@ -31,7 +31,7 @@ def _safe_get(dict_like, dotted, default=None):
 
 SHOW_RUN_LOG = (
     os.environ.get("ICOR_SHOW_RUN_LOG", "0") == "1"
-    or bool(_safe_get(st.secrets, "debug.show_run_log", False))
+    or bool(_safe_get(st.secrets, "debug.show_run_log", True))
 )
 
 SHOW_DATA_DIR = (
