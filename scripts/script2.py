@@ -1,24 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Generation-specific sales estimator (EU + World)
+Generation-specific sales estimator (EU + World) — Variant-aware
 
-This revision locks **generation window detection** to web-only sources:
-  1) wikipedia_gen.detect_via_wikipedia  (cache-first module)  ✅
-  2) Wikipedia API headings (HTML parse)                        ✅
-  3) Web SERP fallback                                          ✅
-  4) User-provided gen (default window)                         ✅
-  5) Final default (8-year)                                     ✅
-
-Local Top100 data is STILL used for:
-  - Seeding volumes/history for the detected generation
-  - Plausibility checks & share bounds
-…but it does NOT affect / override the detected generation WINDOW or LABEL.
-
-Variant logic intent (clarified):
-- The variant (e.g., "Audi Q5 Sportback") keeps its own model identity and keys.
-- Parent model totals (e.g., "Audi Q5") are used only to derive a *logical* seed or bounds
-  when the variant seed is missing or implausibly small. No merging of histories/keys.
+Key behaviors:
+  • Generation window detection is web-only (Wikipedia-first, then Wikipedia API, then SERP).
+  • Local Top100 EU/World data is used only for seeds/history and plausibility — never to decide the window/label.
+  • Variants (body-style or performance trims) keep their own identity and keys.
+  • If a variant’s start-year seed is missing or implausibly tiny, derive it from the *parent* model using category-based priors.
+  • Accept local seed at (model + year) even if the generation label differs (your original intent).
 """
 
 import os, re, csv, json, glob, time, math, sys
@@ -73,7 +63,7 @@ SYSTEM_INSTRUCTIONS = (
 def normalize_name(s: str) -> str:
     s = s.lower()
     s = re.sub(r"[/\-]", " ", s)
-    s = re.sub(r"[^a-z0-9\s]", "", s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
@@ -85,17 +75,99 @@ def normalize_generation(g: Optional[str]) -> str:
     g = re.sub(r"\s+", " ", g).strip()
     return g
 
-# ------------------ Body-style handling ------------
+# ------------------ Variant classification & parent resolution --------
 BODY_STYLE_TOKENS = {
-    "sportback","coupe","fastback","hatchback","sedan","saloon","wagon","estate",
-    "avant","touring","shooting brake","cabrio","convertible","roadster","spider",
-    "spyder","pickup","ute","suv","crossover"
+    "sportback","fastback","coupe","hatchback","sedan","saloon","wagon","estate",
+    "avant","touring","shooting brake","cabrio","convertible","roadster",
+    "spider","spyder","pickup","ute","suv","crossover"
 }
 
-def strip_body_style_tokens(name: str) -> str:
-    toks = normalize_name(name).split()
-    toks = [t for t in toks if t not in BODY_STYLE_TOKENS]
-    return " ".join(toks)
+def classify_variant(model_name: str) -> Dict[str, str]:
+    """
+    Classify the model as base / body_style / performance and indicate subtype.
+    """
+    n = normalize_name(model_name)
+    res = {"kind": "base", "sub": ""}
+
+    # performance trims
+    if (" amg " in f" {n} ") or re.search(r"\brs\s*\d+\b", n) or re.search(r"\bs\s*\d+\b", n) \
+       or re.search(r"\bm\s*\d\b", n) or " type r" in n or " sti" in n or re.search(r"\bn\b", n):
+        res["kind"] = "performance"
+        if " amg " in f" {n} ": res["sub"] = "amg"
+        elif " rs" in f" {n} ": res["sub"] = "rs"
+        elif re.search(r"\bs\s*\d+\b", n): res["sub"] = "s"
+        elif re.search(r"\bm\s*\d\b", n): res["sub"] = "m"
+        else: res["sub"] = "perf"
+        return res
+
+    # body styles
+    bs_map = {
+        "sportback": "sportback", "fastback": "fastback", "coupe": "coupe",
+        "hatchback": "hatchback", "wagon": "wagon", "estate": "wagon",
+        "avant": "wagon", "touring": "wagon", "shooting brake": "shooting_brake",
+        "cabrio": "cabrio", "convertible": "cabrio", "roadster": "cabrio",
+        "spider": "cabrio", "spyder": "cabrio"
+    }
+    for k, v in bs_map.items():
+        if k in n:
+            res["kind"] = "body_style"
+            res["sub"] = v
+            return res
+    return res
+
+def resolve_parent_key(db_eu, db_world, model_name: str) -> Optional[str]:
+    """
+    Creates a parent candidate string by removing body-style or performance markers.
+    Then finds best available parent key in local DBs (exact or strong fuzzy).
+    Used ONLY for derivations (never for identity).
+    """
+    n = normalize_name(model_name)
+    # remove multiword token first
+    parent_candidate = n.replace("shooting brake", " ")
+    # remove body-style simple tokens
+    toks = [t for t in parent_candidate.split() if t not in BODY_STYLE_TOKENS]
+    parent_candidate = " ".join(toks)
+
+    # performance: "audi s6" -> "audi 6", then → "audi a6"
+    parent_candidate = re.sub(r"\brs\s*(\d+)\b", r"\1", parent_candidate)
+    parent_candidate = re.sub(r"\bs\s*(\d+)\b", r"\1", parent_candidate)
+    parent_candidate = re.sub(r"\bm\s*(\d)\b", r"\1", parent_candidate)
+    parent_candidate = re.sub(r"\bamg\b", " ", parent_candidate)
+
+    # brand-specific gentle normalization
+    pc = parent_candidate
+    # Audi: "audi 6" -> "audi a6"
+    pc = re.sub(r"(\baudi\s+)(\d\b)", r"\1a\2", pc)
+    # BMW: ensure "series" presence is not required (we'll try both)
+    pc = pc.strip()
+    keys = set(db_eu.keys()) | set(db_world.keys())
+
+    def present(k: str) -> Optional[str]:
+        k = normalize_name(k)
+        if k in keys: return k
+        return None
+
+    candidate_list = [pc]
+    if pc.startswith("bmw "):
+        candidate_list.append(pc + " series")
+    # also try without extra spaces
+    candidate_list.extend(list(set([normalize_name(x) for x in candidate_list])))
+
+    # exact attempts
+    for cand in candidate_list:
+        hit = present(cand)
+        if hit: return hit
+
+    # strong fuzzy fallback
+    if keys:
+        best, best_r = None, -1.0
+        for cand in keys:
+            r = difflib.SequenceMatcher(None, pc, cand).ratio()
+            if r > best_r:
+                best, best_r = cand, r
+        if best and best_r >= 0.90:
+            return best
+    return None
 
 # ------------------ Local DB loaders ---------------
 def _load_json_array(path: str) -> Optional[List[dict]]:
@@ -154,15 +226,14 @@ def load_local_database_world(folder: str) -> Dict[str, Dict[int, Dict[str, Any]
 # ------------------ Model key resolution -----------
 def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
     """
-    Strictly resolves the model key for EXACT model identity (e.g., 'Q5 Sportback' stays distinct).
-    No parent fallbacks here. We only accept exact or very close string similarity matches.
+    STRICT identity for model key (no parent/variant collapsing).
     """
     key = normalize_name(user_model)
-    # 1) exact
+    # exact
     for db in dbs:
         if key in db:
             return key
-    # 2) similarity with digit-token check
+    # similarity (digit-token aware)
     all_keys = sorted(set(k for db in dbs for k in db.keys()))
     if not all_keys:
         return None
@@ -184,41 +255,28 @@ def find_best_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: 
         return best
     return None
 
-def find_parent_model_key(*dbs: Dict[str, Dict[int, Dict[str, Any]]], user_model: str) -> Optional[str]:
-    """
-    Returns the parent model key (body-style stripped) *if present*.
-    Used ONLY for deriving variant shares from parent totals; never for identity.
-    """
-    parent = strip_body_style_tokens(user_model)
-    parent_key = normalize_name(parent)
-    for db in dbs:
-        if parent_key in db:
-            return parent_key
-    return None
-
-# ------------------ Model totals helpers -----------
+# ------------------ Totals helpers -----------------
 def model_total_eu_for_year(db_eu, user_model, year) -> Optional[int]:
     mk = find_best_model_key(db_eu, {}, user_model=user_model)
     if not mk: return None
     rec = db_eu.get(mk, {}).get(year)
     return int(rec["units_europe"]) if rec and "units_europe" in rec else None
 
-def parent_model_totals_for_year(db_eu, db_world, user_model: str, year: int) -> Dict[str, Optional[int]]:
+def parent_model_totals_for_year(db_eu, db_world, user_model: str, year: int) -> Tuple[Optional[str], Dict[str, Optional[int]]]:
     """
-    Returns EU/World totals for the *parent* model (e.g., 'Q5' for 'Q5 Sportback') at `year`.
-    Does not affect the variant model identity or keys.
+    Returns parent key and its EU/World totals at `year` for derivations.
     """
-    pk = find_parent_model_key(db_eu, db_world, user_model=user_model)
-    if not pk:
-        return {"eu": None, "world": None}
+    pk = resolve_parent_key(db_eu, db_world, user_model)
+    if not pk or normalize_name(user_model) == pk:
+        return None, {"eu": None, "world": None}
     eu_val = db_eu.get(pk, {}).get(year, {}).get("units_europe")
     w_val  = db_world.get(pk, {}).get(year, {}).get("units_world")
-    return {
+    return pk, {
         "eu": (int(eu_val) if isinstance(eu_val, int) else None),
         "world": (int(w_val) if isinstance(w_val, int) else None)
     }
 
-# ------------------ Serp helpers -------------------
+# ------------------ SERP helpers -------------------
 SERP_ENDPOINT = "https://serpapi.com/search.json"
 SALES_WORDS = ["sales","sold","units","registrations","deliveries","volume","shipments"]
 CURRENCY_TOKENS = ["€","$","£"]
@@ -556,22 +614,36 @@ def infer_eu_share_bounds(db_eu, model_key: Optional[str], start_year: int) -> T
     else:          lo,hi=0.03,0.35; diag["bands"]="rank<=100"
     return (lo,hi), diag
 
-def infer_variant_share_prior(model_name: str) -> Tuple[float, float, float]:
+def variant_share_priors(model_name: str) -> Dict[str, Tuple[float,float,float]]:
     """
-    Returns (low, mid, high) share of parent model for the variant/body-style.
-    Used only if variant seed is missing or implausibly tiny relative to the parent.
+    Generic priors for EU/World shares of a variant relative to its parent totals.
+    Returns dict: {"eu": (low, mid, high), "world": (low, mid, high)}
     """
-    name = normalize_name(model_name)
-    if "sportback" in name:
-        return (0.25, 0.35, 0.45)
-    if "coupe" in name or "fastback" in name:
-        return (0.20, 0.30, 0.40)
-    if "convertible" in name or "cabrio" in name or "roadster" in name or "spider" in name or "spyder" in name:
-        return (0.08, 0.12, 0.18)
-    if "wagon" in name or "estate" in name or "avant" in name or "touring" in name:
-        return (0.20, 0.28, 0.38)
-    # default weak prior
-    return (0.15, 0.25, 0.35)
+    c = classify_variant(model_name)
+    # default priors
+    EU = (0.15, 0.25, 0.35)
+    W  = (0.12, 0.22, 0.32)
+
+    if c["kind"] == "body_style":
+        if c["sub"] in {"sportback","fastback"}:
+            EU, W = (0.25, 0.35, 0.45), (0.22, 0.32, 0.42)
+        elif c["sub"] in {"coupe","shooting_brake"}:
+            EU, W = (0.18, 0.28, 0.38), (0.16, 0.26, 0.36)
+        elif c["sub"] in {"wagon"}:
+            EU, W = (0.20, 0.30, 0.40), (0.18, 0.28, 0.36)
+        elif c["sub"] in {"cabrio"}:
+            EU, W = (0.06, 0.12, 0.18), (0.05, 0.10, 0.15)
+        elif c["sub"] in {"hatchback"}:
+            EU, W = (0.25, 0.35, 0.45), (0.22, 0.32, 0.42)
+
+    elif c["kind"] == "performance":
+        EU = (0.05, 0.10, 0.18)
+        W  = (0.04, 0.09, 0.16)
+        if c["sub"] in {"rs","amg","m"}:
+            EU = (0.06, 0.12, 0.20)
+            W  = (0.05, 0.11, 0.18)
+
+    return {"eu": EU, "world": W}
 
 def build_constraints(start_year: int, display_model: str, target_gen: str,
                       gen_window: Tuple[int,int], db_eu, db_world, local, web) -> Tuple[dict, dict, dict]:
@@ -596,7 +668,7 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
 
     eu_val = None; world_val = None
 
-    # --- prefer LOCAL seeds (may come from year-match relaxation)
+    # --- LOCAL seeds (allow model+year even if generation label differs)
     if local.get("eu"):
         eu_val = int(local["eu"]["value"])
         seed["europe"] = {"value": eu_val, "source": local["eu"]["source"], "is_model_level": True}
@@ -606,9 +678,59 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
         seed["world"] = {"value": world_val, "source": local["world"]["source"], "is_model_level": True}
         constraints["world"]["exact"] = {start_year: min(world_val, WORLD_MAX_CAP)}
 
-    # --- WEB seed if nothing local at all
+    # --- Parent totals (for variant derivations and banding)
+    parent_key, parent_totals = parent_model_totals_for_year(db_eu, db_world, display_model, start_year)
+    p_eu, p_world = parent_totals.get("eu"), parent_totals.get("world")
+    priors = variant_share_priors(display_model)
+
+    # Decide if we need derivation from parent (missing or too small vs low prior)
+    def too_small(child, parent, thresh):
+        return (child is not None) and (parent is not None) and (child < thresh * parent)
+
+    need_from_parent = False
+    reasons = []
+    if parent_key:
+        if eu_val is None and p_eu is not None:
+            need_from_parent = True; reasons.append("EU seed missing")
+        elif p_eu is not None and too_small(eu_val, p_eu, priors["eu"][0]):
+            need_from_parent = True; reasons.append(f"EU seed < low prior {int(priors['eu'][0]*100)}% of parent EU")
+        if world_val is None and p_world is not None:
+            need_from_parent = True; reasons.append("World seed missing")
+        elif p_world is not None and too_small(world_val, p_world, priors["world"][0]):
+            need_from_parent = True; reasons.append(f"World seed < low prior {int(priors['world'][0]*100)}% of parent World")
+
+    # Apply derivation (mid prior, capped by high prior)
+    if need_from_parent:
+        if p_eu is not None:
+            lo, mid, hi = priors["eu"]
+            derived = int(round(mid * p_eu))
+            if eu_val is None or derived > eu_val:
+                eu_val = derived
+            cap = int(round(hi * p_eu))
+            eu_val = min(eu_val, cap)
+            seed["europe"] = {"value": eu_val, "source": "derived-from-parent(prior-mid)", "is_model_level": True}
+            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
+        if p_world is not None:
+            lo, mid, hi = priors["world"]
+            derived = int(round(mid * p_world))
+            if world_val is None or derived > world_val:
+                world_val = derived
+            cap = int(round(hi * p_world))
+            world_val = min(world_val, cap)
+            seed["world"] = {"value": world_val, "source": "derived-from-parent(prior-mid)", "is_model_level": True}
+            constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(world_val, WORLD_MAX_CAP)
+
+        seed["variant_derivation_note"] = {
+            "mode": "prior-mid",
+            "parent_model_key": parent_key,
+            "eu_prior_low_mid_high": priors["eu"],
+            "world_prior_low_mid_high": priors["world"],
+            "reasons": reasons
+        }
+
+    # --- WEB seed only if we still have nothing AND no parent basis
     if (eu_val is None and world_val is None
-        and not seed["history_europe"] and not seed["history_world"]):
+        and not seed["history_europe"] and not seed["history_world"] and not parent_key):
         if web and web.get("europe"):
             eu_val = int(web["europe"].get("value"))
             seed["europe"] = {"value": eu_val, "source": "web-serp", "is_model_level": bool(web["europe"].get("is_model_level"))}
@@ -618,53 +740,37 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
             seed["world"] = {"value": world_val, "source": "web-serp", "is_model_level": bool(web["world"].get("is_model_level"))}
             constraints.setdefault("world",{}).setdefault("exact",{})[start_year] = min(world_val, WORLD_MAX_CAP)
 
-    # --- Variant-share derivation from parent (NO absolute floors)
-    parent_totals = parent_model_totals_for_year(db_eu, db_world, display_model, start_year)
-    p_eu, p_world = parent_totals.get("eu"), parent_totals.get("world")
+    # --- Parent-based RANGE bands at start year (safety guard)
+    def add_parent_band(kind: str, child_val: Optional[int], parent_val: Optional[int], pri):
+        if parent_val is None: return
+        lo, mid, hi = pri
+        lo_val = int(round(lo * parent_val))
+        hi_val = int(round(hi * parent_val))
+        cw = constraints.setdefault(kind, {})
+        rng = cw.setdefault("range", {})
+        existing = rng.get(start_year)
+        if existing:
+            lo_val = max(lo_val, existing[0])
+            hi_val = min(hi_val, existing[1])
+        rng[start_year] = (max(0, lo_val), max(hi_val, max(0, lo_val), child_val or 0))
 
-    need_variant_from_parent = False
-    reasons = []
-    if p_eu is not None and (eu_val is None or (eu_val < 0.10 * p_eu)):
-        need_variant_from_parent = True
-        reasons.append(f"EU seed {'missing' if eu_val is None else f'<10% of parent EU {p_eu:,}'}")
-    if p_world is not None and (world_val is None or (world_val < 0.08 * p_world)):
-        need_variant_from_parent = True
-        reasons.append(f"World seed {'missing' if world_val is None else f'<8% of parent World {p_world:,}'}")
+    if parent_key:
+        add_parent_band("europe", eu_val, p_eu, priors["eu"])
+        add_parent_band("world",  world_val, p_world, priors["world"])
 
-    if need_variant_from_parent and (p_eu is not None or p_world is not None):
-        lo, mid, hi = infer_variant_share_prior(display_model)
-        if p_eu is not None and (eu_val is None or eu_val < lo * p_eu):
-            eu_val = int(round(mid * p_eu))
-            seed["europe"] = {"value": eu_val, "source": "derived-from-parent", "is_model_level": True}
-            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
-        if p_world is not None and (world_val is None or world_val < lo * p_world):
-            world_val = int(round(mid * p_world))
-            seed["world"] = {"value": world_val, "source": "derived-from-parent", "is_model_level": True}
-            constraints.setdefault("world", {}).setdefault("exact", {})[start_year] = min(world_val, WORLD_MAX_CAP)
-        seed["variant_derivation_note"] = {
-            "from_parent_model": strip_body_style_tokens(display_model),
-            "prior_share_low_mid_high": [lo, mid, hi],
-            "reasons": reasons
-        }
-
-    # --- Optional: web plausibility check WITHOUT hard absolute floors
+    # --- Optional: plausibility annotation for web-derived EU
     if seed.get("europe") and str(seed["europe"].get("source","")).startswith("web"):
         prior_avg  = prior_generation_avg_eu(db_eu, display_model, target_gen, start_year)
         model_tot  = model_total_eu_for_year(db_eu, display_model, start_year)
-        floors, notes = [], []
-        if prior_avg:
-            floors.append(int(0.10 * prior_avg)); notes.append(f"10% prior-gen avg {prior_avg:,}")
-        if model_tot:
-            floors.append(int(0.05 * model_tot)); notes.append(f"5% model EU {model_tot:,}")
-        if floors and eu_val is not None and eu_val < max(floors):
+        notes = []
+        if prior_avg: notes.append(f"10% prior-gen avg {prior_avg:,}")
+        if model_tot: notes.append(f"5% model EU {model_tot:,}")
+        if notes:
             plaus["flag"] = True
-            plaus["reason"] = f"EU seed {eu_val:,} is very small vs " + " & ".join(notes)
-            eu_val = max(floors)
-            seed["europe"]["value"] = eu_val
-            constraints.setdefault("europe", {}).setdefault("exact", {})[start_year] = eu_val
-        plaus["source_note"] = "EU seed derived from web; checked vs local history"
+            plaus["reason"] = f"EU seed may be small vs " + " & ".join(notes)
+            plaus["source_note"] = "EU seed derived from web; checked vs local history"
 
-    # --- If world still unknown but EU known -> infer range from EU share priors
+    # --- If world still unknown but EU known -> infer world range from EU share priors
     if world_val is None and eu_val is not None:
         (lo_share, hi_share), diag = infer_eu_share_bounds(db_eu, local.get("model_key"), start_year)
         world_min = max(eu_val, int(math.ceil(eu_val / max(hi_share, 1e-6))))
@@ -673,7 +779,6 @@ def build_constraints(start_year: int, display_model: str, target_gen: str,
         seed["eu_share_prior"] = {"low": lo_share, "high": hi_share,
                                   "rank": diag["rank"], "presence_years": diag["presence_years"]}
 
-    # add some traceability
     if local.get("used_year_match_relaxation"):
         seed["notes"] += " | Local seed accepted via model+year match (generation label relaxed)."
 
@@ -848,6 +953,12 @@ def save_excel(data: Dict[str,Any], fleet_repair: List[Dict[str,Any]],
         "ICOR_Supported": [diag.get("supported_flag")],
         "ICOR_Match_Type": [diag.get("match_type")],
         "ICOR_Matched_Row": [json.dumps(diag.get("matched_row"), ensure_ascii=False)],
+        # Variant traceability
+        "Parent_Model_Key": [seed.get("variant_derivation_note", {}).get("parent_model_key")],
+        "Variant_Derivation_Mode": [seed.get("variant_derivation_note", {}).get("mode")],
+        "Variant_EU_Prior_LMH": [seed.get("variant_derivation_note", {}).get("eu_prior_low_mid_high")],
+        "Variant_World_Prior_LMH": [seed.get("variant_derivation_note", {}).get("world_prior_low_mid_high")],
+        "Variant_Reasons": [", ".join(seed.get("variant_derivation_note", {}).get("reasons", []))]
     })
 
     seeds_constraints = pd.DataFrame({
@@ -964,7 +1075,6 @@ def local_seed_for_generation(db_eu, db_world, user_model, target_gen, start_yea
             if window and not (window[0] <= y <= window[1]): 
                 continue
             g_norm = normalize_generation(rec.get("generation"))
-            # relaxed: include rows even if label differs (same variant model+window)
             if g_norm in accepted or allow_year_match_if_model:
                 hist.append({"year": y, "units": int(rec.get(units_field,0)), "estimated": bool(rec.get("estimated",False))})
         return sorted(hist, key=lambda r: r["year"])
@@ -1165,7 +1275,7 @@ def main():
         accepted_alias=alias, window=gen_window, allow_year_match_if_model=True
     )
 
-    # Web only if no local coverage at all
+    # Web only if no local coverage and no usable parent-based derivation will occur later
     use_web = not (local.get("history_europe") or local.get("history_world") or local.get("eu") or local.get("world"))
     web = serp_seed(local.get("display_model") or user["car_model"], gen_label, launch_year) if use_web else {}
 
