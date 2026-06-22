@@ -208,12 +208,19 @@ def run_script1():
     if not os.path.exists(path):
         return 127, f"[ERROR] Script not found: {path}"
     print("[CHECKPOINT] Running Script 1…")
+    # Inject API keys into the child env: a subprocess can't read st.secrets
+    # reliably (especially on Streamlit Cloud), so mirror run_script2_with_env
+    # in the Model Researcher page and pass them explicitly.
+    env = os.environ.copy()
+    env["OPENAI_API_KEY"] = _safe_get(st.secrets, "openai.api_key", env.get("OPENAI_API_KEY", ""))
+    env["SERPAPI_KEY"]    = _safe_get(st.secrets, "serpapi.api_key", env.get("SERPAPI_KEY", ""))
     proc = subprocess.Popen(
         [sys.executable, path],
         cwd=DATA_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env=env,
     )
     out, code = _timeout_communicate(proc, timeout_sec=420)
     print("[CHECKPOINT] Script 1 finished with code", code)
