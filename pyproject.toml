@@ -33,7 +33,7 @@ dev = [
 packages = ["src/icor"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-config --strict-markers"
+addopts = "-ra --strict-config --strict-markers --disable-socket"
 testpaths = ["tests"]
 xfail_strict = true
 
