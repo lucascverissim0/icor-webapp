@@ -14,12 +14,16 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
 - Repository: `lucascverissim0/icor-webapp` (public)
 - Local clone: `C:\Users\LucasCravoVERISSIMO\icor-webapp`
 - Remote: `https://github.com/lucascverissim0/icor-webapp.git`
-- Branch: `main`
+- Production branch: `main`
+- Development branch: `development/windshield-demand-platform`
 - Review baseline HEAD: `1ba1d7c`
 - At the end of the initial review, the tracked worktree was clean.
 - Existing Windows Git Credential Manager credentials identified the account as `lucascverissim0` without exposing the token.
 - All future Git network commands must be non-interactive. Use `GCM_INTERACTIVE=never`; if authentication expires, stop rather than triggering an account-selection pop-up.
 - Clearing a Codex conversation or terminal screen does not normally erase Windows Credential Manager credentials. Credentials can still expire or be revoked externally.
+- Protected local production checkout: `C:\Users\LucasCravoVERISSIMO\icor-webapp`, branch `main`, reset to and tracking `origin/main` at `1ba1d7c` on 2026-08-25.
+- Long-lived development worktree: `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`, branch `development/windshield-demand-platform`, created at `f5d0bf4` on 2026-08-25.
+- All subsequent edits, tests, local servers, and commits must run from the development worktree. Treat the production checkout as read-only. Merging to `main`, pushing, or deploying requires Lucas's explicit authorization after final review.
 
 ## User decisions and working rules
 
@@ -176,7 +180,7 @@ The clarified product objective changes the recommended product sequence. Before
 - No application code fixes have yet been made.
 - `uv 0.11.3` is installed locally, but only Python 3.14.3 is currently available. The approved foundation design standardizes the project on Python 3.12; obtaining that runtime belongs to implementation after the worktree/review gate.
 - The first subproject specification is committed at `docs/superpowers/specs/2026-08-25-foundation-design.md` in commit `fbd10de`. It covers a reproducible Python 3.12/uv foundation, safe configuration, deterministic audits, characterization tests, secure devcontainer defaults, CI, and documentation. It explicitly excludes forecast changes and proprietary-data ingestion.
-- Lucas has authorized an isolated long-lived development branch/worktree. The written foundation specification is still awaiting his content review. After that approval, create the detailed TDD implementation plan and execute it inline because proactive subagent delegation is disabled for this session.
+- Lucas authorized an isolated long-lived development branch/worktree. It now exists at `C:\Users\LucasCravoVERISSIMO\icor-webapp-development` on `development/windshield-demand-platform`; local `main` is restored to the production baseline. The written foundation specification is still awaiting his content review. After that approval, create the detailed TDD implementation plan and execute it inline because proactive subagent delegation is disabled for this session.
 
 ## Terminal identity
 
@@ -187,4 +191,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The initial deep review and business-objective alignment review are complete. Lucas approved the delivery direction, disclosed the availability and one-year limitation of proprietary fitment/replacement data, and authorized work to begin on a separate long-lived development branch/worktree. The foundation subproject design is committed as `fbd10de`; application behavior remains unchanged. Create the isolated branch/worktree while returning local `main` to `origin/main`, then await Lucas's content review of the foundation specification before writing the implementation plan. No local server is running.
+The initial deep review and business-objective alignment review are complete. The protected production checkout is clean on `main` at `1ba1d7c`; the isolated development worktree is on `development/windshield-demand-platform` at `f5d0bf4`. The foundation design remains proposed for Lucas's content review. Application behavior is unchanged, and no local server is running. After Lucas approves the specification, write the detailed implementation plan and perform all work from the development worktree only.
