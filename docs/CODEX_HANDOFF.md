@@ -175,6 +175,22 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Local development status
 
+- On 2026-08-25 the local app startup failure was reproduced as
+  `StreamlitSecretNotFoundError` at `ui/app.py:120`: `st.secrets.get("users", {})`
+  forced Streamlit to parse a missing local secrets file before rendering login. The
+  call now uses the existing exception-safe `_safe_get`, so the documented secret-free
+  offline startup path remains available. `tests/test_app_startup.py` runs the real
+  Streamlit app with no injected secrets and verifies a clean login page with username
+  and password fields. TDD evidence: the test first failed on the exact secrets
+  traceback and then passed after the one-line fix.
+- Fresh verification after the startup fix: `uv lock --check` resolved 96 packages;
+  `uv run ruff check src tests scripts/audit_baseline.py` reported `All checks passed!`;
+  `uv run python -m compileall -q ui/app.py` exited zero; and
+  `uv run pytest -p no:cacheprovider` reported 15 passed with the four documented strict
+  XFAILs (`ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030`). The local Streamlit
+  health endpoint continued to return `ok` on port 8501. Its stdout file still contains
+  the historical pre-fix traceback because no post-fix browser session has rewritten
+  that log; the Streamlit AppTest regression is the fresh render-level verification.
 - A local Streamlit server is running from the development worktree at `http://127.0.0.1:8501` (also reachable as `http://localhost:8501`). Its health endpoint returned HTTP 200 with `ok`, the browser was opened to the app, and the startup log reported Uvicorn listening on `127.0.0.1:8501` with no stderr output. The listener PID at verification time was 7604. Clearing the Codex conversation does not stop it; stopping that process or rebooting does.
 - An isolated `.venv` now uses uv-managed CPython 3.12.13 with 96 locked packages. `uv.lock` is authoritative and `requirements.txt` is an exact production export.
 - The global Python 3.14.3/pytest 9.1 process hung while finalizing intentional RED failures. Collection exited normally, and disabling AnyIO/capture did not change the hang. The locked Python 3.12.13 environment exits normally with pytest 9.1.1; this isolates the problem to the unsupported global runtime rather than pytest 9 itself.
@@ -205,4 +221,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. Existing application and forecasting behavior remains unchanged; the foundation added reproducibility, audits, safety characterization, secure environment/CI configuration, and documentation. The protected production checkout remains untouched on `main` at `1ba1d7c`. A verified local Streamlit server is running at `http://localhost:8501` for Lucas to inspect. The next recommended subproject is deterministic-defect remediation: convert `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` from strict XFAILs to passing behavior tests, beginning with a validated ICOR catalog parser and one explicit duplicate/survival policy. After those correctness boundaries, define the canonical windshield-compatible vehicle identity and forecast target before selecting or changing statistical/ML models.
+The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. The next bounded correctness batch is deterministic-defect remediation: convert `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` from strict XFAILs to passing behavior tests, beginning with a validated ICOR catalog parser. Before changing fleet calculations, Lucas must approve whether a one-year-old cohort receives one year of attrition (recommended) or remains at 100% survival through year one. After those correctness boundaries, define the canonical windshield-compatible vehicle identity and forecast target before selecting or changing statistical/ML models.

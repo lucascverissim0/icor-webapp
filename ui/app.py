@@ -117,7 +117,7 @@ def track(event: str, props: dict | None = None):
         pass
 
 # =================== AUTH (CUSTOM LOGIN) ===================
-USERS = st.secrets.get("users", {})
+USERS = _safe_get(st.secrets, "users", {})
 print(f"[CHECKPOINT] Users loaded: {list(USERS.keys()) if hasattr(USERS,'keys') else 'none'}")
 
 def _verify_password(input_password: str, stored_password: str) -> bool:
