@@ -1,7 +1,7 @@
 # ICOR Development Foundation Design
 
 Date: 2026-08-25
-Status: proposed for user review
+Status: approved by Lucas on 2026-08-25
 
 ## Purpose
 
@@ -118,7 +118,9 @@ The subproject is complete only when all of the following are freshly verified:
 - `docs/DEVELOPMENT.md`: exact local workflow and safety rules.
 - `README.md`: concise project purpose and links to development and architecture documentation.
 
-## Explicit non-goals
+## Deferred from this foundation subproject
+
+The following items are not excluded from the product program. Lucas explicitly requires the final product review to examine and, where evidence supports it, modify every one of them—including the statistical and machine-learning model choices. They are deferred only so the development foundation can be completed and verified before domain behavior changes:
 
 - Fixing forecast formulas, ICOR matching, duplicate aggregation, or generation identity.
 - Defining the vehicle-configuration and windshield-SKU schema.
@@ -127,4 +129,4 @@ The subproject is complete only when all of the following are freshly verified:
 - Changing authentication, roles, output isolation, or the production deployment.
 - Running OpenAI, search, Wikipedia, PostHog, or other network integrations during tests.
 
-Those concerns are separate subprojects and will receive their own approved specifications and implementation plans.
+Those concerns are mandatory later subprojects and will receive their own approved specifications, model/data comparisons, acceptance criteria, and implementation plans. No existing algorithm or model is presumed correct merely because it is outside this first subproject.
