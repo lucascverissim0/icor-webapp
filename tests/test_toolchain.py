@@ -1,5 +1,7 @@
 from pathlib import Path
 import re
+import subprocess
+import sys
 import tomllib
 
 
@@ -21,3 +23,15 @@ def test_production_requirements_are_exact_pins() -> None:
     assert lines
     requirements = [line.split(";", 1)[0].strip() for line in lines]
     assert all(re.match(r"^[A-Za-z0-9_.-]+==[^=; ]+$", line) for line in requirements)
+
+
+def test_core_package_imports_outside_pytest() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import icor; print(icor.__version__)"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0.1.0"

@@ -116,12 +116,8 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/icor"]
 
-[tool.uv]
-package = false
-
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
-pythonpath = ["src"]
 testpaths = ["tests"]
 xfail_strict = true
 
