@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .Python
+.pytest_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -17,6 +19,7 @@ env/
 # Local env files
 .env
 .env.local
+.local/
 
 # OS / editor cruft
 .DS_Store

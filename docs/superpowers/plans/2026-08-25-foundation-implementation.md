@@ -58,7 +58,7 @@ def test_production_requirements_are_exact_pins() -> None:
     lines = [
         line.strip()
         for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
+        if line.strip() and not line.lstrip().startswith("#")
     ]
     assert lines
     requirements = [line.split(";", 1)[0].strip() for line in lines]
@@ -116,8 +116,12 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/icor"]
 
+[tool.uv]
+package = false
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
+pythonpath = ["src"]
 testpaths = ["tests"]
 xfail_strict = true
 

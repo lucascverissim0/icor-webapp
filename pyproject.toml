@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "icor-windshield-demand"
+version = "0.1.0"
+description = "Auditable windshield demand forecasting application"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "bcrypt>=4.1,<5",
+  "beautifulsoup4>=4.12,<5",
+  "numpy>=1.26,<3",
+  "openai>=1.10,<2",
+  "openpyxl>=3.1,<4",
+  "pandas>=2.2,<3",
+  "posthog>=3.6,<4",
+  "requests>=2.32.4,<3",
+  "streamlit>=1.54,<2",
+  "streamlit-authenticator>=0.4,<0.5",
+  "tabulate>=0.9,<1",
+]
+
+[dependency-groups]
+dev = [
+  "pip-audit>=2.9,<3",
+  "pytest>=8.3,<9",
+  "pytest-socket>=0.7,<1",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/icor"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+pythonpath = ["src"]
+testpaths = ["tests"]
+xfail_strict = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
