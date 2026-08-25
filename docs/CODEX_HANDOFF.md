@@ -36,6 +36,13 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
 - On 2026-08-25 Lucas authorized starting the approved delivery sequence and requested brief completion reports covering what changed, what happened, and the next steps.
 - The company has a proprietary vehicle-to-windshield fitment catalog and one year of reliably tracked replacement-related history. Integrate it in a later subproject as fitment truth and limited calibration/validation evidence; do not treat one year as sufficient long-run training history.
 - Lucas requires all development to remain on a separate long-lived development branch/worktree until the final product has been fully reviewed and he explicitly authorizes a merge. The current actively used application on `main` must remain intact. Do not merge, push, deploy, or modify production from the development worktree without explicit authorization.
+- On 2026-08-25 Lucas approved applying one full year of fleet attrition to a
+  one-year-old vehicle cohort. Both forecast workflows must use that convention
+  consistently when `ICOR-030` is remediated.
+- Lucas requested a new responsive, polished local web experience in the development
+  branch rather than treating Streamlit as the long-term product UI. Preserve the
+  working Streamlit app as a behavioral reference during migration; design the new
+  experience and run it locally before considering any production deployment.
 
 ## Application map
 
@@ -221,4 +228,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. The next bounded correctness batch is deterministic-defect remediation: convert `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` from strict XFAILs to passing behavior tests, beginning with a validated ICOR catalog parser. Before changing fleet calculations, Lucas must approve whether a one-year-old cohort receives one year of attrition (recommended) or remains at 100% survival through year one. After those correctness boundaries, define the canonical windshield-compatible vehicle identity and forecast target before selecting or changing statistical/ML models.
+The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. Lucas has approved applying one year of attrition to a one-year-old cohort, resolving the policy question for `ICOR-030`. The active architectural-design task is a new responsive local web experience in the development branch, with Streamlit retained as a temporary behavioral reference. Clarify whether the first product slice should mirror the current strategic-opportunities/model-researcher flows or begin directly with the future windshield-SKU planning workflow, then compare architectures and write the approved design specification before implementation. The deterministic defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs until their TDD remediation batch is implemented.
