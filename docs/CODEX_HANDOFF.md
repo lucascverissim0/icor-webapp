@@ -43,6 +43,10 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
   branch rather than treating Streamlit as the long-term product UI. Preserve the
   working Streamlit app as a behavioral reference during migration; design the new
   experience and run it locally before considering any production deployment.
+- Lucas approved the recommended product-slice direction: the new web experience must
+  begin with the future decision-planning workflow centered on canonical windshield
+  configurations/SKUs. Current forecast data may appear only as clearly labelled
+  prototype evidence; recreating the existing Streamlit screens is not the product goal.
 
 ## Application map
 
@@ -228,4 +232,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. Lucas has approved applying one year of attrition to a one-year-old cohort, resolving the policy question for `ICOR-030`. The active architectural-design task is a new responsive local web experience in the development branch, with Streamlit retained as a temporary behavioral reference. Clarify whether the first product slice should mirror the current strategic-opportunities/model-researcher flows or begin directly with the future windshield-SKU planning workflow, then compare architectures and write the approved design specification before implementation. The deterministic defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs until their TDD remediation batch is implemented.
+The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. Lucas has approved applying one year of attrition to a one-year-old cohort, resolving the policy question for `ICOR-030`. The active architectural-design task is a new responsive local web experience centered on the future windshield-configuration/SKU planning workflow; Streamlit is retained only as a temporary behavioral reference, and current forecasts must be labelled as prototype evidence. The next design step is visual information-hierarchy exploration, followed by architecture comparison, sectioned design approval, and a committed specification before implementation. The deterministic defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs until their TDD remediation batch is implemented.
