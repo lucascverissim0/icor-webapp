@@ -39,3 +39,29 @@ def test_tracked_text_files_contain_no_openai_credential_shape() -> None:
             violations.append(relative_path)
 
     assert not violations, "Credential-like token in tracked file(s): " + ", ".join(violations)
+
+
+def test_local_secret_template_is_safe_and_real_secrets_remain_ignored() -> None:
+    example = (ROOT / ".streamlit" / "secrets.example.toml").read_text(encoding="utf-8")
+    assert "sk-" not in example
+
+    result = subprocess.run(
+        ["git", "check-ignore", ".streamlit/secrets.toml"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+
+def test_development_guide_documents_reproducible_local_commands() -> None:
+    guide = (ROOT / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
+    for required_text in (
+        "icor-webapp-development",
+        "uv sync --locked --all-groups",
+        "uv run pytest",
+        "uv run python scripts/audit_baseline.py",
+        "uv run streamlit run ui/app.py",
+    ):
+        assert required_text in guide
