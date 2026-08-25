@@ -186,6 +186,14 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Local development status
 
+- A private local visual-companion session is active on port 61376 for the new
+  planner design. Its first screen compares three information hierarchies using
+  product-specific content: executive dashboard, planner workbench (recommended),
+  and guided planning flow. The exact session URL contains a private local access
+  key and is intentionally not recorded here. The session files live under ignored
+  `.superpowers/`; `.gitignore` now excludes that directory. Await Lucas's visual
+  selection before advancing the design. The companion server auto-exits after four
+  idle hours; the Streamlit server remains separate on port 8501.
 - On 2026-08-25 the local app startup failure was reproduced as
   `StreamlitSecretNotFoundError` at `ui/app.py:120`: `st.secrets.get("users", {})`
   forced Streamlit to parse a missing local secrets file before rendering login. The
@@ -232,4 +240,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. Lucas has approved applying one year of attrition to a one-year-old cohort, resolving the policy question for `ICOR-030`. The active architectural-design task is a new responsive local web experience centered on the future windshield-configuration/SKU planning workflow; Streamlit is retained only as a temporary behavioral reference, and current forecasts must be labelled as prototype evidence. The next design step is visual information-hierarchy exploration, followed by architecture comparison, sectioned design approval, and a committed specification before implementation. The deterministic defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs until their TDD remediation batch is implemented.
+The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. Lucas has approved applying one year of attrition to a one-year-old cohort, resolving the policy question for `ICOR-030`. The active architectural-design task is a new responsive local web experience centered on the future windshield-configuration/SKU planning workflow; Streamlit is retained only as a temporary behavioral reference, and current forecasts must be labelled as prototype evidence. A private local visual comparison of three planner information hierarchies is active on port 61376 and awaits Lucas's selection. After that selection, compare technical architectures, obtain sectioned design approval, and commit the specification before implementation. The deterministic defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs until their TDD remediation batch is implemented.
