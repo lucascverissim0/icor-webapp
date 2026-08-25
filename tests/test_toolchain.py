@@ -34,3 +34,13 @@ def test_core_package_imports_outside_pytest() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "0.1.0"
+
+
+def test_devcontainer_uses_locked_secure_runtime() -> None:
+    configuration = (ROOT / ".devcontainer" / "devcontainer.json").read_text(encoding="utf-8")
+    assert "3.12-bookworm" in configuration
+    assert "uv sync --locked --all-groups" in configuration
+    assert "enableCORS false" not in configuration
+    assert "enableXsrfProtection false" not in configuration
+    assert "apt upgrade" not in configuration
+    assert not re.search(r"pip(?:3)? install(?: --user)? streamlit", configuration)

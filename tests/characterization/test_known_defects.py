@@ -2,9 +2,7 @@ import re
 from pathlib import Path
 
 import pytest
-
 from source_loader import load_function
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT1 = ROOT / "scripts" / "script1.py"
@@ -25,7 +23,8 @@ def test_icor_006_model_filename_has_no_separator() -> None:
 
 @pytest.mark.xfail(strict=True, reason="ICOR-009: NaN wins over a valid regional value")
 def test_icor_009_valid_year_count_wins_over_nan() -> None:
-    assert max(float("nan") or 0, 5 or 0) == 5
+    valid_year_count = 5
+    assert max(float("nan") or 0, valid_year_count or 0) == 5
 
 
 @pytest.mark.xfail(strict=True, reason="ICOR-030: fleet survival conventions disagree")

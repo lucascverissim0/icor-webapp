@@ -1,7 +1,6 @@
-from pathlib import Path
 import re
 import subprocess
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CREDENTIAL_SHAPE = re.compile(rb"sk-[A-Za-z0-9_-]{20,}")

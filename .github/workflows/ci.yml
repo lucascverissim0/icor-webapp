@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - development/windshield-demand-platform
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.3"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - run: uv lock --check
+      - run: uv run ruff check src tests scripts/audit_baseline.py
+      - run: uv run pytest
+
+  dependency-audit:
+    name: Dependency audit (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.3"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - run: uv run pip-audit
