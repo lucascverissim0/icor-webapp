@@ -143,8 +143,15 @@ export function parsePlannerSearch(
   }
 }
 
-export function serializePlannerSearch(search: PlannerRouteSearch): PlannerSearch {
-  const canonical = { ...search }
-  delete canonical.invalidKeys
-  return canonical
+export function serializePlannerSearch<T extends PlannerRouteSearch>(search: T): PlannerSearch {
+  return {
+    ...(search.market && { market: search.market }),
+    ...(search.horizon && { horizon: search.horizon }),
+    ...(search.brand && { brand: search.brand }),
+    ...(search.model && { model: search.model }),
+    ...(search.evidence && { evidence: search.evidence }),
+    page: search.page,
+    sort: search.sort,
+    direction: search.direction,
+  }
 }

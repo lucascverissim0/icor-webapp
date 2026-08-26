@@ -43,11 +43,11 @@ export function AppShell({ children }: PropsWithChildren) {
           <EvidenceBadge />
         </header>
 
-        <nav aria-label="Primary" className="mobile-navigation">
+        <nav aria-label="Mobile primary" className="mobile-navigation">
           <button
             aria-controls="mobile-navigation-links"
             aria-expanded={mobileOpen}
-            aria-label="Open navigation"
+            aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
             className="mobile-navigation__trigger"
             onClick={() => setMobileOpen((open) => !open)}
             type="button"

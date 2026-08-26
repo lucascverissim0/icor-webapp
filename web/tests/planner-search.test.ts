@@ -77,6 +77,7 @@ describe('planner URL state', () => {
       sort: 'base_demand',
       direction: 'desc',
       invalidKeys: ['market'],
+      legacyFilter: 'obsolete',
     })
 
     expect(serialized).toEqual({
