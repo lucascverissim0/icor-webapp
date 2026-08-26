@@ -93,6 +93,25 @@ class SourceSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelYearDemand:
+    configuration_id: str
+    model_year: int
+    forecast_horizon: int
+    demand: DemandRange
+    evidence_status: EvidenceStatus
+    data_version: str
+    sources: tuple[SourceSummary, ...]
+
+    def __post_init__(self) -> None:
+        if not self.configuration_id.strip() or not self.data_version.strip():
+            raise ValueError("model-year demand identity is required")
+        if type(self.model_year) is not int or type(self.forecast_horizon) is not int:
+            raise ValueError("model-year demand years must be integers")
+        if not self.sources:
+            raise ValueError("model-year demand requires source metadata")
+
+
+@dataclass(frozen=True, slots=True)
 class PlanningConfiguration:
     configuration_id: str
     sku: str | None
@@ -117,6 +136,7 @@ class PlanningConfiguration:
     sources: tuple[SourceSummary, ...]
     updated_at: datetime
     data_version: str
+    model_year_demand: tuple[ModelYearDemand, ...]
 
     def __post_init__(self) -> None:
         required_text = (
@@ -142,6 +162,28 @@ class PlanningConfiguration:
             raise ValueError("at least one source summary is required")
         if self.updated_at.tzinfo is None or self.updated_at.utcoffset() is None:
             raise ValueError("updated_at must include a timezone")
+        identities = {
+            (row.configuration_id, row.model_year, row.forecast_horizon)
+            for row in self.model_year_demand
+        }
+        if len(identities) != len(self.model_year_demand):
+            raise ValueError("model-year demand identities must be unique")
+        if not self.model_year_demand or any(
+            row.configuration_id != self.configuration_id
+            or not self.model_year_start <= row.model_year <= self.model_year_end
+            or row.forecast_horizon != self.forecast_horizon
+            or row.evidence_status != self.evidence_status
+            or row.data_version != self.data_version
+            for row in self.model_year_demand
+        ):
+            raise ValueError("model-year demand must match canonical identity and applicability")
+        totals = DemandRange(
+            downside_units=sum(row.demand.downside_units for row in self.model_year_demand),
+            base_units=sum(row.demand.base_units for row in self.model_year_demand),
+            upside_units=sum(row.demand.upside_units for row in self.model_year_demand),
+        )
+        if totals != self.demand:
+            raise ValueError("model-year demand must reconcile with configuration demand")
 
 
 @dataclass(frozen=True, slots=True)

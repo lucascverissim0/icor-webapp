@@ -17,6 +17,12 @@
       "equipment": {"camera_adas": true, "hud": null, "heated": false, "acoustic": true, "rain_light_sensor": true},
       "forecast_horizon": 2030,
       "demand": {"downside_units": 980, "base_units": 1240, "upside_units": 1510},
+      "model_year_demand": [
+        {"model_year": 2025, "downside_units": 200, "base_units": 250, "upside_units": 300},
+        {"model_year": 2026, "downside_units": 230, "base_units": 300, "upside_units": 370},
+        {"model_year": 2027, "downside_units": 260, "base_units": 330, "upside_units": 400},
+        {"model_year": 2028, "downside_units": 290, "base_units": 360, "upside_units": 440}
+      ],
       "vehicle_exposure_units": 62000,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "medium", "reason": "Synthetic equipment distinctions are intentionally incomplete."},
@@ -42,6 +48,12 @@
       "equipment": {"camera_adas": false, "hud": false, "heated": false, "acoustic": false, "rain_light_sensor": true},
       "forecast_horizon": 2028,
       "demand": {"downside_units": 720, "base_units": 910, "upside_units": 1110},
+      "model_year_demand": [
+        {"model_year": 2024, "downside_units": 140, "base_units": 180, "upside_units": 220},
+        {"model_year": 2025, "downside_units": 170, "base_units": 210, "upside_units": 260},
+        {"model_year": 2026, "downside_units": 190, "base_units": 240, "upside_units": 290},
+        {"model_year": 2027, "downside_units": 220, "base_units": 280, "upside_units": 340}
+      ],
       "vehicle_exposure_units": 52000,
       "replacement_rate": 0.0175,
       "identity_confidence": {"level": "medium", "reason": "Synthetic family boundaries need catalog validation."},
@@ -67,6 +79,12 @@
       "equipment": {"camera_adas": true, "hud": true, "heated": null, "acoustic": true, "rain_light_sensor": true},
       "forecast_horizon": 2030,
       "demand": {"downside_units": 640, "base_units": 820, "upside_units": 1040},
+      "model_year_demand": [
+        {"model_year": 2026, "downside_units": 130, "base_units": 170, "upside_units": 210},
+        {"model_year": 2027, "downside_units": 150, "base_units": 190, "upside_units": 240},
+        {"model_year": 2028, "downside_units": 165, "base_units": 210, "upside_units": 270},
+        {"model_year": 2029, "downside_units": 195, "base_units": 250, "upside_units": 320}
+      ],
       "vehicle_exposure_units": 41000,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "low", "reason": "Heating applicability is explicitly unknown in the synthetic scenario."},
@@ -92,6 +110,12 @@
       "equipment": {"camera_adas": true, "hud": false, "heated": true, "acoustic": true, "rain_light_sensor": true},
       "forecast_horizon": 2030,
       "demand": {"downside_units": 880, "base_units": 1090, "upside_units": 1340},
+      "model_year_demand": [
+        {"model_year": 2026, "downside_units": 180, "base_units": 220, "upside_units": 270},
+        {"model_year": 2027, "downside_units": 200, "base_units": 250, "upside_units": 310},
+        {"model_year": 2028, "downside_units": 225, "base_units": 280, "upside_units": 340},
+        {"model_year": 2029, "downside_units": 275, "base_units": 340, "upside_units": 420}
+      ],
       "vehicle_exposure_units": 54500,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "medium", "reason": "Synthetic configuration requires catalog confirmation."},
@@ -117,6 +141,12 @@
       "equipment": {"camera_adas": null, "hud": false, "heated": true, "acoustic": true, "rain_light_sensor": true},
       "forecast_horizon": 2028,
       "demand": {"downside_units": 460, "base_units": 610, "upside_units": 790},
+      "model_year_demand": [
+        {"model_year": 2023, "downside_units": 90, "base_units": 120, "upside_units": 150},
+        {"model_year": 2024, "downside_units": 110, "base_units": 140, "upside_units": 180},
+        {"model_year": 2025, "downside_units": 120, "base_units": 160, "upside_units": 205},
+        {"model_year": 2026, "downside_units": 140, "base_units": 190, "upside_units": 255}
+      ],
       "vehicle_exposure_units": 30500,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "low", "reason": "Camera applicability is explicitly unknown in the synthetic scenario."},
@@ -142,6 +172,12 @@
       "equipment": {"camera_adas": false, "hud": false, "heated": null, "acoustic": false, "rain_light_sensor": true},
       "forecast_horizon": 2028,
       "demand": {"downside_units": 380, "base_units": 500, "upside_units": 650},
+      "model_year_demand": [
+        {"model_year": 2023, "downside_units": 70, "base_units": 100, "upside_units": 130},
+        {"model_year": 2024, "downside_units": 85, "base_units": 110, "upside_units": 145},
+        {"model_year": 2025, "downside_units": 100, "base_units": 130, "upside_units": 170},
+        {"model_year": 2026, "downside_units": 125, "base_units": 160, "upside_units": 205}
+      ],
       "vehicle_exposure_units": 25000,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "low", "reason": "Drive side and heating applicability are explicitly unknown."},
@@ -167,6 +203,13 @@
       "equipment": {"camera_adas": true, "hud": true, "heated": true, "acoustic": true, "rain_light_sensor": true},
       "forecast_horizon": 2030,
       "demand": {"downside_units": 570, "base_units": 730, "upside_units": 920},
+      "model_year_demand": [
+        {"model_year": 2025, "downside_units": 85, "base_units": 110, "upside_units": 135},
+        {"model_year": 2026, "downside_units": 100, "base_units": 125, "upside_units": 155},
+        {"model_year": 2027, "downside_units": 110, "base_units": 140, "upside_units": 175},
+        {"model_year": 2028, "downside_units": 125, "base_units": 160, "upside_units": 200},
+        {"model_year": 2029, "downside_units": 150, "base_units": 195, "upside_units": 255}
+      ],
       "vehicle_exposure_units": 36500,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "medium", "reason": "Synthetic feature bundle requires catalog confirmation."},
@@ -192,6 +235,13 @@
       "equipment": {"camera_adas": true, "hud": false, "heated": false, "acoustic": true, "rain_light_sensor": null},
       "forecast_horizon": 2030,
       "demand": {"downside_units": 510, "base_units": 660, "upside_units": 840},
+      "model_year_demand": [
+        {"model_year": 2025, "downside_units": 75, "base_units": 100, "upside_units": 125},
+        {"model_year": 2026, "downside_units": 90, "base_units": 115, "upside_units": 145},
+        {"model_year": 2027, "downside_units": 100, "base_units": 125, "upside_units": 160},
+        {"model_year": 2028, "downside_units": 110, "base_units": 145, "upside_units": 185},
+        {"model_year": 2029, "downside_units": 135, "base_units": 175, "upside_units": 225}
+      ],
       "vehicle_exposure_units": 33000,
       "replacement_rate": 0.02,
       "identity_confidence": {"level": "low", "reason": "Rain and light sensor applicability is explicitly unknown."},

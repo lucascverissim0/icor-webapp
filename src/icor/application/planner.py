@@ -8,6 +8,7 @@ from typing import Protocol
 
 from icor.domain.planner import (
     EvidenceStatus,
+    ModelYearDemand,
     PlannerPage,
     PlannerQuery,
     PlanningConfiguration,
@@ -19,6 +20,8 @@ class PlannerRepository(Protocol):
     def list_all(self) -> tuple[PlanningConfiguration, ...]: ...
 
     def get(self, configuration_id: str) -> PlanningConfiguration | None: ...
+
+    def list_model_year_demand(self) -> tuple[ModelYearDemand, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)

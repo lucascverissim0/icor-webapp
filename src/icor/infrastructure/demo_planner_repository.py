@@ -13,6 +13,7 @@ from icor.domain.planner import (
     DemandRange,
     Equipment,
     EvidenceStatus,
+    ModelYearDemand,
     PlanningConfiguration,
     SourceSummary,
 )
@@ -33,6 +34,9 @@ class DemoPlannerRepository:
     ) -> None:
         self._records = records
         self._by_id = {record.configuration_id: record for record in records}
+        self._model_year_demand = tuple(
+            demand for record in records for demand in record.model_year_demand
+        )
         self.data_version = data_version
 
     @classmethod
@@ -60,6 +64,9 @@ class DemoPlannerRepository:
     def get(self, configuration_id: str) -> PlanningConfiguration | None:
         return self._by_id.get(configuration_id)
 
+    def list_model_year_demand(self) -> tuple[ModelYearDemand, ...]:
+        return self._model_year_demand
+
 
 def _parse_confidence(value: Any) -> Confidence:
     if not isinstance(value, dict):
@@ -77,6 +84,13 @@ def _parse_configuration(value: Any) -> PlanningConfiguration:
     demand = value["demand"]
     if not isinstance(equipment, dict) or not isinstance(demand, dict):
         raise TypeError("equipment and demand must be objects")
+    sources = tuple(
+        SourceSummary(name=source["name"], description=source["description"])
+        for source in value["sources"]
+    )
+    model_year_demand = value["model_year_demand"]
+    if not isinstance(model_year_demand, list):
+        raise TypeError("model_year_demand must be an array")
     return PlanningConfiguration(
         configuration_id=value["configuration_id"],
         sku=value["sku"],
@@ -108,10 +122,23 @@ def _parse_configuration(value: Any) -> PlanningConfiguration:
         identity_confidence=_parse_confidence(value["identity_confidence"]),
         data_quality_confidence=_parse_confidence(value["data_quality_confidence"]),
         evidence_status=EvidenceStatus(value["evidence_status"]),
-        sources=tuple(
-            SourceSummary(name=source["name"], description=source["description"])
-            for source in value["sources"]
-        ),
+        sources=sources,
         updated_at=datetime.fromisoformat(value["updated_at"]),
         data_version=value["data_version"],
+        model_year_demand=tuple(
+            ModelYearDemand(
+                configuration_id=value["configuration_id"],
+                model_year=row["model_year"],
+                forecast_horizon=value["forecast_horizon"],
+                demand=DemandRange(
+                    downside_units=row["downside_units"],
+                    base_units=row["base_units"],
+                    upside_units=row["upside_units"],
+                ),
+                evidence_status=EvidenceStatus(value["evidence_status"]),
+                data_version=value["data_version"],
+                sources=sources,
+            )
+            for row in model_year_demand
+        ),
     )

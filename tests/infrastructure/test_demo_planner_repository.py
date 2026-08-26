@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,34 @@ def test_repository_returns_immutable_records_and_identity_lookup(
     assert repository.get(rows[0].configuration_id) is rows[0]
     assert repository.get("missing") is None
     assert repository.data_version == "demo-planner-v1"
+    assert repository.list_model_year_demand() == tuple(
+        demand for row in rows for demand in row.model_year_demand
+    )
+
+
+def test_fixture_model_year_demand_reconciles_exactly(
+    repository: DemoPlannerRepository,
+) -> None:
+    for row in repository.list_all():
+        assert sum(item.demand.downside_units for item in row.model_year_demand) == (
+            row.demand.downside_units
+        )
+        assert sum(item.demand.base_units for item in row.model_year_demand) == (
+            row.demand.base_units
+        )
+        assert sum(item.demand.upside_units for item in row.model_year_demand) == (
+            row.demand.upside_units
+        )
+
+
+def test_fixture_rejects_non_reconciling_model_year_demand(tmp_path: Path) -> None:
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    document["configurations"][0]["model_year_demand"][0]["base_units"] += 1
+    fixture = tmp_path / "planner.json"
+    fixture.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(FixtureError, match="invalid"):
+        DemoPlannerRepository.from_path(fixture)
 
 
 def test_repository_never_writes_fixture(repository: DemoPlannerRepository) -> None:

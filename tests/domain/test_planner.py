@@ -9,6 +9,7 @@ from icor.domain.planner import (
     DemandRange,
     Equipment,
     EvidenceStatus,
+    ModelYearDemand,
     PlannerQuery,
     PlanningConfiguration,
     SortDirection,
@@ -30,6 +31,10 @@ def configuration(
     upside: int = 130,
     hud: bool | None = None,
 ) -> PlanningConfiguration:
+    source = SourceSummary(
+        name="Synthetic planning fixture",
+        description="Non-proprietary demonstration evidence.",
+    )
     return PlanningConfiguration(
         configuration_id=configuration_id,
         sku=f"DEMO-{configuration_id.upper()}",
@@ -67,14 +72,24 @@ def configuration(
             reason="Values are demonstration-only.",
         ),
         evidence_status=EvidenceStatus.DEMONSTRATION,
-        sources=(
-            SourceSummary(
-                name="Synthetic planning fixture",
-                description="Non-proprietary demonstration evidence.",
-            ),
-        ),
+        sources=(source,),
         updated_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
         data_version="demo-planner-v1",
+        model_year_demand=(
+            ModelYearDemand(
+                configuration_id=configuration_id,
+                model_year=2025,
+                forecast_horizon=horizon,
+                demand=DemandRange(
+                    downside_units=downside,
+                    base_units=base,
+                    upside_units=upside,
+                ),
+                evidence_status=EvidenceStatus.DEMONSTRATION,
+                data_version="demo-planner-v1",
+                sources=(source,),
+            ),
+        ),
     )
 
 
@@ -184,3 +199,26 @@ def test_explicit_sort_direction_changes_results_without_mutating_input() -> Non
 def test_model_year_range_must_ascend() -> None:
     with pytest.raises(ValueError, match="model year range"):
         replace(configuration("demo-invalid"), model_year_start=2030, model_year_end=2029)
+
+
+def test_model_year_demand_must_reconcile_with_configuration() -> None:
+    row = configuration("demo-reconcile")
+    invalid_demand = replace(
+        row.model_year_demand[0],
+        demand=DemandRange(downside_units=80, base_units=99, upside_units=130),
+    )
+
+    with pytest.raises(ValueError, match="model-year demand must reconcile"):
+        replace(row, model_year_demand=(invalid_demand,))
+
+
+def test_model_year_demand_requires_canonical_identity_and_range() -> None:
+    row = configuration("demo-canonical")
+
+    with pytest.raises(ValueError, match="identity and applicability"):
+        replace(
+            row,
+            model_year_demand=(
+                replace(row.model_year_demand[0], configuration_id="other", model_year=2035),
+            ),
+        )
