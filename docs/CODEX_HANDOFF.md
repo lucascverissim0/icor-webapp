@@ -452,8 +452,21 @@ reconstruction, backtested 2028/2031 uncertainty forecasts, atomic snapshots, an
 real-data opportunity/search experience. Lucas approved beginning implementation on
 2026-08-26. The first staged plan is written and self-reviewed at
 `docs/superpowers/plans/2026-08-26-evidence-snapshot-foundation-implementation.md`;
-it covers the evidence and atomic-snapshot foundation. No application code has changed
-in this phase yet.
+it covers the evidence and atomic-snapshot foundation. The phase began with no
+application-code changes.
+
+Task 1 of that foundation is committed on `development/windshield-demand-platform`:
+immutable slotted
+domain contracts now exist in `src/icor/domain/evidence.py` and
+`src/icor/domain/snapshots.py`, with 41 focused contract tests. They enforce UTC
+timestamps, identifier/hash/count/coverage validation, original-plus-normalized source
+labels, five-component capped evidence confidence with 40/60/80 bands, prohibition on
+publishing ambiguous/rejected/unresolved identity mappings, ordered uncertainty
+intervals and inputs, and deterministic snapshot manifest invariants. Fresh
+verification: focused pytest 41 passed; `uv run ruff check src tests` passed; full
+pytest passed 134 tests with exactly the four documented strict XFAILs. The existing
+unrelated `AGENTS.md` modification remains untouched. The detailed ignored task report
+is `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-1-report.md`.
 
 The approved opportunity-ranking and production-coverage slice is implemented and
 verified on `development/windshield-demand-platform`. It is live for review at
