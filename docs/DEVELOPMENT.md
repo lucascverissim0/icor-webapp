@@ -54,7 +54,7 @@ Run static checks and the complete test suite:
 
 ```powershell
 uv lock --check
-uv run ruff check src tests scripts/audit_baseline.py
+uv run ruff check src tests scripts/audit_baseline.py scripts/build_evidence_snapshot.py
 uv run pytest
 uv run pip-audit
 ```
@@ -80,11 +80,12 @@ later approved source-acquisition plan.
 $evidenceRoot = '.local/evidence'
 $manifest = 'tests/fixtures/sources/sample-registration.manifest.json'
 $artifact = 'tests/fixtures/sources/sample-registration.csv'
+$candidateSnapshotId = 'candidate-snapshot-id-from-a-successful-build'
 
 uv run python -c "from pathlib import Path; from icor.evidence.release_manifests import load_release_manifest; print(load_release_manifest(Path('tests/fixtures/sources/sample-registration.manifest.json')).release_id)"
 uv run python scripts/build_evidence_snapshot.py stage-release --root $evidenceRoot --manifest $manifest --artifact $artifact
 uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot --release sample-registration-2024 --build-as-of 2026-08-27T00:00:00+00:00 --deterministic-seed 0
-uv run python scripts/build_evidence_snapshot.py promote --root $evidenceRoot --snapshot <candidate-snapshot-id>
+uv run python scripts/build_evidence_snapshot.py promote --root $evidenceRoot --snapshot $candidateSnapshotId
 uv run python scripts/build_evidence_snapshot.py status --root $evidenceRoot
 uv run python scripts/build_evidence_snapshot.py verify --root $evidenceRoot
 ```
@@ -98,10 +99,13 @@ active SQLite repository read-only and validates the pointed snapshot.
 
 At this checkpoint the public CLI deliberately has no registered parser. The example
 `build` therefore returns the typed `unsupported_parser` result (exit 2), and `promote`
-cannot proceed because no candidate was created. That is intentional: there is no real
-EEA, KBA, or UK parser, no forecast, no API replacement, and no fixture fallback. A
-future approved source plan must add a reviewed parser through application composition
-before a candidate can be built; it must not substitute the test fixture.
+has no candidate ID to use. If it is invoked with `$candidateSnapshotId` anyway,
+promotion rejects the missing candidate (exit 3). `status` and `verify` then each emit
+`{"active_snapshot_id": null, "state": "unavailable"}` and exit 4 because no active
+snapshot exists. That is intentional: there is no real EEA, KBA, or UK parser, no
+forecast, no API replacement, and no fixture fallback. A future approved source plan
+must add a reviewed parser through application composition before a candidate can be
+built; it must not substitute the test fixture.
 
 All source-release directories and promoted snapshot directories are immutable. A failed
 build or promotion leaves the current active snapshot unchanged, and promotion never

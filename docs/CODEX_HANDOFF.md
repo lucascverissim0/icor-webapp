@@ -881,3 +881,16 @@ longer running. The next plan is an approved EEA release acquisition/profile/par
 source-level snapshot implementation, including terms review and parser composition;
 it must keep KBA/UK parsing, forecasting, API replacement, and fixture fallback out of
 scope until separately planned.
+
+Task 8 review fix round 1 corrects the operator guide in `docs/DEVELOPMENT.md`.
+The promotion command now consumes an assigned PowerShell `$candidateSnapshotId` rather
+than a shell-invalid angle-bracket literal. The guide now states the precise
+source-neutral outcomes: the fictional build returns `unsupported_parser`/exit 2, a
+promotion with no candidate rejects/exit 3, and both `status` and `verify` return
+`{"active_snapshot_id": null, "state": "unavailable"}`/exit 4 until an active snapshot
+exists. Its maintained Ruff command now checks `src`, `tests`,
+`scripts/audit_baseline.py`, and `scripts/build_evidence_snapshot.py`. Fresh focused
+integration verification reported 3 passed; direct status/verify emitted the documented
+unavailable payload and direct missing-candidate promotion emitted the documented
+validation-rejected payload. The scoped Ruff gate and `git diff --check` passed. No
+process was started or stopped; the review correction remains documentation-only.
