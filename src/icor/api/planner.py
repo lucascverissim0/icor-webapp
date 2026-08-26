@@ -90,6 +90,7 @@ def configurations(
     response_model=PlanningConfigurationResponse,
     responses={
         404: {"model": ProblemResponse},
+        422: {"model": ProblemResponse},
         500: {"model": ProblemResponse},
     },
 )

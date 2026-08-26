@@ -1,0 +1,856 @@
+{
+  "components": {
+    "schemas": {
+      "ConfidenceLevel": {
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "ConfidenceLevel",
+        "type": "string"
+      },
+      "ConfidenceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/ConfidenceLevel"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "reason"
+        ],
+        "title": "ConfidenceResponse",
+        "type": "object"
+      },
+      "DemandRangeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_units": {
+            "title": "Base Units",
+            "type": "integer"
+          },
+          "downside_units": {
+            "title": "Downside Units",
+            "type": "integer"
+          },
+          "upside_units": {
+            "title": "Upside Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "downside_units",
+          "base_units",
+          "upside_units"
+        ],
+        "title": "DemandRangeResponse",
+        "type": "object"
+      },
+      "EquipmentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "acoustic": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acoustic"
+          },
+          "camera_adas": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Adas"
+          },
+          "heated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heated"
+          },
+          "hud": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hud"
+          },
+          "rain_light_sensor": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rain Light Sensor"
+          }
+        },
+        "required": [
+          "camera_adas",
+          "hud",
+          "heated",
+          "acoustic",
+          "rain_light_sensor"
+        ],
+        "title": "EquipmentResponse",
+        "type": "object"
+      },
+      "EvidenceStatus": {
+        "enum": [
+          "demonstration",
+          "prototype",
+          "validated"
+        ],
+        "title": "EvidenceStatus",
+        "type": "string"
+      },
+      "FieldError": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "FieldError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "fixture_ready": {
+            "title": "Fixture Ready",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "fixture_ready",
+          "data_version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "PlannerOptionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brands": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Brands",
+            "type": "array"
+          },
+          "evidence_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceStatus"
+            },
+            "title": "Evidence Statuses",
+            "type": "array"
+          },
+          "horizons": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Horizons",
+            "type": "array"
+          },
+          "markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/ScenarioResponse"
+          }
+        },
+        "required": [
+          "markets",
+          "horizons",
+          "brands",
+          "models",
+          "evidence_statuses",
+          "scenario"
+        ],
+        "title": "PlannerOptionsResponse",
+        "type": "object"
+      },
+      "PlannerPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanningConfigurationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PlannerSummaryResponse"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages",
+          "summary"
+        ],
+        "title": "PlannerPageResponse",
+        "type": "object"
+      },
+      "PlannerSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_units": {
+            "title": "Base Units",
+            "type": "integer"
+          },
+          "candidate_count": {
+            "title": "Candidate Count",
+            "type": "integer"
+          },
+          "downside_units": {
+            "title": "Downside Units",
+            "type": "integer"
+          },
+          "upside_units": {
+            "title": "Upside Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "candidate_count",
+          "downside_units",
+          "base_units",
+          "upside_units"
+        ],
+        "title": "PlannerSummaryResponse",
+        "type": "object"
+      },
+      "PlanningConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "body_style": {
+            "title": "Body Style",
+            "type": "string"
+          },
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "configuration_id": {
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "data_quality_confidence": {
+            "$ref": "#/components/schemas/ConfidenceResponse"
+          },
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "demand": {
+            "$ref": "#/components/schemas/DemandRangeResponse"
+          },
+          "drive_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drive Side"
+          },
+          "equipment": {
+            "$ref": "#/components/schemas/EquipmentResponse"
+          },
+          "evidence_status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          },
+          "facelift": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Facelift"
+          },
+          "forecast_horizon": {
+            "title": "Forecast Horizon",
+            "type": "integer"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "string"
+          },
+          "identity_confidence": {
+            "$ref": "#/components/schemas/ConfidenceResponse"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_year_end": {
+            "title": "Model Year End",
+            "type": "integer"
+          },
+          "model_year_start": {
+            "title": "Model Year Start",
+            "type": "integer"
+          },
+          "part_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Family"
+          },
+          "replacement_rate": {
+            "title": "Replacement Rate",
+            "type": "number"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummaryResponse"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "vehicle_exposure_units": {
+            "title": "Vehicle Exposure Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "sku",
+          "part_family",
+          "market",
+          "brand",
+          "model",
+          "model_year_start",
+          "model_year_end",
+          "generation",
+          "facelift",
+          "body_style",
+          "drive_side",
+          "equipment",
+          "forecast_horizon",
+          "demand",
+          "vehicle_exposure_units",
+          "replacement_rate",
+          "identity_confidence",
+          "data_quality_confidence",
+          "evidence_status",
+          "sources",
+          "updated_at",
+          "data_version"
+        ],
+        "title": "PlanningConfigurationResponse",
+        "type": "object"
+      },
+      "ProblemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "correlation_id": {
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "field_errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "title": "Field Errors",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "correlation_id"
+        ],
+        "title": "ProblemResponse",
+        "type": "object"
+      },
+      "ScenarioResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "evidence_status",
+          "data_version",
+          "updated_at"
+        ],
+        "title": "ScenarioResponse",
+        "type": "object"
+      },
+      "SortDirection": {
+        "enum": [
+          "asc",
+          "desc"
+        ],
+        "title": "SortDirection",
+        "type": "string"
+      },
+      "SortField": {
+        "enum": [
+          "base_demand",
+          "downside_demand",
+          "upside_demand",
+          "brand",
+          "model",
+          "identity_confidence",
+          "data_quality_confidence"
+        ],
+        "title": "SortField",
+        "type": "string"
+      },
+      "SourceSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "SourceSummaryResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Local demonstration contract for windshield demand planning.",
+    "title": "ICOR Planner API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/v1/planner/configurations": {
+      "get": {
+        "operationId": "configurations_api_v1_planner_configurations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "brand",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model"
+            }
+          },
+          {
+            "in": "query",
+            "name": "evidence",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Evidence"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortField",
+              "default": "base_demand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SortDirection",
+              "default": "desc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlannerPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Configurations"
+      }
+    },
+    "/api/v1/planner/configurations/{configuration_id}": {
+      "get": {
+        "operationId": "configuration_detail_api_v1_planner_configurations__configuration_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration_id",
+            "required": true,
+            "schema": {
+              "title": "Configuration Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Configuration Detail"
+      }
+    },
+    "/api/v1/planner/options": {
+      "get": {
+        "operationId": "planner_options_api_v1_planner_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlannerOptionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Planner Options"
+      }
+    }
+  }
+}

@@ -183,3 +183,7 @@ def test_openapi_is_versioned_and_documents_problem_responses() -> None:
     responses = schema["paths"]["/api/v1/planner/configurations"]["get"]["responses"]
     assert "422" in responses
     assert "ProblemResponse" in str(responses["422"])
+    detail_responses = schema["paths"][
+        "/api/v1/planner/configurations/{configuration_id}"
+    ]["get"]["responses"]
+    assert "ProblemResponse" in str(detail_responses["422"])
