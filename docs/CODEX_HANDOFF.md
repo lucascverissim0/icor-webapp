@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 ## Project objective
 
@@ -730,3 +730,32 @@ evidence is in
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
 The unrelated `AGENTS.md` change remains untouched; no server or external process was
 started.
+
+Task 7 adds the clean-room evidence snapshot CLI in
+`scripts/build_evidence_snapshot.py`. `stage-release`, `build`, `promote`, `status`,
+and `verify` require an explicit root; roots resolving outside this repository require
+`--allow-external-root`. Every application write stays beneath that root, stdout is one
+canonical JSON object, stderr is static and sanitized, and exit classes are 0 success,
+2 invalid/unsupported input, 3 failed validation/operation, and 4 unavailable active
+state. Production composition intentionally registers no source parser: an unregistered
+manifest parser returns typed `unsupported_parser`. The only loader is injected from
+`tests/integration/test_clean_room_evidence_snapshot.py`; it reads exactly two fictional
+Example Motors rows, writes normalized-label observations/mappings, and publishes no
+model value. No EEA/KBA/UK parser or real source extract was added.
+
+Task 7 strict TDD first failed at collection because the CLI module did not exist. The
+focused suite then reached 6/6 after covering deterministic byte-identical builds across
+two external temporary roots, promotion/status/verification, socket prohibition,
+outside-root write containment, unavailable status, invalid input, unsupported default
+parser, tampered-candidate exit 3, canonical JSON, raw-row exclusion, and unexpected
+loader-error sanitization. The latter regression independently failed with a raw-message
+`RuntimeError` before the static error boundary and passed afterward. Fresh full pytest
+reported 292 passed, 7 documented Windows symlink-privilege skips, and the four strict
+legacy XFAILs. `uv run ruff check src tests scripts/build_evidence_snapshot.py` and
+`git diff --check` passed; the latter emitted only existing Windows line-ending warnings.
+No network request, server, production/customer data, push, merge, deploy, main-branch,
+or Streamlit action occurred. The unrelated pre-existing `AGENTS.md` modification remains
+untouched. The next planned work is Task 8 foundation documentation/checkpointing; its
+planned broad `ruff check ... scripts` currently encounters 486 pre-existing findings in
+untouched legacy scripts and needs an explicit maintained-scope decision rather than an
+unrelated Task 7 rewrite.
