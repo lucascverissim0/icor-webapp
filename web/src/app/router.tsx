@@ -7,9 +7,9 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router'
 
-import { App } from './App'
 import { AppShell } from './AppShell'
 import { RouteErrorFallback } from './ErrorBoundary'
+import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
 
@@ -58,7 +58,7 @@ export const plannerRoute = createRoute({
 export const configurationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/planner/configurations/$configurationId',
-  component: () => <App detailPlaceholder />,
+  component: ConfigurationDetailPage,
   errorComponent: RouteErrorFallback,
 })
 
