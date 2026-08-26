@@ -614,3 +614,19 @@ punctuation regression first failed with `create table t (x text)` versus
 deferred module-wide E501 suppression and unrelated `AGENTS.md` modification remain
 untouched. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
+
+Task 4 fix round 5 closes the SQLite lexical-boundary defect in schema fingerprints.
+The normalizer now recognizes SQLite's contiguous symbolic multi-character operators
+longest-first, including the three-character JSON extraction operator, while split
+operator characters remain separate tokens. Table-driven regressions cover `!=`,
+`<>`, `<=`, `>=`, `==`, `||`, `<<`, `>>`, `->`, and `->>` against whitespace-split
+forms; exact quoted-literal/escaped-quote preservation; and valid punctuation
+whitespace equivalence. The initial operator table failed all 10 cases because each
+pair produced an identical fingerprint, then passed all 10 after the matcher. A
+mutation check reproduced the 10 failures after temporarily removing the matcher and
+passed all 17 normalization cases after restoration. Fresh final verification:
+`uv run pytest tests/infrastructure/test_sqlite_evidence_repository.py -v` reported
+52 passed, and `uv run ruff check src tests` reported `All checks passed!`. The
+deferred module-wide E501 suppression and unrelated `AGENTS.md` modification remain
+untouched. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.

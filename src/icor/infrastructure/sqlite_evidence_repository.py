@@ -42,6 +42,18 @@ class ImmutableEvidenceError(RuntimeError):
 
 
 _SCHEMA_VERSION = 1
+_SQLITE_MULTI_CHARACTER_OPERATORS = (
+    "->>",
+    "!=",
+    "<>",
+    "<=",
+    ">=",
+    "==",
+    "||",
+    "<<",
+    ">>",
+    "->",
+)
 _NON_PUBLISHABLE_STATUSES = frozenset(
     {MappingStatus.AMBIGUOUS.value, MappingStatus.REJECTED.value, MappingStatus.UNRESOLVED.value}
 )
@@ -360,8 +372,14 @@ class SQLiteEvidenceRepository:
                     index += 1
                 tokens.append(statement[start:index].lower())
                 continue
-            tokens.append(character.lower())
-            index += 1
+            for operator in _SQLITE_MULTI_CHARACTER_OPERATORS:
+                if statement.startswith(operator, index):
+                    tokens.append(operator)
+                    index += len(operator)
+                    break
+            else:
+                tokens.append(character)
+                index += 1
         if tokens and tokens[-1] == ";":
             tokens.pop()
         return " ".join(tokens)

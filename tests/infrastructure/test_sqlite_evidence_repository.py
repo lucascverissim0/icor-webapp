@@ -565,19 +565,74 @@ def test_schema_contract_rejects_unexpected_explicit_index(tmp_path: Path) -> No
         SQLiteEvidenceRepository(path)
 
 
-def test_schema_normalization_preserves_escaped_string_literal_content() -> None:
-    original = "CHECK (reason = 'O''Brien')"
-    changed = "CHECK (reason = 'O''BRIEN')"
-
-    assert SQLiteEvidenceRepository._normalize_schema_sql(original) != (
-        SQLiteEvidenceRepository._normalize_schema_sql(changed)
+@pytest.mark.parametrize(
+    ("contiguous", "split"),
+    [
+        ("x != 1", "x ! = 1"),
+        ("x <> 1", "x < > 1"),
+        ("x <= 1", "x < = 1"),
+        ("x >= 1", "x > = 1"),
+        ("x == 1", "x = = 1"),
+        ("x || y", "x | | y"),
+        ("x << 1", "x < < 1"),
+        ("x >> 1", "x > > 1"),
+        ("payload -> '$.value'", "payload - > '$.value'"),
+        ("payload ->> '$.value'", "payload - >> '$.value'"),
+    ],
+    ids=[
+        "not-equal-bang",
+        "not-equal-angle",
+        "less-than-or-equal",
+        "greater-than-or-equal",
+        "equal",
+        "concatenate",
+        "left-shift",
+        "right-shift",
+        "json-extract",
+        "json-extract-scalar",
+    ],
+)
+def test_schema_normalization_preserves_contiguous_operator_boundaries(
+    contiguous: str,
+    split: str,
+) -> None:
+    assert SQLiteEvidenceRepository._normalize_schema_sql(contiguous) != (
+        SQLiteEvidenceRepository._normalize_schema_sql(split)
     )
 
 
-def test_schema_normalization_ignores_whitespace_around_punctuation() -> None:
-    formatted = "CREATE TABLE t (x TEXT)"
-    compact = "create table t(x text)"
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        ("CHECK (reason = 'O''Brien')", "check ( reason = 'O''Brien' )"),
+        (
+            "CHECK (note = 'MiXeD != ! = <>')",
+            "check ( note = 'MiXeD != ! = <>' )",
+        ),
+    ],
+    ids=["escaped-quote", "operator-characters"],
+)
+def test_schema_normalization_preserves_quoted_literal_bytes(
+    statement: str,
+    expected: str,
+) -> None:
+    assert SQLiteEvidenceRepository._normalize_schema_sql(statement) == expected
 
+
+@pytest.mark.parametrize(
+    ("formatted", "compact"),
+    [
+        ("CREATE TABLE t (x TEXT)", "create table t(x text)"),
+        ("CHECK (x IN (1, 2))", "check(x in(1,2))"),
+        ("CREATE INDEX i ON t (x, y)", "create index i on t(x,y)"),
+        ("CHECK (x != 1)", "check(x!=1)"),
+    ],
+    ids=["parenthesis", "nested-punctuation", "comma", "operator"],
+)
+def test_schema_normalization_ignores_whitespace_around_punctuation(
+    formatted: str,
+    compact: str,
+) -> None:
     assert SQLiteEvidenceRepository._normalize_schema_sql(formatted) == (
         SQLiteEvidenceRepository._normalize_schema_sql(compact)
     )
