@@ -659,3 +659,23 @@ focused GREEN reported 23 passed and Ruff passed. A linked-observation mutation 
 failed when its mapping-status join was removed and passed after restoration. The simultaneous checksum/byte-size
 mismatch behavior is deliberately unchanged for the deferred Minor. Detailed ignored
 report: `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-5-report.md`.
+
+Task 6 implements deterministic candidate builds and atomic last-known-good promotion.
+`SnapshotBuildRequest` now makes the UTC `build_as_of` instant an explicit identity
+input alongside sorted release IDs and artifact hashes, all eight method/registry
+versions, and the deterministic seed. `SnapshotBuilder` verifies releases, loads an
+isolated scratch ledger, replays every record in stable primary-key order, checkpoints
+WAL, switches to a single-file journal, runs `VACUUM`, closes handles, hashes the final
+database, and writes canonical `snapshot.json` and `validation.json` artifacts beneath
+`candidates/<snapshot_id>`. `SnapshotStore` verifies candidate and copied target bytes
+before an fsynced atomic `active.json` replacement; interrupted writes, changed hashes,
+missing files, and invalid candidates leave the previous pointer unchanged. Previous
+snapshot directories are never deleted or replaced, repeat promotion is idempotent,
+and active repositories open read-only with typed unavailable errors and no fixture
+fallback. A Windows regression also corrected `SnapshotValidator` to close its
+read-only SQLite connection rather than relying on the transaction-only connection
+context manager. TDD RED was the expected two missing-module collection errors; focused
+GREEN reported 18 passed. Fresh Ruff reported `All checks passed!`; full pytest
+reported 264 passed, 3 documented Windows symlink-privilege skips, and the four strict
+legacy XFAILs. No server or other process was started. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.

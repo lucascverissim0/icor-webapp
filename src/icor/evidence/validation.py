@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -119,7 +120,7 @@ class SnapshotValidator:
                         "Snapshot database checksum does not match.",
                     )
                 )
-            with _open_read_only(path) as connection:
+            with closing(_open_read_only(path)) as connection:
                 release_ids = {
                     row["release_id"]
                     for row in connection.execute("SELECT release_id FROM source_release")
