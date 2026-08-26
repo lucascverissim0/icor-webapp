@@ -630,3 +630,19 @@ passed all 17 normalization cases after restoration. Fresh final verification:
 deferred module-wide E501 suppression and unrelated `AGENTS.md` modification remain
 untouched. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
+
+Task 5 adds read-only release and candidate-snapshot quality gates in
+`src/icor/evidence/validation.py`. `ReleaseValidator` blocks promotion for unavailable
+or unreadable artifacts, checksum/byte-size mismatch, missing terms metadata,
+non-conserving record counts, and reversed coverage. `SnapshotValidator` opens the
+ledger using SQLite `mode=ro`, blocks promotion for hash/release/count mismatches and
+detects orphan inputs, negative values, invalid or unordered intervals, and unresolved
+published mappings. Findings are frozen, sorted by severity/code/record ID, and use
+fixed sanitized messages that contain no paths, raw rows, credentials, or stack traces.
+TDD RED was the expected missing validation-module import; focused GREEN reported 16
+passed. Fresh Ruff passed. The full Python suite reported 239 passed, 3 Windows
+symlink-privilege skips, and the four documented strict XFAILs. Task 6 must checkpoint,
+VACUUM, and close candidate SQLite files before hashing so this file-hash validation
+does not depend on a WAL sidecar. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-5-report.md`.
+Task 5 is committed with `feat: enforce evidence snapshot quality gates`.
