@@ -44,3 +44,18 @@ def test_devcontainer_uses_locked_secure_runtime() -> None:
     assert "enableXsrfProtection false" not in configuration
     assert "apt upgrade" not in configuration
     assert not re.search(r"pip(?:3)? install(?: --user)? streamlit", configuration)
+
+
+def test_planner_local_operation_is_documented() -> None:
+    required_phrases = (
+        "scripts/run_planner_dev.py",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000/docs",
+        "demonstration data",
+        "no production secrets",
+        "no customer data",
+    )
+    for relative_path in ("README.md", "docs/DEVELOPMENT.md"):
+        contents = (ROOT / relative_path).read_text(encoding="utf-8").lower()
+        for phrase in required_phrases:
+            assert phrase.lower() in contents, f"{relative_path} must document {phrase!r}"

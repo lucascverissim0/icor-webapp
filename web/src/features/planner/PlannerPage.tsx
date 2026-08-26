@@ -175,7 +175,7 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
     <div className="planner-layout">
       <Filters key={JSON.stringify(canonicalSearch)} options={optionsQuery.data} search={canonicalSearch} onApply={onSearchChange} />
       <section className="planner-results" aria-labelledby="results-title">
-        <div className="results-heading"><div><p className="eyebrow">Configuration-level outlook</p><h1 id="results-title">Windshield demand planner</h1><p>Synthetic planning evidence for workflow decisions, not production forecasting.</p></div><span className="status-pill">Demonstration data</span></div>
+        <div className="results-heading"><div><p className="eyebrow">Configuration-level outlook</p><h2 id="results-title">Windshield demand planner</h2><p>Synthetic planning evidence for workflow decisions, not production forecasting.</p></div><span className="status-pill">Demonstration data</span></div>
         {normalizedKeys.length > 0 && <p className="url-notice" role="status">Adjusted URL filters: {normalizedKeys.join(', ')}</p>}
         {constraints.length > 0 && (
           <div className="active-constraints">

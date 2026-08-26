@@ -72,10 +72,16 @@ function appendMany(
 }
 
 export class PlannerApiClient {
+  private readonly fetcher: typeof fetch
+  private readonly baseUrl: string
+
   constructor(
-    private readonly fetcher: typeof fetch = fetch,
-    private readonly baseUrl = '',
-  ) {}
+    fetcher?: typeof fetch,
+    baseUrl = '',
+  ) {
+    this.fetcher = fetcher ?? ((input, init) => globalThis.fetch(input, init))
+    this.baseUrl = baseUrl
+  }
 
   async options(): Promise<PlannerOptions> {
     return this.request<PlannerOptions>('/api/v1/planner/options')

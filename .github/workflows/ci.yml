@@ -28,8 +28,43 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --all-groups
       - run: uv lock --check
-      - run: uv run ruff check src tests scripts/audit_baseline.py
+      - run: uv run ruff check src tests scripts/audit_baseline.py scripts/run_planner_dev.py
       - run: uv run pytest
+
+  planner-web:
+    name: Planner web (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.3"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      - run: npm test -- --run
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: npm run openapi:check
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run e2e
+        working-directory: web
+      - run: npm audit --audit-level=high
+        working-directory: web
 
   dependency-audit:
     name: Dependency audit (Linux)

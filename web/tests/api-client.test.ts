@@ -20,6 +20,26 @@ const successPage = {
 }
 
 describe('PlannerApiClient', () => {
+  it('does not bind the browser fetch transport to the client instance', async () => {
+    const browserFetch = vi.fn(function (this: unknown) {
+      if (this instanceof PlannerApiClient) throw new TypeError('Illegal invocation')
+      return Promise.resolve(new Response(JSON.stringify({
+        markets: [], horizons: [], brands: [], models: [], evidence_statuses: [],
+        scenario: {
+          name: 'Demo', description: 'Synthetic demo', evidence_status: 'demonstration',
+          data_version: 'demo', updated_at: '2026-08-25T12:00:00Z',
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    })
+    vi.stubGlobal('fetch', browserFetch)
+
+    try {
+      await expect(new PlannerApiClient().options()).resolves.toMatchObject({ markets: [] })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('serializes repeatable filters without inventing values', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(successPage), {

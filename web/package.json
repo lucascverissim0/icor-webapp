@@ -10,8 +10,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint --cache --cache-strategy content --cache-location .eslintcache \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\" \"*.config.ts\"",
+    "lint": "eslint --cache --cache-strategy content --cache-location .eslintcache \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"*.config.ts\"",
     "test": "vitest",
+    "e2e": "playwright test",
     "openapi:export": "uv run --project .. python scripts/export-openapi.py",
     "openapi:generate": "npm run openapi:export && openapi-typescript openapi.json -o src/lib/api/schema.ts",
     "openapi:check": "npm run openapi:generate && git diff --exit-code -- openapi.json src/lib/api/schema.ts"

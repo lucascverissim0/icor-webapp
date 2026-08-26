@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 
 import { configurationRoute } from '../../app/router'
 import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
 import type { components } from '../../lib/api/schema'
 import { serializePlannerSearch } from '../../lib/planner-search'
+import { PlannerWorkbench } from './PlannerPage'
 
 type Configuration = components['schemas']['PlanningConfigurationResponse']
 
@@ -17,6 +19,15 @@ type ConfigurationDetailProps = ConfigurationDetailBaseProps & (
   | { backHref: string; onBack?: never }
   | { backHref?: never; onBack: () => void }
 )
+
+export function ResponsiveDetailLayout({ detail, planner }: { detail: ReactNode; planner: ReactNode }) {
+  return (
+    <div className="planner-detail-route">
+      <div className="planner-detail-context">{planner}</div>
+      <aside aria-label="Selected configuration" className="planner-detail-panel">{detail}</aside>
+    </div>
+  )
+}
 
 function formatUnits(value: number): string {
   return `${new Intl.NumberFormat('en-US').format(value)} units`
@@ -152,7 +163,24 @@ export function ConfigurationDetail({ apiClient = plannerApi, backHref, configur
 export function ConfigurationDetailPage() {
   const router = useRouter()
   const { configurationId } = configurationRoute.useParams()
-  const search = serializePlannerSearch(configurationRoute.useSearch())
+  const routeSearch = configurationRoute.useSearch()
+  const search = serializePlannerSearch(routeSearch)
   const backHref = router.buildLocation({ to: '/planner', search }).href
-  return <ConfigurationDetail backHref={backHref} configurationId={configurationId} />
+  return (
+    <ResponsiveDetailLayout
+      detail={<ConfigurationDetail backHref={backHref} configurationId={configurationId} />}
+      planner={
+        <PlannerWorkbench
+          invalidKeys={routeSearch.invalidKeys}
+          onSearchChange={(nextSearch) => void router.navigate({ to: '/planner', search: nextSearch })}
+          onSelect={(nextConfigurationId) => void router.navigate({
+            to: configurationRoute.to,
+            params: { configurationId: nextConfigurationId },
+            search,
+          })}
+          search={search}
+        />
+      }
+    />
+  )
 }
