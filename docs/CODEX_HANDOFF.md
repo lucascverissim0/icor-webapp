@@ -486,3 +486,16 @@ design, uncertainty, and access controls before any value is labelled validated.
 Streamlit remains a temporary behavioral reference, and `ICOR-001`, `ICOR-006`,
 `ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation.
 A concurrent uncommitted `AGENTS.md` change remains untouched.
+
+Task 2 is committed and added the deterministic evidence serialization and manifest boundary in
+`src/icor/evidence/`. `canonical_json_bytes` emits sorted compact UTF-8 JSON with one
+trailing newline; it explicitly serializes contract dataclasses, enums, UTC timestamps,
+dates, decimals, tuples, and paths while rejecting floats. `sha256_file` hashes exact
+file bytes. Strict release and snapshot manifest loaders reject malformed/non-UTF-8
+JSON, duplicate or unknown/missing keys, invalid enum/date/hash values, unsafe artifact
+paths, and duplicate snapshot release IDs before domain validation. Release-manifest
+writes use a same-directory temporary file, flush/fsync, and atomic replacement. Fresh
+verification: focused evidence tests passed 21/21; Ruff passed; full pytest reported
+155 passed with exactly the four documented strict XFAILs. The unrelated `AGENTS.md`
+modification remains untouched. Task report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-2-report.md`.
