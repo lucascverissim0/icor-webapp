@@ -507,3 +507,17 @@ would reject. TDD evidence: the new focused writer regression first failed with 
 `ManifestError`, then `tests/evidence/test_release_manifests.py` passed 18/18 and Ruff
 reported `All checks passed!`. The deferred `load_snapshot_manifest` minor was not
 changed. The unrelated `AGENTS.md` modification remains untouched.
+
+Task 3 is committed as `6955489` (`feat: store immutable source releases`).
+`src/icor/infrastructure/release_store.py` now stages only source artifacts whose
+byte count and SHA-256 match a `ReleaseManifest`, copying them through a same-root
+`.staging/<uuid>` directory before publishing the complete release directory under
+`<source_id>/<release_id>`. The store atomically writes the manifest, validates
+identifiers, detects incomplete or tampered releases, prevents replacement by different
+content, permits exact idempotent restaging, and lists releases in stable ID order.
+`.local/evidence/` is explicitly ignored. TDD evidence: the new focused test file first
+failed at collection because `icor.infrastructure.release_store` did not exist, then
+passed 10/10. Fresh verification: `uv run ruff check src tests` reported `All checks
+passed!`; `uv run pytest -p no:cacheprovider` reported 166 passed with exactly the four
+documented strict XFAILs (`ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030`). No parser
+or real source data was added; the unrelated `AGENTS.md` modification remains untouched.
