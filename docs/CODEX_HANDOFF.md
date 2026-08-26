@@ -534,3 +534,13 @@ reported one expected failure. Fresh focused verification: 14 passed; three syml
 regressions skipped only because Windows returned `WinError 1314` while creating test
 symlinks. Ruff passed. The ignored detailed report is
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-3-report.md`.
+
+Task 3 fix round 2/5 is committed as `0c4ebc3` (`fix: make release staging concurrency
+safe`). Symlink regressions now skip only the explicit Windows developer-privilege
+denial (`WinError 1314`); every other symlink setup error fails the test. A real
+two-thread test synchronizes two distinct releases after both observe `.locks` absent.
+The former check-then-create failure was reproduced as `FileExistsError`; root and
+shared directory setup now uses idempotent creation followed by the existing symlink,
+directory-type, and containment checks. Fresh focused verification: 15 passed and the
+three expected Windows-privilege symlink skips; Ruff passed. The unrelated `AGENTS.md`
+modification remains untouched.
