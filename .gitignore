@@ -20,6 +20,7 @@ env/
 .env
 .env.local
 .local/
+.local/evidence/
 .superpowers/
 
 # Planner web workspace artifacts
