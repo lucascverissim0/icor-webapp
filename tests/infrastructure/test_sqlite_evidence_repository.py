@@ -513,6 +513,34 @@ def test_structurally_corrupt_v1_schema_is_refused(tmp_path: Path) -> None:
         SQLiteEvidenceRepository(path)
 
 
+@pytest.mark.parametrize(
+    ("expected", "replacement"),
+    (
+        (
+            "measure TEXT NOT NULL CHECK (measure IN ('new_registrations', 'active_fleet'))",
+            "measure TEXT NOT NULL",
+        ),
+        ("artifact_bytes INTEGER NOT NULL", "artifact_bytes TEXT NOT NULL"),
+        ("publisher TEXT NOT NULL", "publisher TEXT"),
+    ),
+)
+def test_schema_contract_rejects_altered_column_constraints(
+    tmp_path: Path, expected: str, replacement: str
+) -> None:
+    path = tmp_path / "altered-v1.sqlite3"
+    SQLiteEvidenceRepository(path, writable=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA writable_schema = ON")
+        connection.execute(
+            "UPDATE sqlite_master SET sql = REPLACE(sql, ?, ?) WHERE name = 'source_release'",
+            (expected, replacement),
+        )
+        connection.execute("PRAGMA writable_schema = OFF")
+
+    with pytest.raises(EvidenceSchemaError, match="schema"):
+        SQLiteEvidenceRepository(path)
+
+
 def test_failed_migration_leaves_no_version_table(tmp_path: Path) -> None:
     class FailingMigrationRepository(SQLiteEvidenceRepository):
         def _migration_statements(self) -> tuple[str, ...]:

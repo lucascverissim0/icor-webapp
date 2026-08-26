@@ -297,84 +297,23 @@ class SQLiteEvidenceRepository:
         return version
 
     def _validate_v1_structure(self, connection: sqlite3.Connection) -> None:
-        required_columns = {
-            "source_release": ["release_id", "source_id", "publisher", "source_url", "retrieved_at", "published_at", "coverage_start", "coverage_end", "geography", "geography_version", "measure", "unit", "publication_status", "dependency_group", "terms_url", "permitted_local_use", "artifact_path", "artifact_bytes", "sha256", "parser_name", "parser_version", "expected_schema", "raw_record_count", "accepted_record_count", "rejected_record_count", "quarantined_record_count"],
-            "canonical_vehicle": ["vehicle_id", "make", "model", "model_year", "market"],
-            "observation": ["observation_id", "release_id", "original_row_locator", "geography", "geography_version", "period_start", "period_end", "period_precision", "measure", "value", "unit", "publication_status", "original_make", "original_model", "original_model_year", "original_type", "source_make_identifier", "source_model_identifier", "normalized_make", "normalized_model", "normalized_model_year", "canonical_vehicle_id", "mapping_status", "transformation_notes", "validation_flags", "confidence_authority", "confidence_publication_status", "confidence_coverage", "confidence_identity", "confidence_independent_agreement", "confidence_reasons", "confidence_applied_cap"],
-            "identity_mapping": ["mapping_id", "observation_id", "canonical_vehicle_id", "status", "reason", "reviewed_at"],
-            "published_value": ["value_id", "status", "measure", "unit", "geography", "geography_version", "period_start", "period_end", "canonical_vehicle_id", "mapping_status", "value", "p10", "p50", "p90", "method_version", "confidence_authority", "confidence_publication_status", "confidence_coverage", "confidence_identity", "confidence_independent_agreement", "confidence_reasons", "confidence_applied_cap", "forecast_confidence", "warnings"],
-            "published_value_input": ["value_id", "observation_id", "input_position"],
-            "snapshot": ["snapshot_id", "status", "built_at", "deterministic_seed", "versions", "database_sha256", "observation_count", "published_value_count", "warnings"],
-            "snapshot_release": ["snapshot_id", "release_id", "release_position"],
+        expected = {
+            statement.split()[2]: self._normalize_schema_sql(statement)
+            for statement in self._migration_statements()
+            if statement.startswith("CREATE TABLE")
         }
-        primary_keys = {
-            "source_release": ("release_id",),
-            "canonical_vehicle": ("vehicle_id",),
-            "observation": ("observation_id",),
-            "identity_mapping": ("mapping_id",),
-            "published_value": ("value_id",),
-            "published_value_input": ("value_id", "observation_id"),
-            "snapshot": ("snapshot_id",),
-            "snapshot_release": ("snapshot_id", "release_position"),
-        }
-        for table, columns in required_columns.items():
-            actual_columns = {
-                row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
-            }
-            if not set(columns) <= actual_columns:
-                raise EvidenceSchemaError(f"schema is structurally invalid: {table} columns")
-            actual_primary_key = tuple(
-                row["name"]
-                for row in sorted(
-                    connection.execute(f"PRAGMA table_info({table})"), key=lambda row: row["pk"]
-                )
-                if row["pk"]
+        actual = {
+            row["name"]: self._normalize_schema_sql(row["sql"])
+            for row in connection.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
-            if actual_primary_key != primary_keys[table]:
-                raise EvidenceSchemaError(f"schema is structurally invalid: {table} primary key")
-        self._require_unique_key(connection, "canonical_vehicle", ("make", "model", "model_year", "market"))
-        self._require_unique_key(connection, "observation", ("release_id", "original_row_locator"))
-        self._require_unique_key(connection, "published_value_input", ("value_id", "input_position"))
-        self._require_unique_key(connection, "snapshot_release", ("snapshot_id", "release_id"))
-        for table, expected in {
-            "observation": {
-                ("release_id", "source_release", "release_id"),
-                ("canonical_vehicle_id", "canonical_vehicle", "vehicle_id"),
-            },
-            "identity_mapping": {
-                ("observation_id", "observation", "observation_id"),
-                ("canonical_vehicle_id", "canonical_vehicle", "vehicle_id"),
-            },
-            "published_value": {("canonical_vehicle_id", "canonical_vehicle", "vehicle_id")},
-            "published_value_input": {
-                ("value_id", "published_value", "value_id"),
-                ("observation_id", "observation", "observation_id"),
-            },
-            "snapshot_release": {
-                ("snapshot_id", "snapshot", "snapshot_id"),
-                ("release_id", "source_release", "release_id"),
-            },
-        }.items():
-            actual = {
-                (row["from"], row["table"], row["to"])
-                for row in connection.execute(f"PRAGMA foreign_key_list({table})")
-            }
-            if not expected <= actual:
-                raise EvidenceSchemaError(f"schema is structurally invalid: {table} foreign keys")
+        }
+        if actual != expected:
+            raise EvidenceSchemaError("schema is structurally invalid")
 
     @staticmethod
-    def _require_unique_key(
-        connection: sqlite3.Connection, table: str, columns: tuple[str, ...]
-    ) -> None:
-        for index in connection.execute(f"PRAGMA index_list({table})"):
-            if not index["unique"]:
-                continue
-            index_columns = tuple(
-                row["name"] for row in connection.execute(f"PRAGMA index_info({index['name']})")
-            )
-            if index_columns == columns:
-                return
-        raise EvidenceSchemaError(f"schema is structurally invalid: {table} unique key")
+    def _normalize_schema_sql(statement: str) -> str:
+        return " ".join(statement.removesuffix(";").split()).lower()
 
     def _insert_release(self, connection: sqlite3.Connection, release: ReleaseManifest) -> None:
         connection.execute(

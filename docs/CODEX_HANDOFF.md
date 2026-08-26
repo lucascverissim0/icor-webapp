@@ -575,3 +575,17 @@ passed!`; full pytest reported 200 passed, 3 Windows symlink-privilege skips, an
 four documented strict XFAILs. The unrelated `AGENTS.md` modification remains
 untouched. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
+
+Task 4 fix round 2 completes the v1 schema-integrity boundary. Instead of checking
+only names, the ledger now derives a canonical fingerprint for every `CREATE TABLE`
+statement from the v1 migration and compares it to SQLite's persisted schema. This
+rejects altered column types/nullability, primary and unique keys, foreign keys, and
+enum/relationship checks. TDD corruption regressions first failed for a removed
+source-release measure enum check, a changed required type, and relaxed `NOT NULL`,
+then passed. An honest temporary candidate-schema probe omitted `snapshot_release` and
+failed the membership-integrity expectation with `OperationalError: no such table:
+snapshot_release`; after restoring the contract, the actual membership foreign-key test
+passed. Fresh focused verification: 32 passed; Ruff passed. The module-wide E501
+suppression remains intentionally deferred, and the unrelated `AGENTS.md` modification
+remains untouched. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
