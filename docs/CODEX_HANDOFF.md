@@ -31,6 +31,9 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
   `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`. Run every project
   command from that development worktree; do not switch this conversation to
   `Video_app`, the protected production checkout, or another repository.
+- Lucas explicitly requires strict isolation from the simultaneously open Video Flow
+  terminal session: do not read, write, launch, reference, or transfer files, context,
+  processes, or decisions between that session and this ICOR conversation.
 - Preserve advancement across cleared Codex conversations in this file.
 - Lucas requires Codex to optimize for practical productivity and token efficiency on
   all repository work. `AGENTS.md` now defines this as using the shortest reliable path,
@@ -73,6 +76,95 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
   to readiness; exact matches receive full readiness weight and broad fallbacks half.
   The ranking strategy boundary must allow a later cost-basis strategy without
   migrating coverage records.
+- On 2026-08-26 Lucas clarified that company information is not yet available. The
+  next product slice must therefore begin with publicly obtainable vehicle make,
+  model, and model-year data. Windshield SKU/fitment integration is deferred until
+  proprietary inputs are available, but the architecture must retain a clean future
+  mapping boundary. Lucas also reiterated that this is a new web experience expected
+  to be substantially better than the first Streamlit version.
+- The first real-data geographic scope is the EU aggregate. After the complete EU web
+  app is finished and reviewed, the product must expand worldwide because the company
+  operates globally. Geography must therefore remain a first-class, replaceable data
+  dimension even though the initial UI and validation are EU-only.
+- The authenticated landing page must show the full EU opportunity ranking immediately.
+  A separate second page must provide targeted vehicle search by make, model, and model
+  year. Both views must use the same canonical dataset and calculation services.
+- Opportunity order must be driven by estimated windshield replacements and expose
+  downside, base, and upside values. The ranking must also show fleet size and fleet
+  growth as separate columns so users can make informed decisions; these explanatory
+  measures must not be hidden inside an opaque composite score.
+- On 2026-08-26 Lucas requested an architectural restart of the new web application
+  from a clean product and data design rather than extending the fixture-led prototype.
+  The desired historical scope is worldwide passenger-car sales/registrations by brand
+  and model from 1995 through the latest available period, with explicit forecast
+  horizons through 2028 and 2031. Lucas invited alternative approaches and wants the
+  product to be designed collaboratively before implementation.
+- On 2026-08-26 Lucas approved using each trustworthy dataset for the years it covers,
+  adding further datasets for older periods, and reconciling overlaps rather than
+  forcing one source to cover everything. The real-data design must retain every raw
+  observation and its provenance, use overlaps to detect agreement or conflict, and
+  expose source/data confidence alongside forecast uncertainty. Confidence must remain
+  explainable and must not hide missing coverage or turn estimated values into observed
+  facts.
+- On 2026-08-26 Lucas approved the recommended treatment for incomplete 1995-2009 EU
+  model coverage: retain and display observed national evidence, and also permit
+  explicitly labelled low-confidence EU estimates derived from it. Observations and
+  estimates must remain separate, every estimate must expose its inputs and
+  limitations, and uncertainty must widen automatically as coverage weakens.
+- On 2026-08-26 Lucas approved the evidence-led real-data architecture: immutable raw
+  source releases; normalized observations; a separately governed canonical vehicle
+  registry; dependency-aware evidence reconciliation; distinct observed, reconciled,
+  estimated, and forecast values; versioned estimate/forecast methods; and API/UI
+  provenance drill-down. A deterministic, explainable reconciliation engine will come
+  first behind replaceable strategy boundaries; a probabilistic fusion model may be
+  introduced only after coverage and source behavior are measured.
+- On 2026-08-26 Lucas approved the reconciliation and confidence rules. Measures with
+  different meanings are never merged; source observations remain immutable;
+  dependency groups prevent correlated publications from being counted as independent;
+  deterministic precedence selects a reconciled value; configurable overlap thresholds
+  initially classify <=2% as concordant, 2-10% as review, and >10% as conflict; and
+  conflicts are never averaged automatically. Evidence confidence is an explainable
+  100-point composition of authority (25), publication/revision status (10), coverage
+  (25), identity quality (20), and independent agreement (20), with High/Medium/Low/
+  Very low bands, component reasons, and caps for provisional or inferred evidence.
+  Forecast certainty remains separate and must be backtest-calibrated; uncalibrated
+  windshield outputs remain assumption-led opportunity estimates.
+- On 2026-08-26 Lucas approved the forecasting chain: reconcile registration history;
+  estimate missing EU model-years hierarchically while preserving observation status;
+  reconstruct active vehicle cohorts with evidence-calibrated geography/segment
+  survival curves; select simple future-registration models through rolling-origin
+  backtests; apply an explicit age/geography/vehicle replacement-hazard distribution;
+  and propagate all major uncertainty through simulation to P10/P50/P90 outputs for
+  2028 and 2031. Modelled history stays separate from observations, forecast confidence
+  depends on empirical error/coverage and evidence depth, and insufficiently validated
+  outputs are labelled experimental. Replacement outputs remain assumption-led until
+  defensible hazard evidence or proprietary history is integrated.
+- On 2026-08-26 Lucas approved the real-data UI design. The authenticated landing page
+  opens directly to the complete EU opportunity ranking with 2028/2031 horizon,
+  geography, search, confidence, and estimate-inclusion controls; separate active-fleet
+  and fleet-growth columns; P10/P50/P90 replacement opportunity; evidence/forecast
+  confidence; status; freshness; and URL-addressable state. Row evidence workspaces
+  expose history, assumptions, source comparisons, confidence components, identity,
+  conflicts, missingness, and reproducibility versions. A separate vehicle-search page
+  serves make/model/model-year research. Observed and estimated values remain visually
+  distinct, warnings cannot rely on color, missing periods are not visually invented,
+  provenance remains available on mobile, and internal source diagnostics stay outside
+  the decision-focused user workflow.
+- On 2026-08-26 Lucas approved the final operational-safety and testing section. Source
+  ingestion uses immutable manifests and atomic candidate-snapshot promotion; a failed
+  build preserves the last known-good snapshot and never falls back to fixtures. The
+  required verification covers parser contracts, identity, reconciliation/confidence,
+  estimation/forecast invariants and backtests, source aggregate reconciliation,
+  snapshot/versioned API behavior, authorization/security, frontend/browser/
+  accessibility/responsive behavior, and a deterministic clean-room rebuild.
+- The complete approved design is committed as `c0071db` at
+  `docs/superpowers/specs/2026-08-26-real-data-evidence-forecasting-design.md`. Its
+  placeholder, consistency, ambiguity, scope, and whitespace self-review passed.
+- On 2026-08-26 Lucas explicitly approved beginning the build from the complete written
+  design. The first executable subproject plan covers immutable evidence contracts,
+  release storage, the SQLite evidence ledger, validation, deterministic candidate
+  builds, atomic last-known-good snapshot promotion, and a clean-room CLI. It is at
+  `docs/superpowers/plans/2026-08-26-evidence-snapshot-foundation-implementation.md`.
 
 ## Application map
 
@@ -177,6 +269,34 @@ These are confirmed gaps in the current repository, not proof that no suitable p
 ## Data notes
 
 - Twenty-two Top-100 JSON files cover EU/world datasets from 2015 through 2025.
+- Preliminary source research on 2026-08-26 confirmed that no reviewed free official
+  source provides one complete worldwide make/model series from 1995 to the present.
+  OICA supplies country/category totals, and ACEA states that its public registration
+  figures are by country and brand rather than model. Commercial candidates include
+  MarkLines (country/brand/model data and claimed 99% global-sales coverage), JATO
+  Volumes/ModelMix (registration volumes across 40+ markets), and S&P Global Mobility
+  (new-registration coverage across 150+ countries). Licensing, historical depth,
+  redistribution rights, exact model granularity, corrections, and export/API terms
+  must be verified with vendors before selecting a canonical source.
+- Follow-up official-source validation on 2026-08-26 identified the European
+  Environment Agency's Regulation (EU) 2019/631 passenger-car monitoring dataset as
+  the strongest public first-party source for an initial real EU registration layer.
+  It contains member-state submissions with manufacturer/make and commercial-name
+  fields and currently spans 2010-2024. The EEA labels 2023 final and 2024
+  provisional. It does not satisfy the requested 1995-present worldwide history, so
+  using it requires an explicit product decision to launch the EU real-data phase at
+  2010 and defer 1995-2009/worldwide completeness to licensed or additional sources.
+- Additional official-source validation found complementary national evidence. The UK
+  Department for Transport/DVLA publishes model-level first registrations for Great
+  Britain from 2001 and model-level licensed-stock data from 1994 Q4. Germany's KBA
+  publishes registration tables by brand/model series, including overlapping annual
+  FZ 10 datasets. France's SDES publishes corrected make/model fleet evidence and
+  documents VIN/type-based correction methods, though the reviewed national fleet
+  series is substantially later than 1995. These sources can validate identity,
+  overlap, and national trends but cannot simply be summed into an EU total: scopes,
+  measures, suppression rules, revisions, and upstream dependencies differ. Agreement
+  between EEA and a national register is useful validation but is not necessarily
+  independent evidence.
 - EU 2022 has 93 rows and EU 2024 has 97 rather than 100; provenance/completeness needs confirmation.
 - `icor_supported_models.txt` contains duplicate keys, including Ford Kuga, Mazda 3, Mercedes C Class, and Mercedes E Class. Script 2's custom parser may accumulate some duplicate-year content, but the format is not valid JSON and is interpreted differently by Script 1.
 - The JSON files are valid UTF-8. Mojibake seen in one PowerShell display was a terminal rendering issue, not confirmed file corruption.
@@ -272,11 +392,43 @@ The clarified product objective changes the recommended product sequence. Before
   reported 33 passed; lint, TypeScript/build, and the eight-test Chromium planner suite
   passed.
   Final desktop, mobile, and deep-link screenshots were inspected from the live app.
-- The managed launcher currently serves the local planner at
-  `http://127.0.0.1:5300/planner` and its FastAPI docs at
-  `http://127.0.0.1:8140/docs`; stopping its active terminal/session stops both child
-  processes. The documented defaults are 5173/8000, with optional port flags when
-  those defaults are already in use.
+- On 2026-08-26 the managed launcher was freshly started as background PID 9732 and
+  serves the local planner at `http://127.0.0.1:5300/planner` and its FastAPI docs at
+  `http://127.0.0.1:8140/docs`. Both ports were verified listening, and Edge was
+  verified responsive, maximized, and foregrounded with the title `ICOR Planner`.
+  Launcher logs are under ignored `.local/planner-20260826-115540.*.log`. Clearing the
+  Codex conversation or terminal screen does not stop this background process; stopping
+  PID 9732 or rebooting does. The documented default ports remain 5173/8000.
+- The approved opportunity-ranking implementation plan is committed as `39b010e`.
+  Implementation is committed through `8ec548f`: reconciled model-year demonstration
+  demand, immutable coverage/ranking semantics, versioned transactional SQLite CRUD,
+  canonical exact-before-fallback matching, opportunity application services, six
+  versioned FastAPI endpoints, generated OpenAPI types, and the responsive React
+  opportunity/coverage workbench.
+- The implemented `demand_readiness_v1` policy leaves raw downside/base/upside demand
+  unchanged, uses tie-aware relative base-demand percentiles for 0–80 points, and uses
+  exact/fallback/uncovered base units for 0–20 readiness points. Exact matches take
+  precedence over broader vehicle-year fallbacks; fallbacks receive half readiness
+  weight and demand is never counted twice.
+- Production coverage defaults to ignored shared-local SQLite at
+  `.local/production-coverage.sqlite3` and can be redirected with
+  `ICOR_COVERAGE_DB`. It is local prototype state without authentication,
+  authorization, attribution, backup, or audit-grade history; the UI and documentation
+  prohibit secrets/customer data and explain the lower precision of fallback records.
+- Fresh opportunity-slice verification on 2026-08-26: `uv lock --check` and Ruff
+  passed; pytest reported 93 passed plus the four documented strict XFAILs; pip-audit
+  and npm audit reported no known vulnerabilities; OpenAPI drift passed; all 47
+  frontend tests, ESLint, TypeScript/production build, and all 13 Chromium journeys
+  passed. Browser coverage includes exact create/edit/delete, fallback confirmation,
+  committed ranking refetch, planner regressions, keyboard focus, WCAG serious/critical
+  checks, and 390px/1440px overflow checks. Captured opportunity desktop/mobile pixels
+  were inspected with no clipping, overflow, hierarchy, or responsive-layout defect.
+- A fresh current-code review launcher runs as background PID 18272 at
+  `http://127.0.0.1:5310/opportunities`; its API and docs use port 8150. Both the API
+  health/opportunity reads and web route returned HTTP 200, and the opportunity page
+  was opened in the default browser. Ignored logs are
+  `.local/opportunities-20260826-125116.out.log` and `.err.log`. Clearing conversation
+  context does not stop it; stopping PID 18272 or rebooting does.
 - This product slice remains fixture-only. Proprietary fitment/outcome ingestion,
   calibrated forecasting and backtesting, authentication/roles, multi-user behavior,
   deployment, pushing, and merging remain explicitly deferred. The existing strict
@@ -292,14 +444,32 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The approved local planner product slice is complete on `development/windshield-demand-platform` and is live for review at `http://127.0.0.1:5300/planner`. It uses only clearly labelled deterministic demonstration data and requires no production secret or customer data. Automated Python, frontend, OpenAPI, browser, accessibility, responsive-layout, lock, and dependency-audit gates pass; the final desktop/mobile/detail pixels were inspected. Production remains read-only on `main` at `1ba1d7c`; nothing has been pushed, merged, or deployed. The next product phase requires Lucas to supply or authorize the proprietary fitment/outcome data strategy and calibrated forecasting/backtesting scope. Streamlit remains only a temporary behavioral reference, and `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation batch.
+The full real-data evidence and forecasting design is approved for implementation and
+committed as `c0071db`. It defines the EEA/KBA/UK initial source strategy, immutable
+evidence ledger, canonical identity governance, dependency-aware reconciliation,
+explainable confidence, separate low-confidence 1995-2009 EU estimates, cohort fleet
+reconstruction, backtested 2028/2031 uncertainty forecasts, atomic snapshots, and the
+real-data opportunity/search experience. Lucas approved beginning implementation on
+2026-08-26. The first staged plan is written and self-reviewed at
+`docs/superpowers/plans/2026-08-26-evidence-snapshot-foundation-implementation.md`;
+it covers the evidence and atomic-snapshot foundation. No application code has changed
+in this phase yet.
 
-The opportunity-ranking and production-coverage design was approved in conversation
-on 2026-08-26 and written to
-`docs/superpowers/specs/2026-08-26-opportunity-ranking-production-coverage-design.md`.
-It adds model-year demonstration demand, auditable brand/model/model-year opportunity
-aggregation, exact-or-fallback coverage CRUD in local SQLite, and a replaceable
-ranking strategy that can later support cost evidence. The written specification is
-awaiting Lucas's review before an implementation plan may be created. No application
-code was changed in this design phase. A concurrent uncommitted `AGENTS.md` change
-belongs to another session and must remain untouched.
+The approved opportunity-ranking and production-coverage slice is implemented and
+verified on `development/windshield-demand-platform`. It is live for review at
+`http://127.0.0.1:5310/opportunities`, while the earlier configuration planner remains
+available at `http://127.0.0.1:5300/planner`. The new page ranks brands, models, and
+model years, drills into contributing configuration/model-year demand, and manages
+exact or deliberately broader local production coverage. All forecast and fitment
+values remain clearly labelled deterministic demonstration evidence; local coverage
+records do not validate the forecast.
+
+Production remains read-only on `main` at `1ba1d7c`; nothing has been pushed, merged,
+or deployed. The next real-data phase requires Lucas to provide secure local exports
+and field definitions for the proprietary vehicle-to-windshield fitment catalog and
+the reliably tracked replacement/production history. That phase must approve canonical
+identity mapping, data-quality checks, ingestion, reconciliation, baseline/backtest
+design, uncertainty, and access controls before any value is labelled validated.
+Streamlit remains a temporary behavioral reference, and `ICOR-001`, `ICOR-006`,
+`ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation.
+A concurrent uncommitted `AGENTS.md` change remains untouched.

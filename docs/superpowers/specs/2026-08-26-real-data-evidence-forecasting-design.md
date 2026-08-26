@@ -1,7 +1,7 @@
 # ICOR Real-Data Evidence and Forecasting Design
 
 Date: 2026-08-26
-Status: approved in conversation; awaiting written-spec review
+Status: approved for implementation
 
 ## Purpose
 
@@ -584,4 +584,3 @@ The real-data EU slice is complete only when freshly demonstrated that:
     uncertainty, warnings, and provenance are clear and usable.
 15. The protected production checkout/deployment remains unchanged, and nothing is
     pushed, merged, or deployed without explicit authorization.
-
