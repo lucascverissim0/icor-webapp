@@ -521,3 +521,16 @@ passed 10/10. Fresh verification: `uv run ruff check src tests` reported `All ch
 passed!`; `uv run pytest -p no:cacheprovider` reported 166 passed with exactly the four
 documented strict XFAILs (`ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030`). No parser
 or real source data was added; the unrelated `AGENTS.md` modification remains untouched.
+
+Task 3 fix round 1/5 is committed as `c5f30a0` (`fix: harden immutable release storage`).
+The immutable release store now serializes every stage under an atomic per-release lock,
+uses native non-replacing directory publication (`MoveFileW` on Windows and Linux
+`renameat2` with `RENAME_NOREPLACE`), and fails closed on unsupported platforms. It
+enforces global release-ID uniqueness across source IDs, rejects symlinked or
+out-of-root store paths, and requires the manifest artifact path to exactly match the
+stored `artifact<source suffix>` filename. TDD evidence: the first added regressions
+reported three expected safety failures, and the subsequent global-lock regression
+reported one expected failure. Fresh focused verification: 14 passed; three symlink
+regressions skipped only because Windows returned `WinError 1314` while creating test
+symlinks. Ruff passed. The ignored detailed report is
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-3-report.md`.
