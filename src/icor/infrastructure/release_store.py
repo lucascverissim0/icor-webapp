@@ -280,7 +280,7 @@ class ReleaseStore:
     @staticmethod
     def _require_contained(path: Path, root: Path, label: str) -> None:
         try:
-            path.resolve(strict=True).relative_to(root)
+            path.resolve(strict=True).relative_to(root.resolve(strict=True))
         except (OSError, ValueError) as error:
             raise ReleaseIntegrityError(f"{label} escapes the release store root") from error
 

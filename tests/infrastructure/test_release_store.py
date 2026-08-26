@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -15,6 +16,7 @@ from icor.infrastructure.release_store import (
     ReleaseIntegrityError,
     ReleaseStore,
 )
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem, SnapshotPathError
 
 
 def release_manifest_for(
@@ -75,6 +77,26 @@ def create_symlink_or_skip(link: Path, target: Path, *, is_directory: bool = Fal
         raise
 
 
+def create_directory_alias(link: Path, target: Path) -> None:
+    if os.name != "nt":
+        link.symlink_to(target, target_is_directory=True)
+        return
+    creation = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert creation.returncode == 0, creation.stderr or creation.stdout
+
+
+def remove_directory_alias(link: Path) -> None:
+    if os.name == "nt":
+        os.rmdir(link)
+    else:
+        link.unlink()
+
+
 @pytest.fixture
 def release_manifest() -> ReleaseManifest:
     return release_manifest_for(b"make,model,count\nA,B,1\n")
@@ -98,6 +120,62 @@ def test_stage_copies_artifact_and_manifest_under_release_id(
     assert stored.artifact_path.read_bytes() == b"make,model,count\nA,B,1\n"
     assert stored.manifest_path == stored.artifact_path.parent / "manifest.json"
     assert store.verify(release_manifest.release_id) == stored
+
+
+def test_alias_root_stage_get_and_verify_preserve_the_pinned_operation_path(
+    tmp_path: Path, release_manifest: ReleaseManifest
+) -> None:
+    lexical_root = tmp_path / "evidence"
+    pinned_root = tmp_path / "pinned-evidence"
+    outside = tmp_path / "outside"
+    lexical_root.mkdir()
+    outside.mkdir()
+    artifact = source_artifact(tmp_path)
+    filesystem = SnapshotFilesystem()
+
+    def exercise(operation_root: Path) -> None:
+        assert operation_root.resolve(strict=True) != operation_root
+        store = ReleaseStore(operation_root / "releases", filesystem=filesystem)
+
+        staged = store.stage(artifact, release_manifest)
+        fetched = store.get(release_manifest.release_id)
+        verified = store.verify(release_manifest.release_id)
+
+        assert staged == fetched == verified
+        assert (
+            pinned_root
+            / "releases"
+            / release_manifest.source_id
+            / release_manifest.release_id
+            / "artifact.csv"
+        ).read_bytes() == b"make,model,count\nA,B,1\n"
+        assert list(outside.iterdir()) == []
+
+    if os.name != "nt":
+        try:
+            with (
+                pytest.raises(SnapshotPathError, match="identity"),
+                filesystem.pin_root(lexical_root, create=False) as operation_root,
+            ):
+                lexical_root.rename(pinned_root)
+                create_directory_alias(lexical_root, outside)
+                exercise(operation_root)
+        finally:
+            if os.path.lexists(lexical_root):
+                remove_directory_alias(lexical_root)
+        return
+
+    lexical_root.rename(pinned_root)
+    operation_root = tmp_path / "descriptor-alias"
+    create_directory_alias(lexical_root, outside)
+    create_directory_alias(operation_root, pinned_root)
+    filesystem._pinned_operation_root = operation_root
+    try:
+        exercise(operation_root)
+    finally:
+        filesystem._pinned_operation_root = None
+        remove_directory_alias(operation_root)
+        remove_directory_alias(lexical_root)
 
 
 def test_existing_release_cannot_be_replaced(store: ReleaseStore, tmp_path: Path) -> None:

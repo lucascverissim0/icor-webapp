@@ -802,3 +802,20 @@ evidence. Missing status/verify exit 4, exit classification, coherent verificati
 source-neutral parsing remain unchanged. Argparse help remains deferred. No network,
 server, production/customer data, push, merge, deploy, main-branch, or Streamlit action
 occurred; the unrelated `AGENTS.md` edit remains untouched.
+
+Task 7 fix round 3 corrects descriptor-alias containment in `ReleaseStore`. The store
+now compares a resolved candidate against the resolved pinned-root identity while
+retaining the lexical descriptor-alias path for every returned path and filesystem
+operation. A cross-platform regression performs real `stage`, `get`, and `verify`
+operations through an alias whose resolved target differs from its spelling: POSIX uses
+the live alias yielded by `pin_root`, while Windows uses a privilege-independent junction
+witness after replacing the user-facing lexical root. The regression first failed at
+the `.locks` containment boundary, then passed with exact artifact bytes under the
+original pinned target and no entries under the external replacement. Final affected
+verification reported 67 passed and eight explicit Windows symlink-privilege skips;
+the junction witness and earlier substitution tests passed. Scoped Ruff passed.
+Fail-closed unsupported-POSIX behavior, mid-command substitution protection, source-
+neutral parsing, exit classifications, and coherent active verification remain
+unchanged. Argparse help remains deferred. No network, server, production/customer
+data, push, merge, deploy, main-branch, or Streamlit action occurred; the unrelated
+`AGENTS.md` edit remains untouched.
