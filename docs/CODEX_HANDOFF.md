@@ -544,3 +544,18 @@ shared directory setup now uses idempotent creation followed by the existing sym
 directory-type, and containment checks. Fresh focused verification: 15 passed and the
 three expected Windows-privilege symlink skips; Ruff passed. The unrelated `AGENTS.md`
 modification remains untouched.
+
+Task 4 adds an immutable versioned SQLite evidence ledger in
+`src/icor/infrastructure/sqlite_evidence_repository.py`, behind the
+`EvidenceRepository` application protocol. Version 1 migrates new databases and
+rejects corrupt, missing, or newer schema metadata; stores normalized releases,
+observations, vehicles, mappings, published values with ordered inputs, and snapshots;
+uses bound parameters, explicit transactions, foreign keys, WAL/FULL durability, and
+SQLite read-only URI connections. No update/delete API exists. Its real temporary-DB
+tests cover migration safety, immutability, rollback, references, ordered input
+retention, unresolved-input rejection, and deterministic reads. TDD evidence: the new
+test module first failed at collection because the repository module was absent, then
+passed 16/16. Fresh Ruff output was `All checks passed!`; full pytest ran 194 collected
+tests with 187 passed, 3 Windows symlink-privilege skips, and exactly the four documented
+strict XFAILs. The unrelated `AGENTS.md` modification remains untouched. Detailed
+ignored report: `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
