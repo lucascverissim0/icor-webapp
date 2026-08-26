@@ -25,6 +25,7 @@ env/
 # Planner web workspace artifacts
 web/node_modules/
 web/dist/
+web/.eslintcache
 web/playwright-report/
 web/test-results/
 
