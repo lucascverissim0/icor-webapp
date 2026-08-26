@@ -22,6 +22,15 @@ uv sync --locked --all-groups
 
 Do not use the machine's global Python environment for this project.
 
+Install the locked web dependencies with a supported Node release (24.15.0 is the
+current development runtime):
+
+```powershell
+cd web
+npm ci
+cd ..
+```
+
 ## Local secrets
 
 Copy `.streamlit/secrets.example.toml` to `.streamlit/secrets.toml` only when a
@@ -54,6 +63,19 @@ Tests disable network sockets and clear integration credential environment
 variables. They must not overwrite `data/passenger_car_data.xlsx` or canonical
 source data.
 
+Verify the planner contract and frontend:
+
+```powershell
+cd web
+npm run openapi:check
+npm test -- --run
+npm run typecheck
+npm run lint
+npm run build
+npm run e2e
+cd ..
+```
+
 ## Start the app
 
 From the development worktree, run:
@@ -64,6 +86,37 @@ uv run streamlit run ui/app.py
 
 Open `http://localhost:8501` if Streamlit does not open it automatically. Stop the
 server with `Ctrl+C` in its terminal.
+
+## Start the planner web app
+
+The planner uses deterministic fixture records from `data/demo/planner-v1.json`.
+They are clearly labelled as **demonstration data** and are not production forecasts.
+The local workflow requires no production secrets and no customer data.
+
+From the development worktree, validate or start both local-only processes:
+
+```powershell
+uv run python scripts/run_planner_dev.py --check
+uv run python scripts/run_planner_dev.py
+```
+
+Open `http://127.0.0.1:5173/planner` for the planner and
+`http://127.0.0.1:8000/docs` for the FastAPI contract. Stop both processes with
+`Ctrl+C`. If separate terminals are preferable, run the API from the repository root:
+
+```powershell
+uv run uvicorn icor.api.app:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Then run the web client from `web`:
+
+```powershell
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+The planner and the legacy Streamlit app can coexist on their separate ports. No
+production deployment, proprietary fitment integration, or customer-data migration
+is part of this local product slice.
 
 ## Forecast status
 

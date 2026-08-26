@@ -1,7 +1,7 @@
 # ICOR Planner Web App Design
 
 Date: 2026-08-25
-Status: approved architecture; written specification awaiting Lucas's review
+Status: approved on 2026-08-25; implemented as a local demonstration product slice
 
 ## Purpose
 

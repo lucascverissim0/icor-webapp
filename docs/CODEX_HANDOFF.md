@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Project objective
 
@@ -27,7 +27,15 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
 
 ## User decisions and working rules
 
+- This Codex conversation and all of its terminal work are anchored to
+  `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`. Run every project
+  command from that development worktree; do not switch this conversation to
+  `Video_app`, the protected production checkout, or another repository.
 - Preserve advancement across cleared Codex conversations in this file.
+- Lucas requires Codex to optimize for practical productivity and token efficiency on
+  all repository work. `AGENTS.md` now defines this as using the shortest reliable path,
+  reusing durable context and existing artifacts, batching independent work, and keeping
+  output evidence-focused without weakening correctness, security, or verification.
 - Every final response must state whether the conversation context is safe to clear, as required by `AGENTS.md`.
 - Never store secrets or private/customer data here.
 - Run and demonstrate a local app as work progresses.
@@ -47,6 +55,14 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
   begin with the future decision-planning workflow centered on canonical windshield
   configurations/SKUs. Current forecast data may appear only as clearly labelled
   prototype evidence; recreating the existing Streamlit screens is not the product goal.
+- On 2026-08-25 Lucas selected visual Option B, the planner workbench, and authorized
+  creation of a navigable local app that can be adapted while product data is added.
+- On 2026-08-25 Lucas approved the recommended technical architecture: a modular
+  monolith with a Vite/React/TypeScript planner, a FastAPI adapter, and Python
+  domain/application layers over a replaceable read-only demonstration repository.
+  The written specification is at
+  `docs/superpowers/specs/2026-08-25-planner-webapp-design.md`. Lucas subsequently
+  approved the complete specification and authorized implementation.
 
 ## Application map
 
@@ -188,12 +204,12 @@ The clarified product objective changes the recommended product sequence. Before
 
 - A private local visual-companion session is active on port 61376 for the new
   planner design. Its first screen compares three information hierarchies using
-  product-specific content: executive dashboard, planner workbench (recommended),
-  and guided planning flow. The exact session URL contains a private local access
-  key and is intentionally not recorded here. The session files live under ignored
-  `.superpowers/`; `.gitignore` now excludes that directory. Await Lucas's visual
-  selection before advancing the design. The companion server auto-exits after four
-  idle hours; the Streamlit server remains separate on port 8501.
+  product-specific content: executive dashboard, planner workbench, and guided
+  planning flow. Lucas selected the planner workbench (Option B). The exact session
+  URL contains a private local access key and is intentionally not recorded here.
+  The session files live under ignored `.superpowers/`; `.gitignore` excludes that
+  directory. The companion server auto-exits after four idle hours; the Streamlit
+  server remains separate on port 8501.
 - On 2026-08-25 the local app startup failure was reproduced as
   `StreamlitSecretNotFoundError` at `ui/app.py:120`: `st.secrets.get("users", {})`
   forced Streamlit to parse a missing local secrets file before rendering login. The
@@ -230,6 +246,30 @@ The clarified product objective changes the recommended product sequence. Before
 - Lucas approved the foundation specification on 2026-08-25 and clarified that its non-goals are deferrals only: the full product program must review and may replace forecast formulas, identity handling, proprietary-data integration, statistical methods, and machine-learning models. No current algorithm is exempt from evidence-based review.
 - For model-controlled architecture and forecasting evaluation work, current official OpenAI guidance supports GPT-5.6 Sol as the flagship choice and `max` reasoning effort for the hardest quality-first work, with `xhigh` as the comparison setting. The root model of an already-running Codex turn cannot be silently changed by repository code; preserve this recommendation for future model-selectable sessions and explicitly benchmark app-side model choices rather than assuming them.
 - On 2026-08-25 Lucas requested the Codex effort setting be changed from Fast to the recommended level. The installed GPT-5.6-Sol metadata identifies `medium` as its default reasoning level and exposes Fast separately as a speed tier. The machine-level Codex config now contains `model_reasoning_effort = "medium"`; `codex --strict-config --version` accepted the configuration. This applies to new sessions, not retroactively to an already-running turn.
+- The approved planner implementation plan is committed as `296c48c`. The product
+  slice is implemented through `4810036`: typed Python domain/application layers, a
+  replaceable deterministic demonstration repository with eight windshield
+  configurations, FastAPI endpoints and OpenAPI export, a responsive React planner,
+  URL-backed filters/sort/pagination, traceable configuration detail, error/empty/loading
+  states, accessibility checks, and isolated browser/contract/CI gates. Final visual
+  refinements are recorded in `8b4f7ed` and `46bd3b1`.
+- A final visual-QA defect found at 1440px was corrected with a browser regression:
+  the contextual comparison is retained only at widths that can fit useful filter,
+  comparison, and detail columns; 1440px now uses the uncluttered full-detail route.
+- Fresh planner verification on 2026-08-26: Python reported 50 passed plus the four
+  documented strict XFAILs; Ruff and `uv lock --check` passed; pip-audit and npm audit
+  reported no known vulnerabilities; OpenAPI drift check passed; frontend unit tests
+  reported 33 passed; lint, TypeScript/build, and the eight-test Chromium planner suite
+  passed.
+  Final desktop, mobile, and deep-link screenshots were inspected from the live app.
+- The managed launcher starts the local planner at `http://127.0.0.1:5173/planner`
+  and its FastAPI docs at `http://127.0.0.1:8000/docs`; stopping its terminal stops
+  both child processes. Optional port flags are available when those defaults are in use.
+- This product slice remains fixture-only. Proprietary fitment/outcome ingestion,
+  calibrated forecasting and backtesting, authentication/roles, multi-user behavior,
+  deployment, pushing, and merging remain explicitly deferred. The existing strict
+  XFAIL defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` are not silently
+  treated as fixed.
 
 ## Terminal identity
 
@@ -240,4 +280,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The initial deep review, business-objective alignment, and foundation Tasks 1-8 are complete on `development/windshield-demand-platform`. The secret-free startup regression is fixed and verified in the development worktree; production remains untouched on `main` at `1ba1d7c`. A local Streamlit server remains available at `http://localhost:8501`. Lucas has approved applying one year of attrition to a one-year-old cohort, resolving the policy question for `ICOR-030`. The active architectural-design task is a new responsive local web experience centered on the future windshield-configuration/SKU planning workflow; Streamlit is retained only as a temporary behavioral reference, and current forecasts must be labelled as prototype evidence. A private local visual comparison of three planner information hierarchies is active on port 61376 and awaits Lucas's selection. After that selection, compare technical architectures, obtain sectioned design approval, and commit the specification before implementation. The deterministic defects `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs until their TDD remediation batch is implemented.
+The approved local planner product slice is complete on `development/windshield-demand-platform` and can be started for review with `uv run python scripts/run_planner_dev.py`. It uses only clearly labelled deterministic demonstration data and requires no production secret or customer data. Automated Python, frontend, OpenAPI, browser, accessibility, responsive-layout, lock, and dependency-audit gates pass; the final desktop/mobile/detail pixels were inspected. Production remains read-only on `main` at `1ba1d7c`; nothing has been pushed, merged, or deployed. The next product phase requires Lucas to supply or authorize the proprietary fitment/outcome data strategy and calibrated forecasting/backtesting scope. Streamlit remains only a temporary behavioral reference, and `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation batch.
