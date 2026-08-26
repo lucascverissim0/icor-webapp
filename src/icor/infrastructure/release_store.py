@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -168,7 +169,7 @@ class ReleaseStore:
         if not self.root.exists():
             if not create:
                 return None
-            self.root.mkdir(parents=True)
+            self.root.mkdir(parents=True, exist_ok=True)
         if not self.root.is_dir():
             raise ReleaseIntegrityError("release store root is not a directory")
         return self.root.resolve(strict=True)
@@ -255,10 +256,8 @@ class ReleaseStore:
 
     @staticmethod
     def _prepare_directory(path: Path, root: Path, label: str) -> None:
-        if path.exists() or path.is_symlink():
-            ReleaseStore._require_safe_directory(path, root, label)
-            return
-        path.mkdir(parents=True)
+        with suppress(FileExistsError):
+            path.mkdir(parents=True, exist_ok=True)
         ReleaseStore._require_safe_directory(path, root, label)
 
     @staticmethod

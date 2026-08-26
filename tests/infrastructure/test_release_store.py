@@ -1,4 +1,7 @@
+import os
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from hashlib import sha256
@@ -61,6 +64,15 @@ def source_artifact(
     artifact = tmp_path / name
     artifact.write_bytes(contents)
     return artifact
+
+
+def create_symlink_or_skip(link: Path, target: Path, *, is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=is_directory)
+    except OSError as error:
+        if os.name == "nt" and error.winerror == 1314:
+            pytest.skip(f"symlinks require Windows developer privileges: {error}")
+        raise
 
 
 @pytest.fixture
@@ -155,13 +167,11 @@ def test_get_rejects_a_symlinked_source_directory(
     outside_store.stage(source_artifact(tmp_path), release_manifest)
     store.root.mkdir()
     source_link = store.root / release_manifest.source_id
-    try:
-        source_link.symlink_to(
-            outside_store.root / release_manifest.source_id,
-            target_is_directory=True,
-        )
-    except OSError as error:
-        pytest.skip(f"symlinks are unavailable: {error}")
+    create_symlink_or_skip(
+        source_link,
+        outside_store.root / release_manifest.source_id,
+        is_directory=True,
+    )
 
     with pytest.raises(ReleaseIntegrityError, match="symlink"):
         store.get(release_manifest.release_id)
@@ -174,13 +184,11 @@ def test_get_rejects_a_symlinked_release_directory(
     outside_store.stage(source_artifact(tmp_path), release_manifest)
     release_link = store.root / release_manifest.source_id / release_manifest.release_id
     release_link.parent.mkdir(parents=True)
-    try:
-        release_link.symlink_to(
-            outside_store.root / release_manifest.source_id / release_manifest.release_id,
-            target_is_directory=True,
-        )
-    except OSError as error:
-        pytest.skip(f"symlinks are unavailable: {error}")
+    create_symlink_or_skip(
+        release_link,
+        outside_store.root / release_manifest.source_id / release_manifest.release_id,
+        is_directory=True,
+    )
 
     with pytest.raises(ReleaseIntegrityError, match="symlink"):
         store.get(release_manifest.release_id)
@@ -193,10 +201,7 @@ def test_get_rejects_a_symlinked_artifact(
     outside_artifact = tmp_path / "outside.csv"
     outside_artifact.write_bytes(stored.artifact_path.read_bytes())
     stored.artifact_path.unlink()
-    try:
-        stored.artifact_path.symlink_to(outside_artifact)
-    except OSError as error:
-        pytest.skip(f"symlinks are unavailable: {error}")
+    create_symlink_or_skip(stored.artifact_path, outside_artifact)
 
     with pytest.raises(ReleaseIntegrityError, match="symlink"):
         store.get(release_manifest.release_id)
@@ -254,6 +259,43 @@ def test_stage_rejects_a_release_id_locked_by_another_stager(
         store.stage(source_artifact(tmp_path), release_manifest)
 
     assert not (store.root / release_manifest.source_id).exists()
+
+
+def test_concurrent_distinct_releases_create_shared_directories_idempotently(
+    store: ReleaseStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.root.mkdir()
+    locks_root = store.root / ".locks"
+    absent_locks_barrier = threading.Barrier(2)
+    path_exists = Path.exists
+
+    def synchronize_absent_locks(path: Path) -> bool:
+        exists = path_exists(path)
+        if path == locks_root and not exists:
+            absent_locks_barrier.wait(timeout=5)
+        return exists
+
+    monkeypatch.setattr(Path, "exists", synchronize_absent_locks)
+    manifests = (
+        release_manifest_for(b"first", release_id="eea-2024-20260826-a"),
+        release_manifest_for(b"second", release_id="eea-2024-20260826-b"),
+    )
+    artifacts = (
+        source_artifact(tmp_path, b"first", "first.csv"),
+        source_artifact(tmp_path, b"second", "second.csv"),
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(store.stage, artifact, manifest)
+            for artifact, manifest in zip(artifacts, manifests, strict=True)
+        ]
+        stored = [future.result(timeout=10) for future in futures]
+
+    assert {release.release_id for release in stored} == {
+        "eea-2024-20260826-a",
+        "eea-2024-20260826-b",
+    }
 
 
 def test_stage_rejects_manifest_path_that_disagrees_with_source_extension(
