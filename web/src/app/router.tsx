@@ -9,9 +9,14 @@ import {
 
 import { AppShell } from './AppShell'
 import { RouteErrorFallback } from './ErrorBoundary'
+import { OpportunitiesPage } from '../features/opportunities/OpportunitiesPage'
 import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
+import {
+  parseOpportunitySearch,
+  type OpportunityRouteSearch,
+} from '../lib/opportunity-search'
 
 
 function validatePlannerSearch(raw: PlannerRouteSearch): PlannerRouteSearch {
@@ -22,8 +27,33 @@ function validatePlannerSearch(raw: PlannerRouteSearch): PlannerRouteSearch {
   }
 }
 
+function validateOpportunitySearch(raw: OpportunityRouteSearch): OpportunityRouteSearch {
+  const parsed = parseOpportunitySearch(raw as unknown as Record<string, unknown>)
+  return {
+    ...parsed.value,
+    ...(parsed.invalidKeys.length > 0 && { invalidKeys: parsed.invalidKeys }),
+  }
+}
+
+function parseSharedSearch(search: string): Record<string, unknown> {
+  const raw = defaultParseSearch(search) as Record<string, unknown>
+  const market = raw.market === undefined
+    ? undefined
+    : Array.isArray(raw.market) ? raw.market : [raw.market]
+  const horizonValues = raw.horizon === undefined
+    ? undefined
+    : Array.isArray(raw.horizon) ? raw.horizon : [raw.horizon]
+  const horizon = horizonValues?.map((value) =>
+    typeof value === 'number' ? value : Number(value),
+  )
+  return {
+    ...raw,
+    ...(market && { market }),
+    ...(horizon && { horizon }),
+  }
+}
+
 const rootRoute = createRootRoute({
-  validateSearch: validatePlannerSearch,
   component: AppShell,
   errorComponent: RouteErrorFallback,
   notFoundComponent: () => (
@@ -51,6 +81,7 @@ const indexRoute = createRoute({
 export const plannerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/planner',
+  validateSearch: validatePlannerSearch,
   component: PlannerPage,
   errorComponent: RouteErrorFallback,
 })
@@ -58,18 +89,31 @@ export const plannerRoute = createRoute({
 export const configurationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/planner/configurations/$configurationId',
+  validateSearch: validatePlannerSearch,
   component: ConfigurationDetailPage,
   errorComponent: RouteErrorFallback,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, plannerRoute, configurationRoute])
+export const opportunitiesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/opportunities',
+  validateSearch: validateOpportunitySearch,
+  component: OpportunitiesPage,
+  errorComponent: RouteErrorFallback,
+})
+
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  plannerRoute,
+  configurationRoute,
+  opportunitiesRoute,
+])
 
 export function createPlannerRouter(history?: RouterHistory) {
   const plannerRouter = createRouter({
     routeTree,
     defaultPreload: 'intent',
-    parseSearch: (search) =>
-      validatePlannerSearch(defaultParseSearch(search) as PlannerRouteSearch),
+    parseSearch: parseSharedSearch,
     ...(history && { history }),
   })
   if (history) history.subscribe(() => void plannerRouter.load())

@@ -1,6 +1,15 @@
 import { keepPreviousData, QueryClient } from '@tanstack/react-query'
 
 import { ApiProblem } from '../lib/api/client'
+import type { OpportunitiesQuery } from '../lib/api/client'
+
+
+export const queryKeys = {
+  opportunities: (query: OpportunitiesQuery) => ['opportunities', query] as const,
+  opportunityConfigurations: (groupId: string, query: OpportunitiesQuery) =>
+    ['opportunities', groupId, 'configurations', query] as const,
+  coverage: ['production-coverage'] as const,
+}
 
 
 export function createPlannerQueryClient(): QueryClient {

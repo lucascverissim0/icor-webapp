@@ -6,6 +6,12 @@ type FieldError = components['schemas']['FieldError']
 type PlannerOptions = components['schemas']['PlannerOptionsResponse']
 type PlannerPage = components['schemas']['PlannerPageResponse']
 type PlanningConfiguration = components['schemas']['PlanningConfigurationResponse']
+type OpportunityPage = components['schemas']['OpportunityPageResponse']
+type OpportunityDrillDown = components['schemas']['OpportunityDrillDownResponse']
+type OpportunityGroupBy = components['schemas']['OpportunityGroupBy']
+type ProductionCoverage = components['schemas']['ProductionCoverageResponse']
+type ProductionCoverageRequest = components['schemas']['ProductionCoverageRequest']
+type DeleteCoverageResponse = components['schemas']['DeleteCoverageResponse']
 type ApiQuery = NonNullable<
   operations['configurations_api_v1_planner_configurations_get']['parameters']['query']
 >
@@ -20,6 +26,12 @@ export interface PlannerConfigurationsQuery {
   direction?: ApiQuery['direction']
   page?: ApiQuery['page']
   pageSize?: ApiQuery['page_size']
+}
+
+export interface OpportunitiesQuery {
+  groupBy: OpportunityGroupBy
+  markets?: string[]
+  horizons?: number[]
 }
 
 export class ApiProblem extends Error {
@@ -109,9 +121,57 @@ export class PlannerApiClient {
     )
   }
 
-  private async request<T>(path: string): Promise<T> {
+  async opportunities(query: OpportunitiesQuery): Promise<OpportunityPage> {
+    const parameters = opportunityParameters(query)
+    return this.request<OpportunityPage>(`/api/v1/opportunities?${parameters}`)
+  }
+
+  async opportunityConfigurations(
+    groupId: string,
+    query: OpportunitiesQuery,
+  ): Promise<OpportunityDrillDown[]> {
+    const parameters = opportunityParameters(query)
+    return this.request<OpportunityDrillDown[]>(
+      `/api/v1/opportunities/${encodeURIComponent(groupId)}/configurations?${parameters}`,
+    )
+  }
+
+  async coverage(): Promise<ProductionCoverage[]> {
+    return this.request<ProductionCoverage[]>('/api/v1/production-coverage')
+  }
+
+  async createCoverage(payload: ProductionCoverageRequest): Promise<ProductionCoverage> {
+    return this.request<ProductionCoverage>('/api/v1/production-coverage', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async updateCoverage(
+    coverageId: string,
+    payload: ProductionCoverageRequest,
+  ): Promise<ProductionCoverage> {
+    return this.request<ProductionCoverage>(
+      `/api/v1/production-coverage/${encodeURIComponent(coverageId)}`,
+      { method: 'PUT', body: JSON.stringify(payload) },
+    )
+  }
+
+  async deleteCoverage(coverageId: string): Promise<DeleteCoverageResponse> {
+    return this.request<DeleteCoverageResponse>(
+      `/api/v1/production-coverage/${encodeURIComponent(coverageId)}`,
+      { method: 'DELETE' },
+    )
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers = {
+      Accept: 'application/json',
+      ...(init?.body !== undefined && { 'Content-Type': 'application/json' }),
+    }
     const response = await this.fetcher(`${this.baseUrl}${path}`, {
-      headers: { Accept: 'application/json' },
+      ...init,
+      headers,
     })
     if (response.ok) return (await response.json()) as T
 
@@ -138,6 +198,13 @@ export class PlannerApiClient {
       response.status,
     )
   }
+}
+
+function opportunityParameters(query: OpportunitiesQuery): URLSearchParams {
+  const parameters = new URLSearchParams({ group_by: query.groupBy })
+  appendMany(parameters, 'market', query.markets)
+  appendMany(parameters, 'horizon', query.horizons)
+  return parameters
 }
 
 export const plannerApi = new PlannerApiClient()

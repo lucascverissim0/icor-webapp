@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   configurationRoute,
   createPlannerRouter,
+  opportunitiesRoute,
   plannerRoute,
 } from '../src/app/router'
 import { RouteErrorFallback } from '../src/app/ErrorBoundary'
@@ -50,5 +51,20 @@ describe('planner router', () => {
   it('contains planner and detail errors inside the application shell', () => {
     expect(plannerRoute.options.errorComponent).toBe(RouteErrorFallback)
     expect(configurationRoute.options.errorComponent).toBe(RouteErrorFallback)
+    expect(opportunitiesRoute.options.errorComponent).toBe(RouteErrorFallback)
+  })
+
+  it('validates opportunity grouping independently from planner state', async () => {
+    const history = createMemoryHistory({
+      initialEntries: ['/opportunities?groupBy=model_year&market=FR'],
+    })
+    const router = createPlannerRouter(history)
+    await router.load()
+
+    expect(router.state.location.pathname).toBe('/opportunities')
+    expect(router.state.location.search).toMatchObject({
+      groupBy: 'model_year',
+      market: ['FR'],
+    })
   })
 })

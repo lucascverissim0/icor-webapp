@@ -5,12 +5,26 @@ import { useState, type PropsWithChildren } from 'react'
 import { EvidenceBadge } from '../components/EvidenceBadge'
 
 
-function PlannerLink() {
+function NavigationLink({ href, label }: { href: string; label: string }) {
+  const active = globalThis.location?.pathname.startsWith(href) ?? false
   return (
-    <a className="navigation-link navigation-link--active" href="/planner">
+    <a
+      aria-current={active ? 'page' : undefined}
+      className={`navigation-link${active ? ' navigation-link--active' : ''}`}
+      href={href}
+    >
       <span aria-hidden="true" className="navigation-link__marker" />
-      Planner workbench
+      {label}
     </a>
+  )
+}
+
+function PrimaryLinks() {
+  return (
+    <>
+      <NavigationLink href="/planner" label="Planner workbench" />
+      <NavigationLink href="/opportunities" label="Opportunities" />
+    </>
   )
 }
 
@@ -29,7 +43,7 @@ export function AppShell({ children }: PropsWithChildren) {
           <span>ICOR</span>
         </a>
         <nav aria-label="Primary" className="desktop-navigation">
-          <PlannerLink />
+          <PrimaryLinks />
         </nav>
         <p className="rail-caption">Configuration-level planning</p>
       </aside>
@@ -56,7 +70,7 @@ export function AppShell({ children }: PropsWithChildren) {
             Menu
           </button>
           <div hidden={!mobileOpen} id="mobile-navigation-links">
-            <PlannerLink />
+            <PrimaryLinks />
           </div>
         </nav>
 

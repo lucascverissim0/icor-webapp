@@ -150,4 +150,63 @@ describe('PlannerApiClient', () => {
       status: 422,
     })
   })
+
+  it('serializes opportunity filters using the API contract names', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], summary: { base_units: 0, exact_covered_base_units: 0, high_demand_uncovered_base_units: 0 }, strategy_name: 'demand_readiness', strategy_version: '1', integrity_warnings: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await new PlannerApiClient(fetcher).opportunities({
+      groupBy: 'model_year',
+      markets: ['FR'],
+      horizons: [2030],
+    })
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      '/api/v1/opportunities?group_by=model_year&market=FR&horizon=2030',
+    )
+  })
+
+  it('sends explicit fallback coverage as JSON', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ coverage_id: 'coverage-1' }), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    const payload = {
+      match_type: 'vehicle_year_fallback' as const,
+      configuration_id: null,
+      brand: 'Aurora Mobility',
+      model: 'A1 Horizon',
+      model_year: 2025,
+      note: null,
+    }
+
+    await new PlannerApiClient(fetcher).createCoverage(payload)
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/v1/production-coverage')
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    })
+  })
+
+  it('deletes coverage using an encoded canonical id', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ coverage_id: 'coverage/one', deleted: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await new PlannerApiClient(fetcher).deleteCoverage('coverage/one')
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/v1/production-coverage/coverage%2Fone')
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE' })
+  })
 })
