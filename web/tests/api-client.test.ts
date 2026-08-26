@@ -85,4 +85,49 @@ describe('PlannerApiClient', () => {
       correlationId: null,
     })
   })
+
+  it('accepts a contract-valid problem without field errors', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 'not_found',
+          message: 'The requested configuration was not found.',
+          correlation_id: 'missing-configuration',
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const request = new PlannerApiClient(fetcher).configuration('missing')
+
+    await expect(request).rejects.toMatchObject({
+      code: 'not_found',
+      correlationId: 'missing-configuration',
+      fieldErrors: [],
+      status: 404,
+    })
+  })
+
+  it('rejects malformed field error entries instead of trusting them', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 'invalid_request',
+          message: 'The request was invalid.',
+          correlation_id: 'malformed-problem',
+          field_errors: [{ field: 42, message: null }],
+        }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+
+    const request = new PlannerApiClient(fetcher).options()
+
+    await expect(request).rejects.toMatchObject({
+      code: 'invalid_response',
+      correlationId: null,
+      fieldErrors: [],
+      status: 422,
+    })
+  })
 })

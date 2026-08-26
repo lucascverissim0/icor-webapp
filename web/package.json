@@ -4,13 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\" \"*.config.ts\"",
+    "lint": "eslint --cache --cache-strategy content --cache-location .eslintcache \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\" \"*.config.ts\"",
     "test": "vitest",
     "openapi:export": "uv run --project .. python scripts/export-openapi.py",
     "openapi:generate": "npm run openapi:export && openapi-typescript openapi.json -o src/lib/api/schema.ts",

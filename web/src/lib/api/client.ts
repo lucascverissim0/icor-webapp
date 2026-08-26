@@ -44,14 +44,22 @@ export class ApiProblem extends Error {
   }
 }
 
+function isFieldError(value: unknown): value is FieldError {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.field === 'string' && typeof candidate.message === 'string'
+}
+
 function isProblem(value: unknown): value is Problem {
   if (typeof value !== 'object' || value === null) return false
-  const candidate = value as Partial<Problem>
+  const candidate = value as Record<string, unknown>
+  const fieldErrors = candidate.field_errors
   return (
     typeof candidate.code === 'string' &&
     typeof candidate.message === 'string' &&
     typeof candidate.correlation_id === 'string' &&
-    Array.isArray(candidate.field_errors)
+    (fieldErrors === undefined ||
+      (Array.isArray(fieldErrors) && fieldErrors.every(isFieldError)))
   )
 }
 
