@@ -131,8 +131,8 @@ def _build_as_of(value: str) -> datetime:
     return parsed
 
 
-def _release_store(root: Path) -> ReleaseStore:
-    return ReleaseStore(root / "releases")
+def _release_store(root: Path, filesystem: SnapshotFilesystem) -> ReleaseStore:
+    return ReleaseStore(root / "releases", filesystem=filesystem)
 
 
 def _snapshot_payload(manifest: SnapshotManifest, *, state: str) -> dict[str, object]:
@@ -157,9 +157,13 @@ def _reject(code: str, message: str, *, exit_code: int) -> int:
     return exit_code
 
 
-def _stage_release(args: argparse.Namespace, root: Path) -> tuple[int, dict[str, object]]:
+def _stage_release(
+    args: argparse.Namespace,
+    root: Path,
+    filesystem: SnapshotFilesystem,
+) -> tuple[int, dict[str, object]]:
     manifest = load_release_manifest(args.manifest)
-    stored = _release_store(root).stage(args.artifact, manifest)
+    stored = _release_store(root, filesystem).stage(args.artifact, manifest)
     return 0, {
         "accepted_record_count": stored.manifest.accepted_record_count,
         "release_id": stored.release_id,
@@ -172,11 +176,12 @@ def _build_snapshot(
     args: argparse.Namespace,
     root: Path,
     loader_registry: Mapping[str, EvidenceLoader],
+    filesystem: SnapshotFilesystem,
 ) -> tuple[int, dict[str, object]]:
     release_ids = tuple(sorted(args.release))
     if len(set(release_ids)) != len(release_ids):
         raise CommandInputError("release IDs must be unique")
-    store = _release_store(root)
+    store = _release_store(root, filesystem)
     try:
         releases = tuple(store.verify(release_id) for release_id in release_ids)
     except ReleaseIntegrityError as error:
@@ -194,6 +199,7 @@ def _build_snapshot(
         root,
         store,
         RegistryEvidenceLoader(loader_registry),
+        filesystem=filesystem,
     ).build(request)
     if not result.validation_report.can_promote:
         return 3, {
@@ -206,22 +212,32 @@ def _build_snapshot(
     return 0, _snapshot_payload(result.manifest, state="candidate")
 
 
-def _promote(args: argparse.Namespace, root: Path) -> tuple[int, dict[str, object]]:
-    manifest = SnapshotStore(root).promote(args.snapshot)
+def _promote(
+    args: argparse.Namespace,
+    root: Path,
+    filesystem: SnapshotFilesystem,
+) -> tuple[int, dict[str, object]]:
+    manifest = SnapshotStore(root, filesystem=filesystem).promote(args.snapshot)
     payload = _snapshot_payload(manifest, state="promoted")
     payload["active_snapshot_id"] = manifest.snapshot_id
     return 0, payload
 
 
-def _status(root: Path) -> tuple[int, dict[str, object]]:
-    manifest = SnapshotStore(root).active_manifest()
+def _status(
+    root: Path,
+    filesystem: SnapshotFilesystem,
+) -> tuple[int, dict[str, object]]:
+    manifest = SnapshotStore(root, filesystem=filesystem).active_manifest()
     payload = _snapshot_payload(manifest, state="active")
     payload["active_snapshot_id"] = manifest.snapshot_id
     return 0, payload
 
 
-def _verify(root: Path) -> tuple[int, dict[str, object]]:
-    store = SnapshotStore(root)
+def _verify(
+    root: Path,
+    filesystem: SnapshotFilesystem,
+) -> tuple[int, dict[str, object]]:
+    store = SnapshotStore(root, filesystem=filesystem)
     manifest, repository = store.open_active_snapshot()
     payload = _snapshot_payload(manifest, state="verified")
     payload["repository_observation_count"] = len(repository.list_observations())
@@ -242,17 +258,23 @@ def main(
         create_root = args.command in {"stage-release", "build", "promote"}
         if not create_root and not os.path.lexists(root):
             raise SnapshotUnavailableError("no active snapshot is available")
-        with SnapshotFilesystem().pin_root(root, create=create_root) as pinned_root:
+        filesystem = SnapshotFilesystem()
+        with filesystem.pin_root(root, create=create_root) as pinned_root:
             if args.command == "stage-release":
-                code, payload = _stage_release(args, pinned_root)
+                code, payload = _stage_release(args, pinned_root, filesystem)
             elif args.command == "build":
-                code, payload = _build_snapshot(args, pinned_root, registry)
+                code, payload = _build_snapshot(
+                    args,
+                    pinned_root,
+                    registry,
+                    filesystem,
+                )
             elif args.command == "promote":
-                code, payload = _promote(args, pinned_root)
+                code, payload = _promote(args, pinned_root, filesystem)
             elif args.command == "status":
-                code, payload = _status(pinned_root)
+                code, payload = _status(pinned_root, filesystem)
             else:
-                code, payload = _verify(pinned_root)
+                code, payload = _verify(pinned_root, filesystem)
     except UnsupportedParserError:
         return _reject(
             "unsupported_parser",

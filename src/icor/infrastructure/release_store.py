@@ -20,6 +20,7 @@ from icor.evidence.release_manifests import (
     write_release_manifest,
 )
 from icor.evidence.serialization import sha256_file
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem, SnapshotPathError
 
 _IDENTIFIER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 _AT_FDCWD = -100
@@ -48,8 +49,14 @@ class StoredRelease:
 class ReleaseStore:
     """Store source releases once under ``<root>/<source_id>/<release_id>``."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        filesystem: SnapshotFilesystem | None = None,
+    ) -> None:
         self.root = Path(root)
+        self.filesystem = filesystem or SnapshotFilesystem()
 
     def stage(self, source_artifact: Path, manifest: ReleaseManifest) -> StoredRelease:
         """Copy one verified artifact and its manifest into immutable local storage."""
@@ -164,15 +171,17 @@ class ReleaseStore:
             raise ValueError(f"{label} identifier is invalid")
 
     def _store_root(self, *, create: bool) -> Path | None:
-        if self.root.is_symlink():
-            raise ReleaseIntegrityError("release store root must not be a symlink")
-        if not self.root.exists():
-            if not create:
-                return None
-            self.root.mkdir(parents=True, exist_ok=True)
-        if not self.root.is_dir():
-            raise ReleaseIntegrityError("release store root is not a directory")
-        return self.root.resolve(strict=True)
+        if not create and not os.path.lexists(self.root):
+            return None
+        try:
+            self.root = (
+                self.filesystem.prepare_root(self.root)
+                if create
+                else self.filesystem.require_root(self.root)
+            )
+        except SnapshotPathError as error:
+            raise ReleaseIntegrityError("release store root is unsafe") from error
+        return self.root
 
     def _find_release_paths(self, release_id: str, root: Path) -> list[Path]:
         matches: list[Path] = []

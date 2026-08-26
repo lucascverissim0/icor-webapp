@@ -102,8 +102,15 @@ class SnapshotFilesystem:
             directory=True,
             allow_writes=True,
         )
+        operation_root: Path | None = None
         try:
-            yield safe_root
+            operation_root = self._operation_root_for_handle(
+                safe_root,
+                handle,
+                identity,
+            )
+            self._pinned_operation_root = operation_root
+            yield operation_root
             self._assert_stable_path_identity(
                 safe_root,
                 identity,
@@ -119,7 +126,27 @@ class SnapshotFilesystem:
             )
             raise
         finally:
+            if operation_root is not None:
+                self._pinned_operation_root = None
             self._close_stable_handle(handle)
+
+    @staticmethod
+    def _operation_root_for_handle(
+        safe_root: Path,
+        handle: int,
+        identity: tuple[int, ...],
+    ) -> Path:
+        if os.name == "nt":
+            return safe_root
+        for descriptor_root in (Path("/proc/self/fd"), Path("/dev/fd")):
+            candidate = descriptor_root / str(handle)
+            try:
+                metadata = candidate.stat()
+            except OSError:
+                continue
+            if stat.S_ISDIR(metadata.st_mode) and (metadata.st_dev, metadata.st_ino) == identity:
+                return candidate
+        raise SnapshotPathError("platform cannot anchor the evidence root safely")
 
     def prepare_root(self, root: Path) -> Path:
         absolute = self._absolute(root)
@@ -555,10 +582,25 @@ class SnapshotFilesystem:
     def _replace_atomic_file_raw(source: Path, destination: Path) -> None:
         os.replace(source, destination)
 
-    @classmethod
-    def _reject_existing_reparse_components(cls, path: Path) -> None:
-        current = Path(path.anchor)
-        for part in path.parts[1:]:
+    def _reject_existing_reparse_components(self, path: Path) -> None:
+        absolute = self._absolute(path)
+        pinned_root = getattr(self, "_pinned_operation_root", None)
+        if pinned_root is not None:
+            try:
+                relative = absolute.relative_to(self._absolute(pinned_root))
+            except ValueError:
+                pass
+            else:
+                self._reject_reparse_descendants(pinned_root, relative.parts)
+                return
+        self._reject_reparse_descendants(
+            Path(absolute.anchor),
+            absolute.parts[1:],
+        )
+
+    @staticmethod
+    def _reject_reparse_descendants(current: Path, parts: tuple[str, ...]) -> None:
+        for part in parts:
             current /= part
             if not os.path.lexists(current):
                 continue

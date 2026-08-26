@@ -779,3 +779,26 @@ snapshot-build, and snapshot-store suites; the real junction test passed. Scoped
 and `git diff --check` passed. Argparse help behavior remains deferred as requested. No
 network, server, production/customer data, push, merge, deploy, main-branch, or Streamlit
 action occurred; the unrelated `AGENTS.md` edit remains untouched.
+
+Task 7 fix round 2 closes the remaining POSIX lexical-root race. `pin_root` now validates
+the held POSIX directory descriptor through `/proc/self/fd/<fd>` or `/dev/fd/<fd>`, yields
+that descriptor-relative alias as the operation root, and fails closed when neither
+supported alias resolves to the held directory's exact device/inode. The same
+`SnapshotFilesystem` instance and anchored operation root are injected into
+`ReleaseStore`, `SnapshotBuilder`, and `SnapshotStore`; the filesystem permits the one
+live descriptor alias while retaining no-follow/reparse checks for every descendant.
+Windows continues yielding the lexical root while its handle denies delete sharing. A
+deterministic POSIX-semantics test allows lexical-root rename after pin acquisition,
+replaces it with a redirect immediately before staging, and reproduced the old external
+`releases/` write. It now stages exact bytes only beneath the original pinned directory,
+leaves the replacement target empty, and returns typed `invalid_root` when the final
+lexical identity check detects substitution. Focused GREEN was 1 passed; the full
+affected integration/release-store/snapshot-build/snapshot-store set reported 66 passed
+and eight explicit Windows symlink-privilege skips. The real Windows junction tests
+passed, scoped Ruff passed, and `git diff --check` passed with only line-ending warnings.
+WSL is not installed, so direct Linux execution was unavailable; deterministic simulated
+POSIX rename semantics plus fail-closed descriptor-alias selection are the retained
+evidence. Missing status/verify exit 4, exit classification, coherent verification, and
+source-neutral parsing remain unchanged. Argparse help remains deferred. No network,
+server, production/customer data, push, merge, deploy, main-branch, or Streamlit action
+occurred; the unrelated `AGENTS.md` edit remains untouched.

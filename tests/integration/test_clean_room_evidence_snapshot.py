@@ -25,6 +25,7 @@ from icor.domain.evidence import (
 )
 from icor.evidence.serialization import canonical_json_bytes
 from icor.infrastructure.release_store import StoredRelease
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem
 from icor.infrastructure.snapshot_store import SnapshotStore
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
@@ -539,3 +540,101 @@ def test_verify_reports_one_snapshot_when_promotion_changes_active_pointer(
     assert payload["observation_count"] == 2
     assert payload["repository_observation_count"] == 2
     assert SnapshotStore(root).active_manifest().snapshot_id == second["snapshot_id"]
+
+
+class PosixRenameSemanticsFilesystem(SnapshotFilesystem):
+    """Permit root rename and supply a deterministic descriptor-alias equivalent."""
+
+    _ROOT_HANDLE = -7001
+
+    def __init__(self, operation_root: Path) -> None:
+        self.operation_root = operation_root
+
+    def _open_stable_path(
+        self,
+        path: Path,
+        *,
+        directory: bool,
+        allow_writes: bool = False,
+    ) -> tuple[int, tuple[int, ...]]:
+        if directory and allow_writes:
+            metadata = path.stat()
+            return self._ROOT_HANDLE, (metadata.st_dev, metadata.st_ino)
+        return super()._open_stable_path(
+            path,
+            directory=directory,
+            allow_writes=allow_writes,
+        )
+
+    def _operation_root_for_handle(
+        self,
+        safe_root: Path,
+        handle: int,
+        identity: tuple[int, ...],
+    ) -> Path:
+        del safe_root, handle, identity
+        return self.operation_root
+
+    @staticmethod
+    def _close_stable_handle(handle: int) -> None:
+        if handle != PosixRenameSemanticsFilesystem._ROOT_HANDLE:
+            SnapshotFilesystem._close_stable_handle(handle)
+
+
+def _create_directory_redirect(link: Path, target: Path) -> None:
+    if os.name != "nt":
+        link.symlink_to(target, target_is_directory=True)
+        return
+    creation = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert creation.returncode == 0, creation.stderr or creation.stdout
+
+
+def _remove_directory_redirect(link: Path) -> None:
+    if os.name == "nt":
+        os.rmdir(link)
+    else:
+        link.unlink()
+
+
+def test_posix_root_substitution_uses_pinned_operation_root_without_external_write(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "evidence"
+    pinned_root = tmp_path / "pinned-evidence"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    filesystem = PosixRenameSemanticsFilesystem(pinned_root)
+    monkeypatch.setattr(cli, "SnapshotFilesystem", lambda: filesystem)
+    original_stage = cli._stage_release
+
+    def substitute_before_stage(*args: Any) -> tuple[int, dict[str, object]]:
+        root.rename(pinned_root)
+        _create_directory_redirect(root, outside)
+        return original_stage(*args)
+
+    monkeypatch.setattr(cli, "_stage_release", substitute_before_stage)
+    try:
+        code, payload, error = _stage(capsys, root)
+    finally:
+        if os.path.lexists(root):
+            _remove_directory_redirect(root)
+
+    assert code == 2
+    assert payload == {"error": {"code": "invalid_root"}, "state": "rejected"}
+    assert error == "Evidence root must be contained in the workspace.\n"
+    assert list(outside.iterdir()) == []
+    assert (
+        pinned_root
+        / "releases"
+        / "sample-registration"
+        / RELEASE_ID
+        / "artifact.csv"
+    ).read_bytes() == SAMPLE_ARTIFACT.read_bytes()
