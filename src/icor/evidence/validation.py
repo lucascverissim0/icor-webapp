@@ -7,11 +7,14 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
+from re import compile
 
 from icor.domain.snapshots import SnapshotManifest
 from icor.evidence.serialization import sha256_file
 from icor.infrastructure.release_store import StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
+
+_SAFE_RECORD_ID = compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 
 
 class Severity(StrEnum):
@@ -130,6 +133,17 @@ class SnapshotValidator:
                                 release_id,
                             )
                         )
+                for row in connection.execute(
+                    "SELECT DISTINCT release_id FROM observation ORDER BY release_id"
+                ):
+                    if row["release_id"] not in manifest.release_ids:
+                        findings.append(
+                            _error(
+                                "snapshot.release_unmanifested",
+                                "Snapshot omits a release used by observations.",
+                                row["release_id"],
+                            )
+                        )
                 observation_count = _count(connection, "observation")
                 if observation_count != manifest.observation_count:
                     findings.append(
@@ -159,8 +173,9 @@ def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding
     for row in connection.execute(
         """SELECT published_value_input.value_id, published_value_input.observation_id
         FROM published_value_input
+        LEFT JOIN published_value ON published_value.value_id = published_value_input.value_id
         LEFT JOIN observation ON observation.observation_id = published_value_input.observation_id
-        WHERE observation.observation_id IS NULL"""
+        WHERE published_value.value_id IS NULL OR observation.observation_id IS NULL"""
     ):
         findings.append(
             _error(
@@ -190,6 +205,14 @@ def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding
                     "snapshot.interval_invalid", "Published interval is invalid.", row["value_id"]
                 )
             )
+        elif any(interval < 0 for interval in intervals):
+            findings.append(
+                _error(
+                    "snapshot.interval_negative",
+                    "Published interval must not be negative.",
+                    row["value_id"],
+                )
+            )
         elif not intervals[0] <= intervals[1] <= intervals[2]:
             findings.append(
                 _error(
@@ -197,8 +220,13 @@ def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding
                 )
             )
     for row in connection.execute(
-        """SELECT value_id FROM published_value
-        WHERE mapping_status IN ('ambiguous', 'rejected', 'unresolved')"""
+        """SELECT DISTINCT published_value.value_id FROM published_value
+        LEFT JOIN published_value_input ON published_value_input.value_id = published_value.value_id
+        LEFT JOIN observation ON observation.observation_id = published_value_input.observation_id
+        LEFT JOIN identity_mapping ON identity_mapping.observation_id = observation.observation_id
+        WHERE published_value.mapping_status IN ('ambiguous', 'rejected', 'unresolved')
+        OR observation.mapping_status IN ('ambiguous', 'rejected', 'unresolved')
+        OR identity_mapping.status IN ('ambiguous', 'rejected', 'unresolved')"""
     ):
         findings.append(
             _error(
@@ -238,8 +266,14 @@ def _count(connection: sqlite3.Connection, table: str) -> int:
     return int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
 
-def _error(code: str, message: str, record_id: str | None = None) -> ValidationFinding:
-    return ValidationFinding(code, Severity.ERROR, message, record_id)
+def _error(code: str, message: str, record_id: object = None) -> ValidationFinding:
+    return ValidationFinding(code, Severity.ERROR, message, _safe_record_id(record_id))
+
+
+def _safe_record_id(value: object) -> str | None:
+    if type(value) is str and _SAFE_RECORD_ID.fullmatch(value) is not None:
+        return value
+    return None
 
 
 def _finding_key(finding: ValidationFinding) -> tuple[Severity, str, str]:

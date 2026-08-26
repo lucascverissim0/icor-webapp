@@ -646,3 +646,16 @@ VACUUM, and close candidate SQLite files before hashing so this file-hash valida
 does not depend on a WAL sidecar. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-5-report.md`.
 Task 5 is committed with `feat: enforce evidence snapshot quality gates`.
+
+Task 5 fix round 1 hardens the release/snapshot gates. Ordered P10/P50/P90 intervals
+now reject negative bounds; orphan inputs check both the observation and published-value
+parent; manifest release membership is reconciled against releases actually used by
+observations while unused stored releases remain allowed; and publication validation
+joins inputs through observations and identity mappings so forged published statuses
+cannot hide unresolved links. Database-derived record IDs are sanitized to the domain
+identifier grammar before findings are created, preventing BLOB/mixed-type sort crashes
+and raw-ID leakage. TDD RED reported the five expected missing invariant failures;
+focused GREEN reported 23 passed and Ruff passed. A linked-observation mutation check
+failed when its mapping-status join was removed and passed after restoration. The simultaneous checksum/byte-size
+mismatch behavior is deliberately unchanged for the deferred Minor. Detailed ignored
+report: `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-5-report.md`.

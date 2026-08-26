@@ -12,6 +12,7 @@ import pytest
 from icor.domain.evidence import (
     CanonicalVehicle,
     EvidenceConfidence,
+    IdentityMapping,
     MappingStatus,
     Measure,
     Observation,
@@ -234,7 +235,7 @@ def _snapshot(repository: SQLiteEvidenceRepository, **changes: object) -> Snapsh
 
 
 def _corrupt(
-    repository: SQLiteEvidenceRepository, statement: str, parameters: tuple[str, ...]
+    repository: SQLiteEvidenceRepository, statement: str, parameters: tuple[object, ...]
 ) -> None:
     with sqlite3.connect(repository.path) as connection:
         connection.execute("PRAGMA foreign_keys = OFF")
@@ -274,6 +275,40 @@ def test_snapshot_rejects_unordered_intervals(
     report = SnapshotValidator().validate(repository, manifest)
 
     assert "snapshot.interval_order" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_rejects_negative_interval_bounds(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        "UPDATE published_value SET p10 = ?, p50 = ?, p90 = ? WHERE value_id = ?",
+        ("-20", "-10", "-5", "published-eea-eu-2024-1"),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.interval_negative" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_rejects_inputs_with_missing_published_value(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        "DELETE FROM published_value WHERE value_id = ?",
+        ("published-eea-eu-2024-1",),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.orphan_input" in {finding.code for finding in report.findings}
 
 
 @pytest.mark.parametrize(
@@ -340,6 +375,43 @@ def test_snapshot_rejects_absent_releases(
     assert "snapshot.release_missing" in {finding.code for finding in report.findings}
 
 
+def test_snapshot_rejects_release_used_by_observations_but_absent_from_manifest(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    release, _, observation, _ = evidence_records
+    _seed(repository, evidence_records)
+    extra_release = replace(release, release_id="eea-2023-20260826")
+    repository.add_release(extra_release)
+    repository.add_observations(
+        (
+            replace(
+                observation,
+                observation_id="observation-eea-eu-2023-1",
+                original_row_locator="sheet1:3",
+                release_id=extra_release.release_id,
+            ),
+        )
+    )
+
+    report = SnapshotValidator().validate(repository, _snapshot(repository, observation_count=2))
+
+    assert "snapshot.release_unmanifested" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_allows_unused_stored_release(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    release, _, _, _ = evidence_records
+    _seed(repository, evidence_records)
+    repository.add_release(replace(release, release_id="eea-2023-20260826"))
+
+    report = SnapshotValidator().validate(repository, _snapshot(repository))
+
+    assert "snapshot.release_unmanifested" not in {finding.code for finding in report.findings}
+
+
 def test_snapshot_rejects_database_hash_mismatch(
     repository: SQLiteEvidenceRepository,
     evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
@@ -354,6 +426,72 @@ def test_snapshot_rejects_database_hash_mismatch(
         finding for finding in report.findings if finding.code == "snapshot.database_hash_mismatch"
     )
     assert finding.record_id is None
+
+
+def test_snapshot_rejects_unresolved_linked_identity_mapping(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _, _, observation, _ = evidence_records
+    _seed(repository, evidence_records)
+    repository.add_mapping(
+        IdentityMapping(
+            mapping_id="mapping-eea-eu-2024-unresolved",
+            observation_id=observation.observation_id,
+            canonical_vehicle_id=None,
+            status=MappingStatus.UNRESOLVED,
+            reason="requires review",
+            reviewed_at=datetime(2026, 8, 26, 10, 0, tzinfo=UTC),
+        )
+    )
+
+    report = SnapshotValidator().validate(repository, _snapshot(repository))
+
+    assert "snapshot.unresolved_publication" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_rejects_unresolved_linked_observation(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        "UPDATE observation SET mapping_status = ? WHERE observation_id = ?",
+        ("unresolved", "observation-eea-eu-2024-1"),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.unresolved_publication" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_sanitizes_mixed_type_orphan_identifiers_deterministically(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        """INSERT INTO published_value_input (value_id, observation_id, input_position)
+        VALUES (?, ?, ?)""",
+        (b"raw value", "missing-observation-a", 2),
+    )
+    _corrupt(
+        repository,
+        """INSERT INTO published_value_input (value_id, observation_id, input_position)
+        VALUES (?, ?, ?)""",
+        ("raw value", "missing-observation-b", 3),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    orphan_findings = [
+        finding for finding in report.findings if finding.code == "snapshot.orphan_input"
+    ]
+    assert [finding.record_id for finding in orphan_findings] == [None, None]
 
 
 def test_snapshot_clean_report_can_promote(
