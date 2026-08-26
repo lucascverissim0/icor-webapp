@@ -63,6 +63,16 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
   The written specification is at
   `docs/superpowers/specs/2026-08-25-planner-webapp-design.md`. Lucas subsequently
   approved the complete specification and authorized implementation.
+- On 2026-08-26 Lucas approved the opportunity-ranking design: a new page will rank
+  brands, models, and model years by forecast windshield replacements and separately
+  apply a moderate production-readiness advantage. Raw demand remains unchanged.
+  Exact configuration/SKU production matches are preferred, with an explicitly
+  lower-confidence brand/model/model-year fallback when exact identity is unknown.
+- Production coverage will use shared backend persistence, initially local SQLite.
+  The initial explainable score allocates 80 points to relative demand and 20 points
+  to readiness; exact matches receive full readiness weight and broad fallbacks half.
+  The ranking strategy boundary must allow a later cost-basis strategy without
+  migrating coverage records.
 
 ## Application map
 
@@ -283,3 +293,13 @@ The clarified product objective changes the recommended product sequence. Before
 ## Current checkpoint
 
 The approved local planner product slice is complete on `development/windshield-demand-platform` and is live for review at `http://127.0.0.1:5300/planner`. It uses only clearly labelled deterministic demonstration data and requires no production secret or customer data. Automated Python, frontend, OpenAPI, browser, accessibility, responsive-layout, lock, and dependency-audit gates pass; the final desktop/mobile/detail pixels were inspected. Production remains read-only on `main` at `1ba1d7c`; nothing has been pushed, merged, or deployed. The next product phase requires Lucas to supply or authorize the proprietary fitment/outcome data strategy and calibrated forecasting/backtesting scope. Streamlit remains only a temporary behavioral reference, and `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation batch.
+
+The opportunity-ranking and production-coverage design was approved in conversation
+on 2026-08-26 and written to
+`docs/superpowers/specs/2026-08-26-opportunity-ranking-production-coverage-design.md`.
+It adds model-year demonstration demand, auditable brand/model/model-year opportunity
+aggregation, exact-or-fallback coverage CRUD in local SQLite, and a replaceable
+ranking strategy that can later support cost evidence. The written specification is
+awaiting Lucas's review before an implementation plan may be created. No application
+code was changed in this design phase. A concurrent uncommitted `AGENTS.md` change
+belongs to another session and must remain untouched.
