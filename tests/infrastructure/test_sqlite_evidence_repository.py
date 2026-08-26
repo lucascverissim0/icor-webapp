@@ -574,6 +574,24 @@ def test_schema_normalization_preserves_escaped_string_literal_content() -> None
     )
 
 
+def test_schema_normalization_ignores_whitespace_around_punctuation() -> None:
+    formatted = "CREATE TABLE t (x TEXT)"
+    compact = "create table t(x text)"
+
+    assert SQLiteEvidenceRepository._normalize_schema_sql(formatted) == (
+        SQLiteEvidenceRepository._normalize_schema_sql(compact)
+    )
+
+
+def test_schema_normalization_preserves_meaningful_token_changes() -> None:
+    text_column = "CREATE TABLE t (x TEXT)"
+    integer_column = "CREATE TABLE t (x INTEGER)"
+
+    assert SQLiteEvidenceRepository._normalize_schema_sql(text_column) != (
+        SQLiteEvidenceRepository._normalize_schema_sql(integer_column)
+    )
+
+
 def test_failed_migration_leaves_no_version_table(tmp_path: Path) -> None:
     class FailingMigrationRepository(SQLiteEvidenceRepository):
         def _migration_statements(self) -> tuple[str, ...]:

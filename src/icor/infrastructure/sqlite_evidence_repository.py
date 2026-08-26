@@ -329,29 +329,42 @@ class SQLiteEvidenceRepository:
 
     @staticmethod
     def _normalize_schema_sql(statement: str) -> str:
-        normalized: list[str] = []
+        tokens: list[str] = []
         index = 0
-        in_string = False
         while index < len(statement):
             character = statement[index]
-            if in_string:
-                normalized.append(character)
-                if character == "'":
-                    if index + 1 < len(statement) and statement[index + 1] == "'":
-                        normalized.append("'")
+            if character.isspace():
+                index += 1
+                continue
+            if character in {"'", '"', "`"}:
+                quote = character
+                start = index
+                index += 1
+                while index < len(statement):
+                    if statement[index] != quote:
                         index += 1
-                    else:
-                        in_string = False
-            elif character == "'":
-                normalized.append(character)
-                in_string = True
-            elif character.isspace():
-                if normalized and normalized[-1] != " ":
-                    normalized.append(" ")
-            else:
-                normalized.append(character.lower())
+                        continue
+                    if index + 1 < len(statement) and statement[index + 1] == quote:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                tokens.append(statement[start:index])
+                continue
+            if character.isalnum() or character in {"_", "$"}:
+                start = index
+                index += 1
+                while index < len(statement) and (
+                    statement[index].isalnum() or statement[index] in {"_", "$"}
+                ):
+                    index += 1
+                tokens.append(statement[start:index].lower())
+                continue
+            tokens.append(character.lower())
             index += 1
-        return "".join(normalized).strip().removesuffix(";")
+        if tokens and tokens[-1] == ";":
+            tokens.pop()
+        return " ".join(tokens)
 
     def _insert_release(self, connection: sqlite3.Connection, release: ReleaseManifest) -> None:
         connection.execute(

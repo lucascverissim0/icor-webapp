@@ -601,3 +601,16 @@ passed. Fresh focused verification: 32 passed; Ruff passed. The module-wide E501
 suppression remains intentionally deferred, and the unrelated `AGENTS.md` modification
 remains untouched. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
+
+Task 4 fix round 4 makes schema fingerprints insensitive to optional whitespace around
+SQL punctuation without weakening their semantic checks. `_normalize_schema_sql` now
+extracts lexical tokens, lowercases unquoted tokens, and copies quoted tokens verbatim,
+including doubled-quote escapes. Regressions cover equivalent `t (x TEXT)`/`t(x text)`
+formatting, meaningful type-token changes, and escaped literal changes. The exact
+punctuation regression first failed with `create table t (x text)` versus
+`create table t(x text)`, then passed after the tokenizer change. Fresh verification:
+`uv run pytest tests/infrastructure/test_sqlite_evidence_repository.py -v` reported
+38 passed, and `uv run ruff check src tests` reported `All checks passed!`. The
+deferred module-wide E501 suppression and unrelated `AGENTS.md` modification remain
+untouched. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
