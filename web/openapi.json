@@ -28,6 +28,43 @@
         "title": "ConfidenceResponse",
         "type": "object"
       },
+      "CoverageMatchType": {
+        "enum": [
+          "exact_configuration",
+          "vehicle_year_fallback"
+        ],
+        "title": "CoverageMatchType",
+        "type": "string"
+      },
+      "CoverageStatus": {
+        "enum": [
+          "exact_covered",
+          "fallback_only",
+          "mixed",
+          "uncovered"
+        ],
+        "title": "CoverageStatus",
+        "type": "string"
+      },
+      "DeleteCoverageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "coverage_id": {
+            "title": "Coverage Id",
+            "type": "string"
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "coverage_id",
+          "deleted"
+        ],
+        "title": "DeleteCoverageResponse",
+        "type": "object"
+      },
       "DemandRangeResponse": {
         "additionalProperties": false,
         "properties": {
@@ -171,6 +208,282 @@
           "data_version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "ModelYearDemandResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_id": {
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "demand": {
+            "$ref": "#/components/schemas/DemandRangeResponse"
+          },
+          "evidence_status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          },
+          "forecast_horizon": {
+            "title": "Forecast Horizon",
+            "type": "integer"
+          },
+          "model_year": {
+            "title": "Model Year",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummaryResponse"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "model_year",
+          "forecast_horizon",
+          "demand",
+          "evidence_status",
+          "data_version",
+          "sources"
+        ],
+        "title": "ModelYearDemandResponse",
+        "type": "object"
+      },
+      "OpportunityDrillDownResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "$ref": "#/components/schemas/PlanningConfigurationResponse"
+          },
+          "coverage_status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          },
+          "model_year_demand": {
+            "$ref": "#/components/schemas/ModelYearDemandResponse"
+          }
+        },
+        "required": [
+          "configuration",
+          "model_year_demand",
+          "coverage_status"
+        ],
+        "title": "OpportunityDrillDownResponse",
+        "type": "object"
+      },
+      "OpportunityGroupBy": {
+        "enum": [
+          "brand",
+          "model",
+          "model_year"
+        ],
+        "title": "OpportunityGroupBy",
+        "type": "string"
+      },
+      "OpportunityPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "integrity_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Integrity Warnings",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpportunityRowResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "strategy_name": {
+            "title": "Strategy Name",
+            "type": "string"
+          },
+          "strategy_version": {
+            "title": "Strategy Version",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/OpportunitySummaryResponse"
+          }
+        },
+        "required": [
+          "items",
+          "summary",
+          "strategy_name",
+          "strategy_version",
+          "integrity_warnings"
+        ],
+        "title": "OpportunityPageResponse",
+        "type": "object"
+      },
+      "OpportunityRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "contributing_configuration_count": {
+            "title": "Contributing Configuration Count",
+            "type": "integer"
+          },
+          "coverage_status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          },
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "demand": {
+            "$ref": "#/components/schemas/DemandRangeResponse"
+          },
+          "evidence_status": {
+            "$ref": "#/components/schemas/EvidenceStatus"
+          },
+          "exact_covered_base_units": {
+            "title": "Exact Covered Base Units",
+            "type": "integer"
+          },
+          "fallback_covered_base_units": {
+            "title": "Fallback Covered Base Units",
+            "type": "integer"
+          },
+          "group_by": {
+            "title": "Group By",
+            "type": "string"
+          },
+          "group_id": {
+            "title": "Group Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "model_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Year"
+          },
+          "score": {
+            "$ref": "#/components/schemas/OpportunityScoreResponse"
+          },
+          "uncovered_base_units": {
+            "title": "Uncovered Base Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "group_id",
+          "group_by",
+          "brand",
+          "model",
+          "model_year",
+          "demand",
+          "contributing_configuration_count",
+          "exact_covered_base_units",
+          "fallback_covered_base_units",
+          "uncovered_base_units",
+          "coverage_status",
+          "score",
+          "evidence_status",
+          "data_version"
+        ],
+        "title": "OpportunityRowResponse",
+        "type": "object"
+      },
+      "OpportunityScoreResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "demand_percentile": {
+            "title": "Demand Percentile",
+            "type": "number"
+          },
+          "demand_points": {
+            "title": "Demand Points",
+            "type": "number"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "readiness_points": {
+            "title": "Readiness Points",
+            "type": "number"
+          },
+          "readiness_ratio": {
+            "title": "Readiness Ratio",
+            "type": "number"
+          },
+          "strategy_name": {
+            "title": "Strategy Name",
+            "type": "string"
+          },
+          "strategy_version": {
+            "title": "Strategy Version",
+            "type": "string"
+          },
+          "total_points": {
+            "title": "Total Points",
+            "type": "number"
+          }
+        },
+        "required": [
+          "demand_percentile",
+          "demand_points",
+          "readiness_ratio",
+          "readiness_points",
+          "total_points",
+          "strategy_name",
+          "strategy_version",
+          "explanation"
+        ],
+        "title": "OpportunityScoreResponse",
+        "type": "object"
+      },
+      "OpportunitySummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_units": {
+            "title": "Base Units",
+            "type": "integer"
+          },
+          "exact_covered_base_units": {
+            "title": "Exact Covered Base Units",
+            "type": "integer"
+          },
+          "high_demand_uncovered_base_units": {
+            "title": "High Demand Uncovered Base Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "base_units",
+          "exact_covered_base_units",
+          "high_demand_uncovered_base_units"
+        ],
+        "title": "OpportunitySummaryResponse",
         "type": "object"
       },
       "PlannerOptionsResponse": {
@@ -478,6 +791,153 @@
         "title": "ProblemResponse",
         "type": "object"
       },
+      "ProductionCoverageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand"
+          },
+          "configuration_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Id"
+          },
+          "match_type": {
+            "$ref": "#/components/schemas/CoverageMatchType"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "model_year": {
+            "title": "Model Year",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "match_type",
+          "configuration_id",
+          "brand",
+          "model",
+          "model_year"
+        ],
+        "title": "ProductionCoverageRequest",
+        "type": "object"
+      },
+      "ProductionCoverageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "configuration_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration Id"
+          },
+          "coverage_id": {
+            "title": "Coverage Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "match_type": {
+            "$ref": "#/components/schemas/CoverageMatchType"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_year": {
+            "title": "Model Year",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coverage_id",
+          "match_type",
+          "configuration_id",
+          "brand",
+          "model",
+          "model_year",
+          "sku",
+          "note",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProductionCoverageResponse",
+        "type": "object"
+      },
       "ScenarioResponse": {
         "additionalProperties": false,
         "properties": {
@@ -577,6 +1037,213 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/opportunities": {
+      "get": {
+        "operationId": "opportunities_api_v1_opportunities_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OpportunityGroupBy",
+              "default": "brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpportunityPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Opportunities"
+      }
+    },
+    "/api/v1/opportunities/{group_id}/configurations": {
+      "get": {
+        "operationId": "opportunity_configurations_api_v1_opportunities__group_id__configurations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OpportunityGroupBy",
+              "default": "brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OpportunityDrillDownResponse"
+                  },
+                  "title": "Response Opportunity Configurations Api V1 Opportunities  Group Id  Configurations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Opportunity Configurations"
       }
     },
     "/api/v1/planner/configurations": {
@@ -850,6 +1517,250 @@
           }
         },
         "summary": "Planner Options"
+      }
+    },
+    "/api/v1/production-coverage": {
+      "get": {
+        "operationId": "production_coverage_api_v1_production_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductionCoverageResponse"
+                  },
+                  "title": "Response Production Coverage Api V1 Production Coverage Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Production Coverage"
+      },
+      "post": {
+        "operationId": "create_production_coverage_api_v1_production_coverage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionCoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Create Production Coverage"
+      }
+    },
+    "/api/v1/production-coverage/{coverage_id}": {
+      "delete": {
+        "operationId": "delete_production_coverage_api_v1_production_coverage__coverage_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coverage_id",
+            "required": true,
+            "schema": {
+              "title": "Coverage Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteCoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Delete Production Coverage"
+      },
+      "put": {
+        "operationId": "update_production_coverage_api_v1_production_coverage__coverage_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coverage_id",
+            "required": true,
+            "schema": {
+              "title": "Coverage Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductionCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionCoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Update Production Coverage"
       }
     }
   }

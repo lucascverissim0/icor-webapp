@@ -2,8 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from icor.domain.opportunities import CoverageMatchType, CoverageStatus
 from icor.domain.planner import ConfidenceLevel, EvidenceStatus
 
 
@@ -110,3 +111,92 @@ class PlannerPageResponse(ApiModel):
     page_size: int
     pages: int
     summary: PlannerSummaryResponse
+
+
+class ModelYearDemandResponse(ApiModel):
+    configuration_id: str
+    model_year: int
+    forecast_horizon: int
+    demand: DemandRangeResponse
+    evidence_status: EvidenceStatus
+    data_version: str
+    sources: tuple[SourceSummaryResponse, ...]
+
+
+class ProductionCoverageRequest(ApiModel):
+    match_type: CoverageMatchType
+    configuration_id: str | None
+    brand: str | None
+    model: str | None
+    model_year: int
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ProductionCoverageResponse(ApiModel):
+    coverage_id: str
+    match_type: CoverageMatchType
+    configuration_id: str | None
+    brand: str
+    model: str
+    model_year: int
+    sku: str | None
+    note: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class OpportunityScoreResponse(ApiModel):
+    demand_percentile: float
+    demand_points: float
+    readiness_ratio: float
+    readiness_points: float
+    total_points: float
+    strategy_name: str
+    strategy_version: str
+    explanation: str
+
+    @field_serializer("total_points")
+    def serialize_total_points(self, value: float) -> float:
+        return round(value, 1)
+
+
+class OpportunityRowResponse(ApiModel):
+    group_id: str
+    group_by: str
+    brand: str
+    model: str | None
+    model_year: int | None
+    demand: DemandRangeResponse
+    contributing_configuration_count: int
+    exact_covered_base_units: int
+    fallback_covered_base_units: int
+    uncovered_base_units: int
+    coverage_status: CoverageStatus
+    score: OpportunityScoreResponse
+    evidence_status: EvidenceStatus
+    data_version: str
+
+
+class OpportunitySummaryResponse(ApiModel):
+    base_units: int
+    exact_covered_base_units: int
+    high_demand_uncovered_base_units: int
+
+
+class OpportunityPageResponse(ApiModel):
+    items: tuple[OpportunityRowResponse, ...]
+    summary: OpportunitySummaryResponse
+    strategy_name: str
+    strategy_version: str
+    integrity_warnings: tuple[str, ...]
+
+
+class OpportunityDrillDownResponse(ApiModel):
+    configuration: PlanningConfigurationResponse
+    model_year_demand: ModelYearDemandResponse
+    coverage_status: CoverageStatus
+
+
+class DeleteCoverageResponse(ApiModel):
+    coverage_id: str
+    deleted: bool

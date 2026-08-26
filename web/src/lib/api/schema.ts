@@ -21,6 +21,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/opportunities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opportunities */
+        get: operations["opportunities_api_v1_opportunities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opportunities/{group_id}/configurations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opportunity Configurations */
+        get: operations["opportunity_configurations_api_v1_opportunities__group_id__configurations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/planner/configurations": {
         parameters: {
             query?: never;
@@ -72,6 +106,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/production-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Production Coverage */
+        get: operations["production_coverage_api_v1_production_coverage_get"];
+        put?: never;
+        /** Create Production Coverage */
+        post: operations["create_production_coverage_api_v1_production_coverage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/production-coverage/{coverage_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Production Coverage */
+        put: operations["update_production_coverage_api_v1_production_coverage__coverage_id__put"];
+        post?: never;
+        /** Delete Production Coverage */
+        delete: operations["delete_production_coverage_api_v1_production_coverage__coverage_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -86,6 +156,23 @@ export interface components {
             level: components["schemas"]["ConfidenceLevel"];
             /** Reason */
             reason: string;
+        };
+        /**
+         * CoverageMatchType
+         * @enum {string}
+         */
+        CoverageMatchType: "exact_configuration" | "vehicle_year_fallback";
+        /**
+         * CoverageStatus
+         * @enum {string}
+         */
+        CoverageStatus: "exact_covered" | "fallback_only" | "mixed" | "uncovered";
+        /** DeleteCoverageResponse */
+        DeleteCoverageResponse: {
+            /** Coverage Id */
+            coverage_id: string;
+            /** Deleted */
+            deleted: boolean;
         };
         /** DemandRangeResponse */
         DemandRangeResponse: {
@@ -129,6 +216,99 @@ export interface components {
             fixture_ready: boolean;
             /** Status */
             status: string;
+        };
+        /** ModelYearDemandResponse */
+        ModelYearDemandResponse: {
+            /** Configuration Id */
+            configuration_id: string;
+            /** Data Version */
+            data_version: string;
+            demand: components["schemas"]["DemandRangeResponse"];
+            evidence_status: components["schemas"]["EvidenceStatus"];
+            /** Forecast Horizon */
+            forecast_horizon: number;
+            /** Model Year */
+            model_year: number;
+            /** Sources */
+            sources: components["schemas"]["SourceSummaryResponse"][];
+        };
+        /** OpportunityDrillDownResponse */
+        OpportunityDrillDownResponse: {
+            configuration: components["schemas"]["PlanningConfigurationResponse"];
+            coverage_status: components["schemas"]["CoverageStatus"];
+            model_year_demand: components["schemas"]["ModelYearDemandResponse"];
+        };
+        /**
+         * OpportunityGroupBy
+         * @enum {string}
+         */
+        OpportunityGroupBy: "brand" | "model" | "model_year";
+        /** OpportunityPageResponse */
+        OpportunityPageResponse: {
+            /** Integrity Warnings */
+            integrity_warnings: string[];
+            /** Items */
+            items: components["schemas"]["OpportunityRowResponse"][];
+            /** Strategy Name */
+            strategy_name: string;
+            /** Strategy Version */
+            strategy_version: string;
+            summary: components["schemas"]["OpportunitySummaryResponse"];
+        };
+        /** OpportunityRowResponse */
+        OpportunityRowResponse: {
+            /** Brand */
+            brand: string;
+            /** Contributing Configuration Count */
+            contributing_configuration_count: number;
+            coverage_status: components["schemas"]["CoverageStatus"];
+            /** Data Version */
+            data_version: string;
+            demand: components["schemas"]["DemandRangeResponse"];
+            evidence_status: components["schemas"]["EvidenceStatus"];
+            /** Exact Covered Base Units */
+            exact_covered_base_units: number;
+            /** Fallback Covered Base Units */
+            fallback_covered_base_units: number;
+            /** Group By */
+            group_by: string;
+            /** Group Id */
+            group_id: string;
+            /** Model */
+            model: string | null;
+            /** Model Year */
+            model_year: number | null;
+            score: components["schemas"]["OpportunityScoreResponse"];
+            /** Uncovered Base Units */
+            uncovered_base_units: number;
+        };
+        /** OpportunityScoreResponse */
+        OpportunityScoreResponse: {
+            /** Demand Percentile */
+            demand_percentile: number;
+            /** Demand Points */
+            demand_points: number;
+            /** Explanation */
+            explanation: string;
+            /** Readiness Points */
+            readiness_points: number;
+            /** Readiness Ratio */
+            readiness_ratio: number;
+            /** Strategy Name */
+            strategy_name: string;
+            /** Strategy Version */
+            strategy_version: string;
+            /** Total Points */
+            total_points: number;
+        };
+        /** OpportunitySummaryResponse */
+        OpportunitySummaryResponse: {
+            /** Base Units */
+            base_units: number;
+            /** Exact Covered Base Units */
+            exact_covered_base_units: number;
+            /** High Demand Uncovered Base Units */
+            high_demand_uncovered_base_units: number;
         };
         /** PlannerOptionsResponse */
         PlannerOptionsResponse: {
@@ -227,6 +407,48 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** ProductionCoverageRequest */
+        ProductionCoverageRequest: {
+            /** Brand */
+            brand: string | null;
+            /** Configuration Id */
+            configuration_id: string | null;
+            match_type: components["schemas"]["CoverageMatchType"];
+            /** Model */
+            model: string | null;
+            /** Model Year */
+            model_year: number;
+            /** Note */
+            note?: string | null;
+        };
+        /** ProductionCoverageResponse */
+        ProductionCoverageResponse: {
+            /** Brand */
+            brand: string;
+            /** Configuration Id */
+            configuration_id: string | null;
+            /** Coverage Id */
+            coverage_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            match_type: components["schemas"]["CoverageMatchType"];
+            /** Model */
+            model: string;
+            /** Model Year */
+            model_year: number;
+            /** Note */
+            note: string | null;
+            /** Sku */
+            sku: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** ScenarioResponse */
         ScenarioResponse: {
             /** Data Version */
@@ -284,6 +506,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    opportunities_api_v1_opportunities_get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["OpportunityGroupBy"];
+                market?: string[] | null;
+                horizon?: number[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityPageResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    opportunity_configurations_api_v1_opportunities__group_id__configurations_get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["OpportunityGroupBy"];
+                market?: string[] | null;
+                horizon?: number[] | null;
+            };
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityDrillDownResponse"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
         };
@@ -401,6 +727,215 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlannerOptionsResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    production_coverage_api_v1_production_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionCoverageResponse"][];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    create_production_coverage_api_v1_production_coverage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionCoverageResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    update_production_coverage_api_v1_production_coverage__coverage_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                coverage_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionCoverageResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    delete_production_coverage_api_v1_production_coverage__coverage_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                coverage_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteCoverageResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
             /** @description Unprocessable Entity */

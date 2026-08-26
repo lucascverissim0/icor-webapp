@@ -13,15 +13,21 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from icor.api.planner import router
+from icor.api.opportunities import router as opportunity_router
+from icor.api.planner import router as planner_router
 from icor.api.schemas import FieldError, ProblemResponse
+from icor.application.coverage import CoverageRepository, ProductionCoverageService
+from icor.application.opportunities import OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
+from icor.application.ranking import DemandReadinessV1
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
+from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FIXTURE = ROOT / "data" / "demo" / "planner-v1.json"
 DEFAULT_WEB_ORIGIN = "http://127.0.0.1:5173"
+DEFAULT_COVERAGE_DB = ROOT / ".local" / "production-coverage.sqlite3"
 
 
 def _problem(request: Request, *, code: str, message: str, status_code: int) -> JSONResponse:
@@ -40,14 +46,28 @@ def _local_origin(value: str) -> str:
     return value.rstrip("/")
 
 
-def create_app(repository: PlannerRepository | None = None) -> FastAPI:
+def create_app(
+    repository: PlannerRepository | None = None,
+    coverage_repository: CoverageRepository | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
         version="1.0.0",
         description="Local demonstration contract for windshield demand planning.",
     )
     selected_repository = repository or DemoPlannerRepository.from_path(DEFAULT_FIXTURE)
+    selected_coverage_repository = coverage_repository or SQLiteCoverageRepository(
+        Path(os.getenv("ICOR_COVERAGE_DB", DEFAULT_COVERAGE_DB))
+    )
     app.state.planner_service = PlannerService(selected_repository)
+    app.state.coverage_service = ProductionCoverageService(
+        selected_repository, selected_coverage_repository
+    )
+    app.state.opportunity_service = OpportunityService(
+        selected_repository,
+        selected_coverage_repository,
+        DemandReadinessV1(),
+    )
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -92,8 +112,9 @@ def create_app(repository: PlannerRepository | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[_local_origin(os.getenv("ICOR_WEB_ORIGIN", DEFAULT_WEB_ORIGIN))],
-        allow_methods=["GET", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Accept", "Content-Type"],
     )
-    app.include_router(router)
+    app.include_router(planner_router)
+    app.include_router(opportunity_router)
     return app

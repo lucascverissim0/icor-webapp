@@ -1,17 +1,20 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from icor.api.app import create_app
 from icor.domain.planner import PlanningConfiguration
+from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
-    with TestClient(create_app()) as test_client:
+def client(tmp_path: Path) -> Iterator[TestClient]:
+    coverage = SQLiteCoverageRepository(tmp_path / "coverage.sqlite3")
+    with TestClient(create_app(coverage_repository=coverage)) as test_client:
         yield test_client
 
 
@@ -139,9 +142,12 @@ class BrokenRepository:
         raise RuntimeError(f"private identifier {configuration_id} must never escape")
 
 
-def test_unexpected_errors_are_sanitized() -> None:
+def test_unexpected_errors_are_sanitized(tmp_path: Path) -> None:
     with TestClient(
-        create_app(repository=BrokenRepository()),
+        create_app(
+            repository=BrokenRepository(),
+            coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        ),
         raise_server_exceptions=False,
     ) as client:
         response = client.get("/api/v1/planner/configurations")
@@ -175,8 +181,10 @@ def test_cors_allows_only_the_configured_local_web_origin(client: TestClient) ->
     assert "access-control-allow-origin" not in denied.headers
 
 
-def test_openapi_is_versioned_and_documents_problem_responses() -> None:
-    schema = create_app().openapi()
+def test_openapi_is_versioned_and_documents_problem_responses(tmp_path: Path) -> None:
+    schema = create_app(
+        coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3")
+    ).openapi()
 
     assert schema["openapi"].startswith("3.1.")
     assert schema["info"]["version"] == "1.0.0"
