@@ -97,13 +97,7 @@ class SnapshotStore:
     def active_manifest(self) -> SnapshotManifest:
         """Return the manifest selected by a complete and verified active pointer."""
         try:
-            self.root = self.filesystem.require_root(self.root)
-            pointer = self._load_active_pointer()
-            snapshot_id = pointer["snapshot_id"]
-            target = self.root / "snapshots" / snapshot_id
-            manifest, manifest_digest, _ = self._verify_snapshot_directory(target, snapshot_id)
-            if manifest_digest != pointer["manifest_sha256"]:
-                raise SnapshotUnavailableError("active snapshot manifest does not match pointer")
+            manifest, _ = self._resolve_active_snapshot()
             return manifest
         except SnapshotUnavailableError:
             raise
@@ -116,16 +110,35 @@ class SnapshotStore:
 
     def open_active_repository(self) -> SQLiteEvidenceRepository:
         """Open the verified active ledger through its read-only repository boundary."""
-        manifest = self.active_manifest()
-        path = self.root / "snapshots" / manifest.snapshot_id / "evidence.sqlite3"
+        _, repository = self.open_active_snapshot()
+        return repository
+
+    def open_active_snapshot(
+        self,
+    ) -> tuple[SnapshotManifest, SQLiteEvidenceRepository]:
+        """Resolve one active pointer to its matching manifest and repository."""
         try:
-            return SQLiteEvidenceRepository(self.filesystem.require_file(path, self.root))
+            manifest, target = self._resolve_active_snapshot()
+            path = self.filesystem.require_file(target / "evidence.sqlite3", self.root)
+            return manifest, SQLiteEvidenceRepository(path)
+        except SnapshotUnavailableError:
+            raise
         except SnapshotPathError as error:
             raise SnapshotUnavailableError(
                 "active snapshot database path is unsafe or not contained"
             ) from error
         except (OSError, RuntimeError, ValueError) as error:
             raise SnapshotUnavailableError("active snapshot database is unavailable") from error
+
+    def _resolve_active_snapshot(self) -> tuple[SnapshotManifest, Path]:
+        self.root = self.filesystem.require_root(self.root)
+        pointer = self._load_active_pointer()
+        snapshot_id = pointer["snapshot_id"]
+        target = self.root / "snapshots" / snapshot_id
+        manifest, manifest_digest, _ = self._verify_snapshot_directory(target, snapshot_id)
+        if manifest_digest != pointer["manifest_sha256"]:
+            raise SnapshotUnavailableError("active snapshot manifest does not match pointer")
+        return manifest, target
 
     def _publish_candidate(self, candidate: Path, snapshot_id: str) -> Path:
         snapshots_root = self.filesystem.prepare_directory(

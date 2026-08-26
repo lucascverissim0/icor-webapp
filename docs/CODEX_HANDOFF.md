@@ -759,3 +759,23 @@ untouched. The next planned work is Task 8 foundation documentation/checkpointin
 planned broad `ruff check ... scripts` currently encounters 486 pre-existing findings in
 untouched legacy scripts and needs an explicit maintained-scope decision rather than an
 unrelated Task 7 rewrite.
+
+Task 7 fix round 1 closes all three Important review findings. The CLI now keeps the
+lexical explicit root after policy resolution and holds a reparse-aware root identity
+for every command: Windows permits child writes but denies root deletion/replacement,
+while POSIX holds a no-follow directory descriptor and revalidates device/inode identity.
+Substitution after `_safe_root` and a real Windows junction root are rejected as typed
+`invalid_root` without writing the external target. Stored-release integrity failures
+during `build` now translate to exit 3 `snapshot_validation_failed`; malformed staging
+input remains sanitized exit 2. `SnapshotStore.open_active_snapshot()` resolves and
+verifies one active pointer/immutable target and returns its matching manifest plus
+read-only repository; CLI `verify` no longer resolves active state twice. A deterministic
+promotion seam advances `active.json` between pointer read and result construction and
+proves the reported snapshot ID, manifest count, and repository count still come from
+the same earlier immutable snapshot. RED reported four expected failures, six passes,
+and one explicit `WinError 1314` symlink skip. Final relevant verification reported 50
+passed and five explicit Windows symlink-privilege skips across integration,
+snapshot-build, and snapshot-store suites; the real junction test passed. Scoped Ruff
+and `git diff --check` passed. Argparse help behavior remains deferred as requested. No
+network, server, production/customer data, push, merge, deploy, main-branch, or Streamlit
+action occurred; the unrelated `AGENTS.md` edit remains untouched.

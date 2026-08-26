@@ -253,6 +253,24 @@ def test_active_repository_is_read_only(
         repository.add_release(_manifest())
 
 
+def test_open_active_snapshot_returns_matching_manifest_and_repository(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    candidate = builder.build(build_request)
+    snapshot_store.promote(candidate.manifest.snapshot_id)
+
+    manifest, repository = snapshot_store.open_active_snapshot()
+
+    assert manifest == candidate.manifest
+    assert tuple(release.release_id for release in repository.list_releases()) == (
+        *manifest.release_ids,
+    )
+    assert len(repository.list_observations()) == manifest.observation_count
+    assert len(repository.list_published_values()) == manifest.published_value_count
+
+
 def _rewrite_candidate_manifest(
     candidate_path: Path, manifest: SnapshotManifest
 ) -> None:

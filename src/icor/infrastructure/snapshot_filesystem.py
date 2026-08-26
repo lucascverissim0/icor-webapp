@@ -93,6 +93,34 @@ class SnapshotPathError(RuntimeError):
 class SnapshotFilesystem:
     """No-follow path checks and durability operations used by snapshot storage."""
 
+    @contextmanager
+    def pin_root(self, root: Path, *, create: bool) -> Iterator[Path]:
+        """Hold one safe root identity while allowing writes beneath it."""
+        safe_root = self.prepare_root(root) if create else self.require_root(root)
+        handle, identity = self._open_stable_path(
+            safe_root,
+            directory=True,
+            allow_writes=True,
+        )
+        try:
+            yield safe_root
+            self._assert_stable_path_identity(
+                safe_root,
+                identity,
+                directory=True,
+                allow_writes=True,
+            )
+        except BaseException:
+            self._assert_stable_path_identity(
+                safe_root,
+                identity,
+                directory=True,
+                allow_writes=True,
+            )
+            raise
+        finally:
+            self._close_stable_handle(handle)
+
     def prepare_root(self, root: Path) -> Path:
         absolute = self._absolute(root)
         self._reject_existing_reparse_components(absolute)
@@ -364,10 +392,18 @@ class SnapshotFilesystem:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
 
     def _open_stable_path(
-        self, path: Path, *, directory: bool
+        self,
+        path: Path,
+        *,
+        directory: bool,
+        allow_writes: bool = False,
     ) -> tuple[int, tuple[int, ...]]:
         if os.name == "nt":
-            return self._open_windows_stable_path(path, directory=directory)
+            return self._open_windows_stable_path(
+                path,
+                directory=directory,
+                allow_writes=allow_writes,
+            )
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         if directory:
             flags |= getattr(os, "O_DIRECTORY", 0)
@@ -381,6 +417,23 @@ class SnapshotFilesystem:
             os.close(descriptor)
             raise SnapshotPathError("stable snapshot path has an unsafe type")
         return descriptor, (metadata.st_dev, metadata.st_ino)
+
+    def _assert_stable_path_identity(
+        self,
+        path: Path,
+        expected: tuple[int, ...],
+        *,
+        directory: bool,
+        allow_writes: bool,
+    ) -> None:
+        handle, actual = self._open_stable_path(
+            path,
+            directory=directory,
+            allow_writes=allow_writes,
+        )
+        self._close_stable_handle(handle)
+        if actual != expected:
+            raise SnapshotPathError("stable snapshot path identity changed")
 
     @staticmethod
     def _digest_open_file(handle: int) -> str:
@@ -431,7 +484,10 @@ class SnapshotFilesystem:
 
     @staticmethod
     def _open_windows_stable_path(
-        path: Path, *, directory: bool
+        path: Path,
+        *,
+        directory: bool,
+        allow_writes: bool = False,
     ) -> tuple[int, tuple[int, ...]]:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         create_file = kernel32.CreateFileW
@@ -451,7 +507,7 @@ class SnapshotFilesystem:
         handle = create_file(
             str(path),
             0x80000000,
-            0x00000001,
+            0x00000001 | (0x00000002 if allow_writes else 0),
             None,
             3,
             flags,

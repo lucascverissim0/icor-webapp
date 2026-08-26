@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import socket
+import subprocess
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -10,6 +12,7 @@ from typing import Any
 
 import pytest
 
+import scripts.build_evidence_snapshot as cli
 from icor.domain.evidence import (
     CanonicalVehicle,
     EvidenceConfidence,
@@ -22,8 +25,8 @@ from icor.domain.evidence import (
 )
 from icor.evidence.serialization import canonical_json_bytes
 from icor.infrastructure.release_store import StoredRelease
+from icor.infrastructure.snapshot_store import SnapshotStore
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
-from scripts.build_evidence_snapshot import main
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "sources"
 SAMPLE_ARTIFACT = FIXTURES / "sample-registration.csv"
@@ -34,6 +37,9 @@ RELEASE_ID = "sample-registration-2024"
 
 class SampleRegistrationLoader:
     """Contract-test adapter retained only in this integration composition root."""
+
+    def __init__(self, *, row_limit: int | None = None) -> None:
+        self.row_limit = row_limit
 
     def load(
         self,
@@ -51,6 +57,8 @@ class SampleRegistrationLoader:
         for release in releases:
             with release.artifact_path.open(encoding="utf-8", newline="") as artifact:
                 rows = tuple(csv.DictReader(artifact))
+            if self.row_limit is not None:
+                rows = rows[: self.row_limit]
             observations = tuple(
                 self._observation(release, vehicle, row, position)
                 for position, row in enumerate(rows, start=2)
@@ -130,7 +138,7 @@ def _run_cli(
     *,
     loaders: dict[str, object] | None = None,
 ) -> tuple[int, dict[str, Any], str]:
-    code = main(arguments, loader_registry=loaders)
+    code = cli.main(arguments, loader_registry=loaders)
     captured = capsys.readouterr()
     assert captured.out
     payload = json.loads(captured.out)
@@ -163,6 +171,7 @@ def _build(
     root: Path,
     *,
     loaders: dict[str, object] | None,
+    build_as_of: str = BUILD_AS_OF,
 ) -> tuple[int, dict[str, Any], str]:
     return _run_cli(
         capsys,
@@ -172,7 +181,7 @@ def _build(
             "--release",
             RELEASE_ID,
             "--build-as-of",
-            BUILD_AS_OF,
+            build_as_of,
             "--deterministic-seed",
             "17",
         ],
@@ -363,3 +372,170 @@ def test_loader_failure_is_sanitized_without_raw_row_output(
     assert error == "Evidence snapshot operation failed.\n"
     assert "Example Motors" not in error
     assert "secret-row" not in error
+
+
+def _create_directory_symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        if os.name == "nt" and error.winerror == 1314:
+            pytest.skip(f"symlinks require Windows developer privileges: {error}")
+        raise
+
+
+def test_root_substitution_before_stage_is_rejected_without_external_write(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "evidence"
+    held_root = tmp_path / "held-evidence"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    original_safe_root = cli._safe_root
+
+    def substitute_root(path: Path, *, allow_external: bool) -> Path:
+        safe = original_safe_root(path, allow_external=allow_external)
+        root.rename(held_root)
+        _create_directory_symlink_or_skip(root, outside)
+        return safe
+
+    monkeypatch.setattr(cli, "_safe_root", substitute_root)
+    try:
+        code, payload, error = _stage(capsys, root)
+    finally:
+        if root.is_symlink():
+            root.unlink()
+
+    assert code == 2
+    assert payload == {"error": {"code": "invalid_root"}, "state": "rejected"}
+    assert error == "Evidence root must be contained in the workspace.\n"
+    assert list(outside.iterdir()) == []
+    assert list(held_root.iterdir()) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_windows_junction_root_is_rejected_without_external_write(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "evidence"
+    outside = tmp_path / "junction-target"
+    outside.mkdir()
+    creation = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(root), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert creation.returncode == 0, creation.stderr or creation.stdout
+    try:
+        code, payload, error = _stage(capsys, root)
+    finally:
+        os.rmdir(root)
+
+    assert code == 2
+    assert payload == {"error": {"code": "invalid_root"}, "state": "rejected"}
+    assert error == "Evidence root must be contained in the workspace.\n"
+    assert list(outside.iterdir()) == []
+
+
+def test_stage_corruption_is_input_error_but_stored_build_corruption_is_validation_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    malformed_root = tmp_path / "malformed"
+    malformed_artifact = tmp_path / "malformed-secret.csv"
+    malformed_artifact.write_bytes(b"Example Motors,Alpha,secret-row\n")
+    stage_code, stage_payload, stage_error = _run_cli(
+        capsys,
+        [
+            "stage-release",
+            *_root_arguments(malformed_root),
+            "--manifest",
+            str(SAMPLE_MANIFEST),
+            "--artifact",
+            str(malformed_artifact),
+        ],
+    )
+    assert stage_code == 2
+    assert stage_payload == {
+        "error": {"code": "invalid_input"},
+        "state": "rejected",
+    }
+    assert stage_error == "Release or command input is invalid.\n"
+    assert "secret-row" not in stage_error
+
+    build_root = tmp_path / "staged"
+    assert _stage(capsys, build_root)[0] == 0
+    stored_artifact = (
+        build_root
+        / "releases"
+        / "sample-registration"
+        / RELEASE_ID
+        / "artifact.csv"
+    )
+    stored_artifact.write_bytes(stored_artifact.read_bytes() + b"secret-row")
+
+    build_code, build_payload, build_error = _build(
+        capsys,
+        build_root,
+        loaders={"sample_registration_csv": SampleRegistrationLoader()},
+    )
+
+    assert build_code == 3
+    assert build_payload == {
+        "error": {"code": "snapshot_validation_failed"},
+        "state": "rejected",
+    }
+    assert build_error == "Snapshot validation failed.\n"
+    assert "secret-row" not in build_error
+
+
+def test_verify_reports_one_snapshot_when_promotion_changes_active_pointer(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "evidence"
+    assert _stage(capsys, root)[0] == 0
+    first_code, first, _ = _build(
+        capsys,
+        root,
+        loaders={"sample_registration_csv": SampleRegistrationLoader()},
+    )
+    second_code, second, _ = _build(
+        capsys,
+        root,
+        loaders={"sample_registration_csv": SampleRegistrationLoader(row_limit=1)},
+        build_as_of="2026-08-26T13:00:00+00:00",
+    )
+    assert first_code == second_code == 0
+    assert first["observation_count"] == 2
+    assert second["observation_count"] == 1
+    assert _run_cli(
+        capsys,
+        ["promote", *_root_arguments(root), "--snapshot", first["snapshot_id"]],
+    )[0] == 0
+
+    original_load_pointer = SnapshotStore._load_active_pointer
+    switched = False
+
+    def switch_after_read(store: SnapshotStore) -> dict[str, str]:
+        nonlocal switched
+        pointer = original_load_pointer(store)
+        if not switched:
+            switched = True
+            SnapshotStore(root).promote(second["snapshot_id"])
+        return pointer
+
+    monkeypatch.setattr(SnapshotStore, "_load_active_pointer", switch_after_read)
+
+    code, payload, error = _run_cli(capsys, ["verify", *_root_arguments(root)])
+
+    assert code == 0
+    assert error == ""
+    assert switched
+    assert payload["snapshot_id"] == first["snapshot_id"]
+    assert payload["observation_count"] == 2
+    assert payload["repository_observation_count"] == 2
+    assert SnapshotStore(root).active_manifest().snapshot_id == second["snapshot_id"]

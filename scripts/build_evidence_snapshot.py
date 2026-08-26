@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,7 @@ from icor.infrastructure.release_store import (
     ReleaseStore,
     StoredRelease,
 )
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem, SnapshotPathError
 from icor.infrastructure.snapshot_store import (
     SnapshotPromotionError,
     SnapshotStore,
@@ -110,12 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
 def _safe_root(path: Path, *, allow_external: bool) -> Path:
     try:
         workspace = WORKSPACE_ROOT.resolve(strict=True)
-        resolved = path.resolve(strict=False)
+        absolute = Path(os.path.abspath(path))
+        resolved = absolute.resolve(strict=False)
     except OSError as error:
         raise CommandInputError("invalid evidence root") from error
     if not allow_external and not resolved.is_relative_to(workspace):
         raise CommandInputError("external evidence root")
-    return resolved
+    return absolute
 
 
 def _build_as_of(value: str) -> datetime:
@@ -174,7 +177,10 @@ def _build_snapshot(
     if len(set(release_ids)) != len(release_ids):
         raise CommandInputError("release IDs must be unique")
     store = _release_store(root)
-    releases = tuple(store.verify(release_id) for release_id in release_ids)
+    try:
+        releases = tuple(store.verify(release_id) for release_id in release_ids)
+    except ReleaseIntegrityError as error:
+        raise SnapshotBuildError("staged release failed validation") from error
     parser_names = {release.manifest.parser_name for release in releases}
     if parser_names.difference(loader_registry):
         raise UnsupportedParserError("release parser is not registered")
@@ -216,8 +222,7 @@ def _status(root: Path) -> tuple[int, dict[str, object]]:
 
 def _verify(root: Path) -> tuple[int, dict[str, object]]:
     store = SnapshotStore(root)
-    manifest = store.active_manifest()
-    repository = store.open_active_repository()
+    manifest, repository = store.open_active_snapshot()
     payload = _snapshot_payload(manifest, state="verified")
     payload["repository_observation_count"] = len(repository.list_observations())
     payload["repository_published_value_count"] = len(repository.list_published_values())
@@ -234,16 +239,20 @@ def main(
         args = build_parser().parse_args(argv)
         root = _safe_root(args.root, allow_external=args.allow_external_root)
         registry = {} if loader_registry is None else loader_registry
-        if args.command == "stage-release":
-            code, payload = _stage_release(args, root)
-        elif args.command == "build":
-            code, payload = _build_snapshot(args, root, registry)
-        elif args.command == "promote":
-            code, payload = _promote(args, root)
-        elif args.command == "status":
-            code, payload = _status(root)
-        else:
-            code, payload = _verify(root)
+        create_root = args.command in {"stage-release", "build", "promote"}
+        if not create_root and not os.path.lexists(root):
+            raise SnapshotUnavailableError("no active snapshot is available")
+        with SnapshotFilesystem().pin_root(root, create=create_root) as pinned_root:
+            if args.command == "stage-release":
+                code, payload = _stage_release(args, pinned_root)
+            elif args.command == "build":
+                code, payload = _build_snapshot(args, pinned_root, registry)
+            elif args.command == "promote":
+                code, payload = _promote(args, pinned_root)
+            elif args.command == "status":
+                code, payload = _status(pinned_root)
+            else:
+                code, payload = _verify(pinned_root)
     except UnsupportedParserError:
         return _reject(
             "unsupported_parser",
@@ -258,6 +267,12 @@ def main(
             else "Invalid command input."
         )
         return _reject(code, message, exit_code=2)
+    except SnapshotPathError:
+        return _reject(
+            "invalid_root",
+            "Evidence root must be contained in the workspace.",
+            exit_code=2,
+        )
     except SnapshotUnavailableError:
         _emit({"active_snapshot_id": None, "state": "unavailable"})
         sys.stderr.write("No active snapshot is available.\n")
