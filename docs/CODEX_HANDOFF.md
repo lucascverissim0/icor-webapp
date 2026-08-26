@@ -834,8 +834,9 @@ untouched; no server or external process was started.
 
 Task 8 records the evidence-snapshot foundation checkpoint from exact predecessor
 `d79613348f430f529392426036534b26e3a974c8` on
-`development/windshield-demand-platform`. The checkpoint commit message is
-`docs: document evidence snapshot foundation`. `README.md` and `docs/DEVELOPMENT.md`
+`development/windshield-demand-platform`. Its documentation and security-regression
+changes are committed as `db39675` (`docs: document evidence snapshot foundation`).
+`README.md` and `docs/DEVELOPMENT.md`
 now document the explicit local evidence commands, source-terms review before
 acquisition, immutable release/snapshot storage, atomic active-pointer recovery, and
 the irreversible implications of deleting local ignored evidence state. They explicitly
