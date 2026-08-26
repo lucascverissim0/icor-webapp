@@ -262,9 +262,11 @@ The clarified product objective changes the recommended product sequence. Before
   reported 33 passed; lint, TypeScript/build, and the eight-test Chromium planner suite
   passed.
   Final desktop, mobile, and deep-link screenshots were inspected from the live app.
-- The managed launcher starts the local planner at `http://127.0.0.1:5173/planner`
-  and its FastAPI docs at `http://127.0.0.1:8000/docs`; stopping its terminal stops
-  both child processes. Optional port flags are available when those defaults are in use.
+- The managed launcher currently serves the local planner at
+  `http://127.0.0.1:5300/planner` and its FastAPI docs at
+  `http://127.0.0.1:8140/docs`; stopping its active terminal/session stops both child
+  processes. The documented defaults are 5173/8000, with optional port flags when
+  those defaults are already in use.
 - This product slice remains fixture-only. Proprietary fitment/outcome ingestion,
   calibrated forecasting and backtesting, authentication/roles, multi-user behavior,
   deployment, pushing, and merging remain explicitly deferred. The existing strict
@@ -280,4 +282,4 @@ The clarified product objective changes the recommended product sequence. Before
 
 ## Current checkpoint
 
-The approved local planner product slice is complete on `development/windshield-demand-platform` and can be started for review with `uv run python scripts/run_planner_dev.py`. It uses only clearly labelled deterministic demonstration data and requires no production secret or customer data. Automated Python, frontend, OpenAPI, browser, accessibility, responsive-layout, lock, and dependency-audit gates pass; the final desktop/mobile/detail pixels were inspected. Production remains read-only on `main` at `1ba1d7c`; nothing has been pushed, merged, or deployed. The next product phase requires Lucas to supply or authorize the proprietary fitment/outcome data strategy and calibrated forecasting/backtesting scope. Streamlit remains only a temporary behavioral reference, and `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation batch.
+The approved local planner product slice is complete on `development/windshield-demand-platform` and is live for review at `http://127.0.0.1:5300/planner`. It uses only clearly labelled deterministic demonstration data and requires no production secret or customer data. Automated Python, frontend, OpenAPI, browser, accessibility, responsive-layout, lock, and dependency-audit gates pass; the final desktop/mobile/detail pixels were inspected. Production remains read-only on `main` at `1ba1d7c`; nothing has been pushed, merged, or deployed. The next product phase requires Lucas to supply or authorize the proprietary fitment/outcome data strategy and calibrated forecasting/backtesting scope. Streamlit remains only a temporary behavioral reference, and `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030` remain strict XFAILs for their separate TDD remediation batch.
