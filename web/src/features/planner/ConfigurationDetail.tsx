@@ -66,7 +66,7 @@ function EquipmentFacts({ equipment }: { equipment: Configuration['equipment'] }
     <section className="detail-section" aria-labelledby="equipment-heading">
       <h2 id="equipment-heading">Equipment compatibility</h2>
       <dl className="fact-grid">
-        {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{factValue(value)}{value === false && <span className="equipment-alias">No</span>}</dd></div>)}
+        {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{factValue(value)}</dd></div>)}
       </dl>
     </section>
   )
@@ -113,7 +113,7 @@ function DetailContent({ configuration, backHref, onBack }: { configuration: Con
           <div><span>Downside–upside</span><strong>{new Intl.NumberFormat('en-US').format(configuration.demand.downside_units)}–{formatUnits(configuration.demand.upside_units)}</strong></div>
         </div>
         <dl className="fact-grid assumptions">
-          <div><dt>Vehicle exposure</dt><dd><span>{new Intl.NumberFormat('en-US').format(configuration.vehicle_exposure_units)} vehicles</span><span className="exposure-alias">{new Intl.NumberFormat('en-US').format(configuration.vehicle_exposure_units)} units</span></dd></div>
+          <div><dt>Vehicle exposure</dt><dd>{new Intl.NumberFormat('en-US').format(configuration.vehicle_exposure_units)} vehicles</dd></div>
           <div><dt>Replacement-rate assumption</dt><dd>{new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(configuration.replacement_rate)}</dd></div>
           <div><dt>Forecast horizon</dt><dd>{configuration.forecast_horizon}</dd></div>
         </dl>

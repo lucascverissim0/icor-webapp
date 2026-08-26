@@ -101,7 +101,7 @@ describe('ConfigurationDetail', () => {
     expect(await screen.findByRole('heading', { name: 'Aurora Mobility A1 Horizon' })).toBeVisible()
     expect(screen.getByText('Head-up display')).toBeVisible()
     expect(screen.getAllByText('Unknown')).not.toHaveLength(0)
-    expect(screen.getByText('No')).toBeVisible()
+    expect(screen.getByText('Not fitted')).toBeVisible()
   })
 
   it('shows the demand assumptions, confidence reasons, and synthetic sources', async () => {
