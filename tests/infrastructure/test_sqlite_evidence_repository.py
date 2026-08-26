@@ -210,6 +210,9 @@ def test_read_only_repository_rejects_writes(
     with pytest.raises(ImmutableEvidenceError, match="read-only"):
         repository.add_release(release)
 
+    with repository._connect() as connection, pytest.raises(sqlite3.OperationalError):
+        connection.execute("INSERT INTO source_release (release_id) VALUES ('direct-write')")
+
 
 def test_observation_identity_is_immutable(
     repository: SQLiteEvidenceRepository,
@@ -301,9 +304,7 @@ def test_published_value_retains_every_input(
     seed_dependencies(repository, release, vehicle, observation)
     repository.add_published_values((published_value,))
 
-    assert repository.get_published_value(published_value.value_id).input_ids == (
-        "observation-eea-de-2024-1",
-    )
+    assert repository.get_published_value(published_value.value_id) == published_value
 
 
 def test_published_value_requires_existing_vehicle_and_inputs(
@@ -328,6 +329,52 @@ def test_published_value_rejects_ambiguous_input(
     seed_dependencies(repository, release, vehicle, ambiguous)
 
     with pytest.raises(ImmutableEvidenceError, match="unresolved"):
+        repository.add_published_values((published_value,))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("measure", Measure.ACTIVE_FLEET),
+        ("unit", "registrations"),
+        ("geography", "FR"),
+        ("geography_version", "fr-2024"),
+        ("period_start", date(2023, 1, 1)),
+        ("period_end", date(2025, 12, 31)),
+    ),
+)
+def test_published_value_rejects_semantically_incompatible_input(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    published_value: PublishedValue,
+    field: str,
+    value: object,
+) -> None:
+    incompatible_observation = replace(observation, **{field: value})
+    seed_dependencies(repository, release, vehicle, incompatible_observation)
+
+    with pytest.raises(ImmutableEvidenceError, match="incompatible"):
+        repository.add_published_values((published_value,))
+
+
+def test_published_value_rejects_input_for_a_different_vehicle(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    published_value: PublishedValue,
+) -> None:
+    different_vehicle = replace(vehicle, vehicle_id="vehicle-vw-golf-2025", model_year=2025)
+    repository.add_release(release)
+    repository.add_vehicle(vehicle)
+    repository.add_vehicle(different_vehicle)
+    repository.add_observations(
+        (replace(observation, canonical_vehicle_id=different_vehicle.vehicle_id),)
+    )
+
+    with pytest.raises(ImmutableEvidenceError, match="incompatible"):
         repository.add_published_values((published_value,))
 
 
@@ -360,8 +407,124 @@ def test_list_observations_is_deterministically_ordered(
     ]
 
 
+def test_all_lists_are_deterministically_ordered(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    mapping: IdentityMapping,
+    published_value: PublishedValue,
+    snapshot: SnapshotManifest,
+) -> None:
+    later_release = replace(release, release_id="eea-2025")
+    later_vehicle = replace(vehicle, vehicle_id="vehicle-vw-golf-2025", model_year=2025)
+    later_observation = replace(
+        observation,
+        observation_id="observation-eea-de-2024-2",
+        original_row_locator="sheet1:3",
+    )
+    later_mapping = replace(mapping, mapping_id="mapping-eea-de-2024-2")
+    later_value = replace(published_value, value_id="published-eea-de-2024-2")
+    later_snapshot = replace(snapshot, snapshot_id="snapshot-2025", release_ids=("eea-2025",))
+    repository.add_release(later_release)
+    repository.add_release(release)
+    repository.add_vehicle(later_vehicle)
+    repository.add_vehicle(vehicle)
+    repository.add_observations((later_observation, observation))
+    repository.add_mapping(later_mapping)
+    repository.add_mapping(mapping)
+    repository.add_published_values((later_value, published_value))
+    repository.add_snapshot(later_snapshot)
+    repository.add_snapshot(snapshot)
+
+    assert [item.release_id for item in repository.list_releases()] == ["eea-2024", "eea-2025"]
+    assert [item.vehicle_id for item in repository.list_vehicles()] == [
+        "vehicle-vw-golf-2024",
+        "vehicle-vw-golf-2025",
+    ]
+    assert [item.observation_id for item in repository.list_observations()] == [
+        "observation-eea-de-2024-1",
+        "observation-eea-de-2024-2",
+    ]
+    assert [item.mapping_id for item in repository.list_mappings()] == [
+        "mapping-eea-de-2024-1",
+        "mapping-eea-de-2024-2",
+    ]
+    assert [item.value_id for item in repository.list_published_values()] == [
+        "published-eea-de-2024-1",
+        "published-eea-de-2024-2",
+    ]
+    assert [item.snapshot_id for item in repository.list_snapshots()] == [
+        "snapshot-2024",
+        "snapshot-2025",
+    ]
+
+
+def test_canonical_vehicle_identity_is_unique(
+    repository: SQLiteEvidenceRepository, vehicle: CanonicalVehicle
+) -> None:
+    repository.add_vehicle(vehicle)
+
+    with pytest.raises(DuplicateEvidenceError):
+        repository.add_vehicle(replace(vehicle, vehicle_id="vehicle-duplicate"))
+
+
 def test_snapshot_requires_existing_releases(
     repository: SQLiteEvidenceRepository, snapshot: SnapshotManifest
 ) -> None:
     with pytest.raises(ImmutableEvidenceError, match="reference"):
         repository.add_snapshot(snapshot)
+
+
+def test_snapshot_round_trips_existing_release_membership(
+    repository: SQLiteEvidenceRepository, release: ReleaseManifest, snapshot: SnapshotManifest
+) -> None:
+    repository.add_release(release)
+    repository.add_snapshot(snapshot)
+
+    assert repository.get_snapshot(snapshot.snapshot_id) == snapshot
+
+
+def test_snapshot_membership_has_database_foreign_keys(
+    tmp_path: Path, release: ReleaseManifest, snapshot: SnapshotManifest
+) -> None:
+    path = tmp_path / "evidence.sqlite3"
+    repository = SQLiteEvidenceRepository(path, writable=True)
+    repository.add_release(release)
+    repository.add_snapshot(snapshot)
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """INSERT INTO snapshot_release (snapshot_id, release_id, release_position)
+                VALUES (?, ?, ?)""",
+                (snapshot.snapshot_id, "missing-release", 1),
+            )
+
+
+def test_structurally_corrupt_v1_schema_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "corrupt-v1.sqlite3"
+    SQLiteEvidenceRepository(path, writable=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE published_value_input")
+
+    with pytest.raises(EvidenceSchemaError, match="schema"):
+        SQLiteEvidenceRepository(path)
+
+
+def test_failed_migration_leaves_no_version_table(tmp_path: Path) -> None:
+    class FailingMigrationRepository(SQLiteEvidenceRepository):
+        def _migration_statements(self) -> tuple[str, ...]:
+            return (*super()._migration_statements(), "CREATE TABLE (")
+
+    path = tmp_path / "migration-failure.sqlite3"
+
+    with pytest.raises(sqlite3.OperationalError):
+        FailingMigrationRepository(path, writable=True)
+
+    with sqlite3.connect(path) as connection:
+        tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    assert tables == []

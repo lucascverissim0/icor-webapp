@@ -103,7 +103,11 @@ class SQLiteEvidenceRepository:
             return None if row is None else self._published_value(connection, row)
 
     def get_snapshot(self, snapshot_id: str) -> SnapshotManifest | None:
-        return self._get_one("SELECT * FROM snapshot WHERE snapshot_id = ?", (snapshot_id,), self._snapshot)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM snapshot WHERE snapshot_id = ?", (snapshot_id,)
+            ).fetchone()
+            return None if row is None else self._snapshot(connection, row)
 
     def list_releases(self) -> tuple[ReleaseManifest, ...]:
         return self._list("SELECT * FROM source_release ORDER BY release_id", self._release)
@@ -125,7 +129,11 @@ class SQLiteEvidenceRepository:
             )
 
     def list_snapshots(self) -> tuple[SnapshotManifest, ...]:
-        return self._list("SELECT * FROM snapshot ORDER BY snapshot_id", self._snapshot)
+        with self._connect() as connection:
+            return tuple(
+                self._snapshot(connection, row)
+                for row in connection.execute("SELECT * FROM snapshot ORDER BY snapshot_id")
+            )
 
     def _prepare_writable_schema(self) -> None:
         existing = self.path.exists() and self.path.stat().st_size > 0
@@ -163,6 +171,17 @@ class SQLiteEvidenceRepository:
             raise self._integrity_error(error) from error
 
     def _migrate_v1(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in self._migration_statements():
+                connection.execute(statement)
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+
+    def _migration_statements(self) -> tuple[str, ...]:
         checks = {
             "measure": self._enum_check(Measure),
             "publication_status": self._enum_check(PublicationStatus),
@@ -171,9 +190,9 @@ class SQLiteEvidenceRepository:
             "value_status": self._enum_check(ValueStatus),
             "snapshot_status": self._enum_check(SnapshotStatus),
         }
-        with connection:
-            connection.executescript(
-                f"""
+        return tuple(
+            statement.strip()
+            for statement in f"""
                 CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 1));
                 INSERT INTO schema_version (version) VALUES (1);
                 CREATE TABLE source_release (
@@ -236,12 +255,19 @@ class SQLiteEvidenceRepository:
                 );
                 CREATE TABLE snapshot (
                     snapshot_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK (status IN {checks['snapshot_status']}),
-                    built_at TEXT NOT NULL, deterministic_seed INTEGER NOT NULL, release_ids TEXT NOT NULL,
-                    versions TEXT NOT NULL, database_sha256 TEXT NOT NULL, observation_count INTEGER NOT NULL,
+                    built_at TEXT NOT NULL, deterministic_seed INTEGER NOT NULL, versions TEXT NOT NULL,
+                    database_sha256 TEXT NOT NULL, observation_count INTEGER NOT NULL,
                     published_value_count INTEGER NOT NULL, warnings TEXT NOT NULL
                 );
-                """
-            )
+                CREATE TABLE snapshot_release (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    release_id TEXT NOT NULL REFERENCES source_release(release_id),
+                    release_position INTEGER NOT NULL,
+                    PRIMARY KEY (snapshot_id, release_position), UNIQUE (snapshot_id, release_id)
+                );
+                """.split(";")
+            if statement.strip()
+        )
 
     @staticmethod
     def _enum_check(enum_type: type[Any]) -> str:
@@ -267,7 +293,88 @@ class SQLiteEvidenceRepository:
             raise EvidenceSchemaError("evidence schema is newer than this application")
         if version != _SCHEMA_VERSION:
             raise EvidenceSchemaError("schema version is unsupported")
+        self._validate_v1_structure(connection)
         return version
+
+    def _validate_v1_structure(self, connection: sqlite3.Connection) -> None:
+        required_columns = {
+            "source_release": ["release_id", "source_id", "publisher", "source_url", "retrieved_at", "published_at", "coverage_start", "coverage_end", "geography", "geography_version", "measure", "unit", "publication_status", "dependency_group", "terms_url", "permitted_local_use", "artifact_path", "artifact_bytes", "sha256", "parser_name", "parser_version", "expected_schema", "raw_record_count", "accepted_record_count", "rejected_record_count", "quarantined_record_count"],
+            "canonical_vehicle": ["vehicle_id", "make", "model", "model_year", "market"],
+            "observation": ["observation_id", "release_id", "original_row_locator", "geography", "geography_version", "period_start", "period_end", "period_precision", "measure", "value", "unit", "publication_status", "original_make", "original_model", "original_model_year", "original_type", "source_make_identifier", "source_model_identifier", "normalized_make", "normalized_model", "normalized_model_year", "canonical_vehicle_id", "mapping_status", "transformation_notes", "validation_flags", "confidence_authority", "confidence_publication_status", "confidence_coverage", "confidence_identity", "confidence_independent_agreement", "confidence_reasons", "confidence_applied_cap"],
+            "identity_mapping": ["mapping_id", "observation_id", "canonical_vehicle_id", "status", "reason", "reviewed_at"],
+            "published_value": ["value_id", "status", "measure", "unit", "geography", "geography_version", "period_start", "period_end", "canonical_vehicle_id", "mapping_status", "value", "p10", "p50", "p90", "method_version", "confidence_authority", "confidence_publication_status", "confidence_coverage", "confidence_identity", "confidence_independent_agreement", "confidence_reasons", "confidence_applied_cap", "forecast_confidence", "warnings"],
+            "published_value_input": ["value_id", "observation_id", "input_position"],
+            "snapshot": ["snapshot_id", "status", "built_at", "deterministic_seed", "versions", "database_sha256", "observation_count", "published_value_count", "warnings"],
+            "snapshot_release": ["snapshot_id", "release_id", "release_position"],
+        }
+        primary_keys = {
+            "source_release": ("release_id",),
+            "canonical_vehicle": ("vehicle_id",),
+            "observation": ("observation_id",),
+            "identity_mapping": ("mapping_id",),
+            "published_value": ("value_id",),
+            "published_value_input": ("value_id", "observation_id"),
+            "snapshot": ("snapshot_id",),
+            "snapshot_release": ("snapshot_id", "release_position"),
+        }
+        for table, columns in required_columns.items():
+            actual_columns = {
+                row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+            if not set(columns) <= actual_columns:
+                raise EvidenceSchemaError(f"schema is structurally invalid: {table} columns")
+            actual_primary_key = tuple(
+                row["name"]
+                for row in sorted(
+                    connection.execute(f"PRAGMA table_info({table})"), key=lambda row: row["pk"]
+                )
+                if row["pk"]
+            )
+            if actual_primary_key != primary_keys[table]:
+                raise EvidenceSchemaError(f"schema is structurally invalid: {table} primary key")
+        self._require_unique_key(connection, "canonical_vehicle", ("make", "model", "model_year", "market"))
+        self._require_unique_key(connection, "observation", ("release_id", "original_row_locator"))
+        self._require_unique_key(connection, "published_value_input", ("value_id", "input_position"))
+        self._require_unique_key(connection, "snapshot_release", ("snapshot_id", "release_id"))
+        for table, expected in {
+            "observation": {
+                ("release_id", "source_release", "release_id"),
+                ("canonical_vehicle_id", "canonical_vehicle", "vehicle_id"),
+            },
+            "identity_mapping": {
+                ("observation_id", "observation", "observation_id"),
+                ("canonical_vehicle_id", "canonical_vehicle", "vehicle_id"),
+            },
+            "published_value": {("canonical_vehicle_id", "canonical_vehicle", "vehicle_id")},
+            "published_value_input": {
+                ("value_id", "published_value", "value_id"),
+                ("observation_id", "observation", "observation_id"),
+            },
+            "snapshot_release": {
+                ("snapshot_id", "snapshot", "snapshot_id"),
+                ("release_id", "source_release", "release_id"),
+            },
+        }.items():
+            actual = {
+                (row["from"], row["table"], row["to"])
+                for row in connection.execute(f"PRAGMA foreign_key_list({table})")
+            }
+            if not expected <= actual:
+                raise EvidenceSchemaError(f"schema is structurally invalid: {table} foreign keys")
+
+    @staticmethod
+    def _require_unique_key(
+        connection: sqlite3.Connection, table: str, columns: tuple[str, ...]
+    ) -> None:
+        for index in connection.execute(f"PRAGMA index_list({table})"):
+            if not index["unique"]:
+                continue
+            index_columns = tuple(
+                row["name"] for row in connection.execute(f"PRAGMA index_info({index['name']})")
+            )
+            if index_columns == columns:
+                return
+        raise EvidenceSchemaError(f"schema is structurally invalid: {table} unique key")
 
     def _insert_release(self, connection: sqlite3.Connection, release: ReleaseManifest) -> None:
         connection.execute(
@@ -337,12 +444,25 @@ class SQLiteEvidenceRepository:
             self._require_reference(connection, "canonical_vehicle", "vehicle_id", value.canonical_vehicle_id)
             for input_id in value.input_ids:
                 row = connection.execute(
-                    "SELECT mapping_status FROM observation WHERE observation_id = ?", (input_id,)
+                    """SELECT canonical_vehicle_id, mapping_status, measure, unit, geography,
+                    geography_version, period_start, period_end FROM observation
+                    WHERE observation_id = ?""",
+                    (input_id,),
                 ).fetchone()
                 if row is None:
                     raise ImmutableEvidenceError(f"evidence reference does not exist: {input_id}")
                 if row["mapping_status"] in _NON_PUBLISHABLE_STATUSES:
                     raise ImmutableEvidenceError("unresolved observation cannot publish a model value")
+                if (
+                    row["canonical_vehicle_id"] != value.canonical_vehicle_id
+                    or row["measure"] != value.measure.value
+                    or row["unit"] != value.unit
+                    or row["geography"] != value.geography
+                    or row["geography_version"] != value.geography_version
+                    or row["period_start"] != self._date(value.period_start)
+                    or row["period_end"] != self._date(value.period_end)
+                ):
+                    raise ImmutableEvidenceError("input observation is semantically incompatible")
             connection.execute(
                 """INSERT INTO published_value VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
@@ -364,14 +484,19 @@ class SQLiteEvidenceRepository:
         for release_id in snapshot.release_ids:
             self._require_reference(connection, "source_release", "release_id", release_id)
         connection.execute(
-            "INSERT INTO snapshot VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO snapshot VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 snapshot.snapshot_id, snapshot.status.value, self._datetime(snapshot.built_at),
-                snapshot.deterministic_seed, self._json(snapshot.release_ids), self._json(snapshot.versions),
+                snapshot.deterministic_seed, self._json(snapshot.versions),
                 snapshot.database_sha256, snapshot.observation_count, snapshot.published_value_count,
                 self._json(snapshot.warnings),
             ),
         )
+        for position, release_id in enumerate(snapshot.release_ids):
+            connection.execute(
+                "INSERT INTO snapshot_release VALUES (?, ?, ?)",
+                (snapshot.snapshot_id, release_id, position),
+            )
 
     @staticmethod
     def _require_reference(connection: sqlite3.Connection, table: str, column: str, value: str) -> None:
@@ -501,13 +626,21 @@ class SQLiteEvidenceRepository:
     def _load_decimal(value: str | None) -> Decimal | None:
         return None if value is None else Decimal(value)
 
-    @staticmethod
-    def _snapshot(row: sqlite3.Row) -> SnapshotManifest:
+    @classmethod
+    def _snapshot(cls, connection: sqlite3.Connection, row: sqlite3.Row) -> SnapshotManifest:
         versions = SnapshotVersions(**json.loads(row["versions"]))
+        release_ids = tuple(
+            member["release_id"]
+            for member in connection.execute(
+                """SELECT release_id FROM snapshot_release WHERE snapshot_id = ?
+                ORDER BY release_position""",
+                (row["snapshot_id"],),
+            )
+        )
         return SnapshotManifest(
             snapshot_id=row["snapshot_id"], status=SnapshotStatus(row["status"]),
             built_at=datetime.fromisoformat(row["built_at"]), deterministic_seed=row["deterministic_seed"],
-            release_ids=tuple(json.loads(row["release_ids"])), versions=versions,
+            release_ids=release_ids, versions=versions,
             database_sha256=row["database_sha256"], observation_count=row["observation_count"],
             published_value_count=row["published_value_count"], warnings=tuple(json.loads(row["warnings"])),
         )

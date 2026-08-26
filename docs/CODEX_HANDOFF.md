@@ -559,3 +559,19 @@ passed 16/16. Fresh Ruff output was `All checks passed!`; full pytest ran 194 co
 tests with 187 passed, 3 Windows symlink-privilege skips, and exactly the four documented
 strict XFAILs. The unrelated `AGENTS.md` modification remains untouched. Detailed
 ignored report: `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
+
+Task 4 fix round 1 hardens the SQLite ledger after review. Published values now reject
+each input observation unless canonical vehicle, measure, unit, geography and version,
+and exact period match. SQLite v1 now has a normalized `snapshot_release` table with
+ordered membership and database foreign keys rather than a JSON release-ID bundle.
+Schema inspection validates all required tables, columns, primary/unique keys, and
+foreign keys; migration executes each statement inside an explicit transaction so a
+late DDL error rolls back without even a schema-version table. Tests now exercise the
+actual SQLite read-only connection, full published-value and snapshot round-trips,
+canonical identity uniqueness, all list orderings, membership foreign keys, schema
+corruption, and migration rollback. TDD evidence: 9 regressions first failed for the
+known missing checks; focused verification passed 29/29; Ruff reported `All checks
+passed!`; full pytest reported 200 passed, 3 Windows symlink-privilege skips, and the
+four documented strict XFAILs. The unrelated `AGENTS.md` modification remains
+untouched. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
