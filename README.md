@@ -35,3 +35,12 @@ local production-coverage state in an ignored SQLite database. It supports exact
 configuration/SKU coverage and an explicitly lower-precision vehicle-year fallback;
 it is not a multi-user or production data store. The existing Streamlit application
 remains available separately and is not modified or deployed by this workflow.
+
+## Evidence snapshot foundation
+
+The repository now has a local, immutable evidence-release and snapshot foundation.
+Its operator workflow, recovery rules, and data-handling constraints are documented in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#evidence-snapshot-foundation). This is only
+the safety foundation: it contains no real EEA, KBA, or UK parser; no forecast; no API
+replacement; and no fixture fallback. The retained CSV fixture is fictional contract-test
+data, not an acquisition source or an application data fallback.

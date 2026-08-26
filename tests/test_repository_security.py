@@ -20,23 +20,44 @@ BINARY_EXTENSIONS = {
 }
 
 
-def test_tracked_text_files_contain_no_openai_credential_shape() -> None:
-    result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    )
+def credential_shape_violations(
+    repository_root: Path, relative_paths: tuple[str, ...] | None = None
+) -> list[str]:
+    """Scan repository text files with the same credential boundary used by this suite."""
+    if relative_paths is None:
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+        )
+        relative_paths = tuple(
+            raw_path.decode("utf-8") for raw_path in result.stdout.split(b"\0") if raw_path
+        )
+
     violations: list[str] = []
-    for raw_path in result.stdout.split(b"\0"):
-        if not raw_path:
-            continue
-        relative_path = raw_path.decode("utf-8")
-        path = ROOT / relative_path
+    for relative_path in relative_paths:
+        path = repository_root / relative_path
         if path.suffix.casefold() in BINARY_EXTENSIONS:
             continue
         if CREDENTIAL_SHAPE.search(path.read_bytes()):
             violations.append(relative_path)
+    return violations
+
+
+def git_check_ignore(repository_root: Path, relative_path: str) -> bool:
+    result = subprocess.run(
+        ["git", "check-ignore", "--", relative_path],
+        cwd=repository_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def test_tracked_text_files_contain_no_openai_credential_shape() -> None:
+    violations = credential_shape_violations(ROOT)
 
     assert not violations, "Credential-like token in tracked file(s): " + ", ".join(violations)
 
@@ -45,14 +66,21 @@ def test_local_secret_template_is_safe_and_real_secrets_remain_ignored() -> None
     example = (ROOT / ".streamlit" / "secrets.example.toml").read_text(encoding="utf-8")
     assert "sk-" not in example
 
-    result = subprocess.run(
-        ["git", "check-ignore", ".streamlit/secrets.toml"],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
+    assert git_check_ignore(ROOT, ".streamlit/secrets.toml")
+
+
+def test_runtime_evidence_and_candidate_snapshots_are_ignored() -> None:
+    assert git_check_ignore(
+        ROOT, ".local/evidence/candidates/example/evidence.sqlite3"
     )
-    assert result.returncode == 0
+
+
+def test_fictional_source_fixture_is_clear_to_repository_credential_scanner() -> None:
+    findings = credential_shape_violations(
+        ROOT, ("tests/fixtures/sources/sample-registration.csv",)
+    )
+
+    assert findings == []
 
 
 def test_development_guide_documents_reproducible_local_commands() -> None:

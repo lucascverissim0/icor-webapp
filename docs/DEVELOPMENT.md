@@ -63,6 +63,60 @@ Tests disable network sockets and clear integration credential environment
 variables. They must not overwrite `data/passenger_car_data.xlsx` or canonical
 source data.
 
+## Evidence snapshot foundation
+
+The evidence CLI stores all runtime state below an explicit, ignored local root. Before
+acquiring any source, review and record the source's terms, permitted local use,
+redistribution restrictions, attribution, retention/deletion requirements, and any
+personal-data restrictions. Do not download or stage a source until that review supports
+the intended use. Never put credentials, customer data, unapproved copyrighted extracts,
+or real source files in Git.
+
+The following commands show the exact local command boundary. The fixture paths are
+fictional contract-test data only; use a reviewed real manifest and artifact only in a
+later approved source-acquisition plan.
+
+```powershell
+$evidenceRoot = '.local/evidence'
+$manifest = 'tests/fixtures/sources/sample-registration.manifest.json'
+$artifact = 'tests/fixtures/sources/sample-registration.csv'
+
+uv run python -c "from pathlib import Path; from icor.evidence.release_manifests import load_release_manifest; print(load_release_manifest(Path('tests/fixtures/sources/sample-registration.manifest.json')).release_id)"
+uv run python scripts/build_evidence_snapshot.py stage-release --root $evidenceRoot --manifest $manifest --artifact $artifact
+uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot --release sample-registration-2024 --build-as-of 2026-08-27T00:00:00+00:00 --deterministic-seed 0
+uv run python scripts/build_evidence_snapshot.py promote --root $evidenceRoot --snapshot <candidate-snapshot-id>
+uv run python scripts/build_evidence_snapshot.py status --root $evidenceRoot
+uv run python scripts/build_evidence_snapshot.py verify --root $evidenceRoot
+```
+
+The manifest command is the pre-stage validation boundary. `stage-release` verifies
+the declared byte count and SHA-256 before immutably storing the artifact and manifest.
+`build` verifies the staged release and candidate ledger, then emits a candidate only
+when validation permits promotion; `promote` revalidates it before atomically changing
+the active pointer; `status` reports the active pointer state; and `verify` opens the
+active SQLite repository read-only and validates the pointed snapshot.
+
+At this checkpoint the public CLI deliberately has no registered parser. The example
+`build` therefore returns the typed `unsupported_parser` result (exit 2), and `promote`
+cannot proceed because no candidate was created. That is intentional: there is no real
+EEA, KBA, or UK parser, no forecast, no API replacement, and no fixture fallback. A
+future approved source plan must add a reviewed parser through application composition
+before a candidate can be built; it must not substitute the test fixture.
+
+All source-release directories and promoted snapshot directories are immutable. A failed
+build or promotion leaves the current active snapshot unchanged, and promotion never
+deletes an earlier snapshot. If `active.json` is missing or corrupt, do not hand-edit it:
+re-promote a retained known-good candidate by its snapshot ID, or rebuild from verified
+staged releases when no valid candidate remains. An unavailable or invalid active state
+must remain unavailable; the application must not fall back to fixtures.
+
+Local evidence state is ignored by Git but can still be consequential. Deleting the
+exact evidence root removes locally staged source copies, candidates, snapshots, and any
+active-pointer recovery path; it is not reversible through Git. Stop local processes,
+preserve any required retention/terms evidence, and back up the exact root if recovery is
+needed before deleting it. Never recursively delete `.local/` or a path resolved from an
+unverified environment variable.
+
 Verify the planner contract and frontend:
 
 ```powershell

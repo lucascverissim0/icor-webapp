@@ -831,3 +831,52 @@ restored implementation passed. Fresh verification reported 1 focused pass, 67 p
 and eight explicit Windows symlink-privilege skips across affected suites, and clean
 scoped Ruff. The unrelated `AGENTS.md` change and deferred argparse Minor remain
 untouched; no server or external process was started.
+
+Task 8 records the evidence-snapshot foundation checkpoint from exact predecessor
+`d79613348f430f529392426036534b26e3a974c8` on
+`development/windshield-demand-platform`. The checkpoint commit message is
+`docs: document evidence snapshot foundation`. `README.md` and `docs/DEVELOPMENT.md`
+now document the explicit local evidence commands, source-terms review before
+acquisition, immutable release/snapshot storage, atomic active-pointer recovery, and
+the irreversible implications of deleting local ignored evidence state. They explicitly
+state the current limits: no real EEA/KBA/UK parser, forecast, API replacement, or
+fixture fallback. The default CLI deliberately returns typed `unsupported_parser` for
+the fictional sample build until a future reviewed parser is supplied through application
+composition; it must not fall back to fixture data.
+
+The repository-security boundary now has two focused behavior regressions: `git
+check-ignore` proves candidate evidence SQLite state is ignored, and the retained
+fictional registration CSV is run through the same credential-shape scanner used for
+tracked text files and produces no finding. TDD RED was
+`uv run pytest tests/test_repository_security.py -v`, which reported 3 passed and 2
+expected helper-boundary `NameError` failures. After extracting the scanner and
+`git check-ignore` helpers without weakening the existing tracked-file check, the same
+focused command reported 5 passed in 0.31s. The documented manifest-validation command
+was also run and printed only `sample-registration-2024`.
+
+Fresh Task 8 foundation verification on 2026-08-27:
+
+- `uv lock --check` reported `Resolved 105 packages in 2ms`.
+- `uv run ruff check src tests scripts/audit_baseline.py scripts/build_evidence_snapshot.py`
+  reported `All checks passed!`. This is the maintained foundation gate; the broad
+  `scripts` diagnostic remains excluded because it has 486 pre-existing untouched
+  legacy-script findings.
+- `uv run pytest -p no:cacheprovider -q` reported `300 passed, 8 skipped, 4 xfailed in
+  23.64s`. Every skip was the documented Windows symlink-privilege (`WinError 1314`)
+  limitation. The strict legacy XFAILs remain `ICOR-001`, `ICOR-006`, `ICOR-009`, and
+  `ICOR-030`.
+- `uv run pip-audit` reported no known vulnerabilities and skipped only the unpublished
+  local package `icor-windshield-demand`.
+- `git diff --check` exited 0 with only existing Windows line-ending warnings. Before
+  adding this handoff entry, `git status --short` contained only the intended
+  `README.md`, `docs/DEVELOPMENT.md`, and `tests/test_repository_security.py` changes
+  plus the unrelated pre-existing `AGENTS.md` modification.
+
+No evidence CLI, Streamlit, deployment, source acquisition, production/customer-data,
+push, merge, or main-branch action occurred in Task 8. No new process was started.
+Previously documented local processes remain running: Python PID 9732 (planner launcher)
+and uv PID 18272 (opportunity-review launcher); the older Streamlit PID 7604 is no
+longer running. The next plan is an approved EEA release acquisition/profile/parser and
+source-level snapshot implementation, including terms review and parser composition;
+it must keep KBA/UK parsing, forecasting, API replacement, and fixture fallback out of
+scope until separately planned.
