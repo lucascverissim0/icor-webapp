@@ -551,19 +551,6 @@ a {
   gap: 0.15rem;
 }
 
-.exposure-alias {
-  color: var(--ink-muted);
-  font-size: 0.78rem;
-  font-weight: 500;
-}
-
-.equipment-alias {
-  margin-left: 0.35rem;
-  color: var(--ink-muted);
-  font-size: 0.78rem;
-  font-weight: 500;
-}
-
 .detail-section {
   padding: clamp(1rem, 4vw, 1.5rem);
 }
@@ -746,7 +733,7 @@ a {
   }
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1680px) {
   .planner-detail-route {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(26rem, 34rem);

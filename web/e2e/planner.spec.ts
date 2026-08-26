@@ -27,7 +27,7 @@ test('retries a recoverable configurations failure without losing controls', asy
   let requests = 0
   await page.route('**/api/v1/planner/configurations*', async (route) => {
     requests += 1
-    if (requests === 1) {
+    if (requests <= 2) {
       await route.fulfill({
         contentType: 'application/json',
         status: 500,
