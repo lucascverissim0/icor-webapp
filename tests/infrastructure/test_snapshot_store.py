@@ -4,7 +4,9 @@ import os
 import sqlite3
 import stat
 import subprocess
+import sys
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import replace
@@ -20,7 +22,7 @@ from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVers
 from icor.evidence.serialization import canonical_json_bytes, sha256_file
 from icor.evidence.validation import SnapshotValidator
 from icor.infrastructure.release_store import ReleaseStore, StoredRelease
-from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem, SnapshotPathError
 from icor.infrastructure.snapshot_store import (
     SnapshotPromotionError,
     SnapshotStore,
@@ -207,7 +209,9 @@ def test_interrupted_pointer_write_preserves_previous_active_snapshot(
             raise OSError("simulated interruption")
         replace_file(source, destination)
 
-    monkeypatch.setattr("icor.infrastructure.snapshot_store.os.replace", interrupt_active_replace)
+    monkeypatch.setattr(
+        "icor.infrastructure.snapshot_filesystem.os.replace", interrupt_active_replace
+    )
 
     with pytest.raises(SnapshotPromotionError):
         snapshot_store.promote(second.manifest.snapshot_id)
@@ -326,6 +330,46 @@ def test_promotion_rejects_changed_persisted_release_hash_with_old_snapshot_id(
     assert not snapshot_store.active_path.exists()
 
 
+def test_promotion_rejects_extra_persisted_release_and_preserves_active_pointer(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    first = builder.build(build_request)
+    second = builder.build(
+        replace(
+            build_request,
+            versions=replace(build_request.versions, hazard_method="hazard-v2"),
+        )
+    )
+    snapshot_store.promote(first.manifest.snapshot_id)
+    active_bytes = snapshot_store.active_path.read_bytes()
+    extra_release = replace(
+        _manifest(),
+        release_id="extra-2024-20260826",
+        source_id="extra",
+        dependency_group="extra-direct",
+    )
+    SQLiteEvidenceRepository(second.database_path, writable=True).add_release(
+        extra_release
+    )
+    with closing(sqlite3.connect(second.database_path)) as connection:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("PRAGMA journal_mode = DELETE")
+        connection.execute("VACUUM")
+    changed = replace(
+        second.manifest,
+        database_sha256=sha256_file(second.database_path),
+    )
+    _rewrite_candidate_manifest(second.candidate_path, changed)
+
+    with pytest.raises(SnapshotPromotionError, match="release|identity"):
+        snapshot_store.promote(second.manifest.snapshot_id)
+
+    assert snapshot_store.active_path.read_bytes() == active_bytes
+    assert snapshot_store.active_manifest() == first.manifest
+
+
 @pytest.mark.parametrize(
     "manifest_change",
     [
@@ -369,10 +413,19 @@ class RecordingFilesystem(SnapshotFilesystem):
         self,
         source: Path,
         destination: Path,
-        verify: object,
+        verify: Callable[[], None],
+        *,
+        stable_directory: Path,
+        stable_files: tuple[Path, ...],
     ) -> None:
         self.events.append(("replace_file", destination))
-        super().replace_verified_file(source, destination, verify)  # type: ignore[arg-type]
+        super().replace_verified_file(
+            source,
+            destination,
+            verify,
+            stable_directory=stable_directory,
+            stable_files=stable_files,
+        )
 
 
 def test_promotion_flushes_files_and_directories_in_durable_order(
@@ -488,12 +541,21 @@ class TamperingFilesystem(SnapshotFilesystem):
         self,
         source: Path,
         destination: Path,
-        verify: object,
+        verify: Callable[[], None],
+        *,
+        stable_directory: Path,
+        stable_files: tuple[Path, ...],
     ) -> None:
         self.target_database.chmod(stat.S_IREAD | stat.S_IWRITE)
         with self.target_database.open("ab") as database:
             database.write(b"tampered-before-pointer")
-        super().replace_verified_file(source, destination, verify)  # type: ignore[arg-type]
+        super().replace_verified_file(
+            source,
+            destination,
+            verify,
+            stable_directory=stable_directory,
+            stable_files=stable_files,
+        )
 
 
 def test_tamper_between_target_validation_and_pointer_replace_preserves_active(
@@ -521,6 +583,47 @@ def test_tamper_between_target_validation_and_pointer_replace_preserves_active(
 
     with pytest.raises(SnapshotPromotionError):
         tampering_store.promote(second.manifest.snapshot_id)
+
+    assert initial_store.active_path.read_bytes() == active_bytes
+    assert initial_store.active_manifest() == first.manifest
+
+
+class SwappingAfterVerificationFilesystem(SnapshotFilesystem):
+    def __init__(self, target: Path) -> None:
+        self.target = target
+        self.displaced = target.with_name(f"{target.name}.displaced")
+
+    def replace_atomic_file(self, source: Path, destination: Path) -> None:
+        try:
+            self.target.rename(self.displaced)
+        except PermissionError as error:
+            raise SnapshotPathError("stable snapshot blocked target swap") from error
+        super().replace_atomic_file(source, destination)
+
+
+def test_target_swap_after_verification_preserves_last_known_good_pointer(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    first = builder.build(build_request)
+    second = builder.build(
+        replace(
+            build_request,
+            versions=replace(build_request.versions, forecast_method="forecast-v2"),
+        )
+    )
+    initial_store = SnapshotStore(evidence_root)
+    initial_store.promote(first.manifest.snapshot_id)
+    active_bytes = initial_store.active_path.read_bytes()
+    second_target = evidence_root / "snapshots" / second.manifest.snapshot_id
+    store = SnapshotStore(
+        evidence_root,
+        filesystem=SwappingAfterVerificationFilesystem(second_target),
+    )
+
+    with pytest.raises(SnapshotPromotionError, match="stable|changed|failed|unsafe"):
+        store.promote(second.manifest.snapshot_id)
 
     assert initial_store.active_path.read_bytes() == active_bytes
     assert initial_store.active_manifest() == first.manifest
@@ -579,3 +682,36 @@ def test_concurrent_same_snapshot_promotion_reuses_identical_pointer_bytes(
 
     assert first_pointer == second_pointer == store.active_path.read_bytes()
     assert clock_calls == 1
+
+
+def test_crashed_process_releases_promotion_lock_for_next_promoter(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    candidate = builder.build(build_request)
+    script = """
+import os
+import sys
+from pathlib import Path
+
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem
+
+with SnapshotFilesystem().promotion_lock(Path(sys.argv[1])):
+    print("locked", flush=True)
+    os._exit(73)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", script, str(evidence_root)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout is not None
+    assert process.stdout.readline().strip() == "locked"
+    _, stderr = process.communicate(timeout=5)
+    assert process.returncode == 73, stderr
+
+    promoted = SnapshotStore(evidence_root).promote(candidate.manifest.snapshot_id)
+
+    assert promoted == candidate.manifest

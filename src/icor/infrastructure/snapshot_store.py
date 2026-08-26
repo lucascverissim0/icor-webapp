@@ -201,6 +201,10 @@ class SnapshotStore:
             releases_by_id = {
                 release.release_id: release for release in repository.list_releases()
             }
+            if tuple(sorted(releases_by_id)) != manifest.release_ids:
+                raise SnapshotPromotionError(
+                    "candidate snapshot release identity set does not match"
+                )
             try:
                 release_artifact_hashes = tuple(
                     (release_id, releases_by_id[release_id].sha256)
@@ -286,6 +290,8 @@ class SnapshotStore:
                 temporary_path,
                 self.active_path,
                 verify_target,
+                stable_directory=target,
+                stable_files=tuple(target / name for name in sorted(_CANDIDATE_FILES)),
             )
             self.filesystem.fsync_directory(self.root)
         except OSError as error:

@@ -697,3 +697,21 @@ tests` passed. The detailed ignored report is
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
 The unrelated `AGENTS.md` modification remains untouched; no server or external process
 was started.
+
+Task 6 fix round 2 closes the remaining exact-set, stable-publication, and crash-lock
+blockers. Promotion now rejects any mismatch between the complete persisted
+`source_release` ID set and manifest release IDs. Final verification and pointer
+replacement run while no-follow identity handles remain open for the target directory
+and all three files: Windows handles deny write/delete sharing, while POSIX descriptors
+anchor device/inode identity; held file bytes and path identities are checked before
+and after replacement, with atomic restoration of the prior pointer on detected change.
+The promotion lock is now an OS-owned byte/range lock (`msvcrt.locking` or
+`fcntl.flock`) whose ownership disappears on process death. RED reproduced extra-release
+acceptance, a real post-verification target rename, and a subprocess crash leaving the
+old directory lock until timeout. Final focused verification reported 39 passed and
+four explicit Windows symlink-privilege skips; full pytest reported 285 passed, 7
+skipped, and the four documented strict XFAILs. `uv run ruff check src tests` passed.
+Detailed ignored evidence is in
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
+The unrelated `AGENTS.md` change remains untouched; no server or external process was
+started.
