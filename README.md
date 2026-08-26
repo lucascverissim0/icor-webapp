@@ -26,6 +26,12 @@ cd ..
 uv run python scripts/run_planner_dev.py
 ```
 
-Open the planner at `http://127.0.0.1:5173/planner` and the API documentation at
-`http://127.0.0.1:8000/docs`. The existing Streamlit application remains available
-separately and is not modified or deployed by this workflow.
+Open the configuration planner at `http://127.0.0.1:5173/planner`, the opportunity
+ranking at `http://127.0.0.1:5173/opportunities`, and the API documentation at
+`http://127.0.0.1:8000/docs`.
+
+The opportunity ranking uses the same synthetic demonstration forecast plus shared
+local production-coverage state in an ignored SQLite database. It supports exact
+configuration/SKU coverage and an explicitly lower-precision vehicle-year fallback;
+it is not a multi-user or production data store. The existing Streamlit application
+remains available separately and is not modified or deployed by this workflow.

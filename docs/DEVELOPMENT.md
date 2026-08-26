@@ -100,9 +100,11 @@ uv run python scripts/run_planner_dev.py --check
 uv run python scripts/run_planner_dev.py
 ```
 
-Open `http://127.0.0.1:5173/planner` for the planner and
-`http://127.0.0.1:8000/docs` for the FastAPI contract. Stop both processes with
-`Ctrl+C`. If separate terminals are preferable, run the API from the repository root:
+Open `http://127.0.0.1:5173/planner` for configuration planning,
+`http://127.0.0.1:5173/opportunities` for opportunity ranking and local production
+coverage, and `http://127.0.0.1:8000/docs` for the FastAPI contract. Stop both
+processes with `Ctrl+C`. If separate terminals are preferable, run the API from the
+repository root:
 
 ```powershell
 uv run uvicorn icor.api.app:create_app --factory --host 127.0.0.1 --port 8000
@@ -113,6 +115,32 @@ Then run the web client from `web`:
 ```powershell
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
+
+### Local production-coverage state
+
+By default the opportunity page stores coverage records at the ignored path
+`.local/production-coverage.sqlite3`. Set `ICOR_COVERAGE_DB` before starting the API
+to use a different local database:
+
+```powershell
+$env:ICOR_COVERAGE_DB = 'C:\path\to\local\production-coverage.sqlite3'
+uv run python scripts/run_planner_dev.py
+```
+
+The database is shared by every browser using that local API and currently has no
+authentication, authorization, user attribution, backup, or audit-grade history.
+Store no secrets, customer data, or proprietary catalog exports in notes. The app
+refuses unsupported or corrupt schema versions instead of deleting or rebuilding the
+file automatically.
+
+If a disposable local database must be reset, stop the API first and move the exact
+configured SQLite file to a backup location. Do not recursively delete `.local/` or
+remove an unresolved environment-variable path.
+
+Forecast and fitment values remain synthetic demonstration evidence. Connecting the
+company catalog and tracked replacement history requires a separately approved,
+validated ingestion contract; SQLite coverage records alone do not make the forecast
+production-valid.
 
 The planner and the legacy Streamlit app can coexist on their separate ports. No
 production deployment, proprietary fitment integration, or customer-data migration

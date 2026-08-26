@@ -1,4 +1,3 @@
-from dataclasses import replace
 from datetime import UTC, datetime
 
 from icor.application.planner import PlannerService
@@ -8,6 +7,7 @@ from icor.domain.planner import (
     DemandRange,
     Equipment,
     EvidenceStatus,
+    ModelYearDemand,
     PlannerQuery,
     PlanningConfiguration,
     SourceSummary,
@@ -23,6 +23,8 @@ def configuration(
     horizon: int,
     base_units: int,
 ) -> PlanningConfiguration:
+    demand = DemandRange(base_units - 10, base_units, base_units + 20)
+    source = SourceSummary("Synthetic source", "Demonstration evidence.")
     return PlanningConfiguration(
         configuration_id=configuration_id,
         sku=None,
@@ -38,15 +40,26 @@ def configuration(
         drive_side=None,
         equipment=Equipment(None, None, None, None, None),
         forecast_horizon=horizon,
-        demand=DemandRange(base_units - 10, base_units, base_units + 20),
+        demand=demand,
         vehicle_exposure_units=5_000,
         replacement_rate=0.02,
         identity_confidence=Confidence(ConfidenceLevel.MEDIUM, "Synthetic identity."),
         data_quality_confidence=Confidence(ConfidenceLevel.LOW, "Demonstration values."),
         evidence_status=EvidenceStatus.DEMONSTRATION,
-        sources=(SourceSummary("Synthetic source", "Demonstration evidence."),),
+        sources=(source,),
         updated_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
         data_version="demo-planner-v1",
+        model_year_demand=(
+            ModelYearDemand(
+                configuration_id=configuration_id,
+                model_year=2024,
+                forecast_horizon=horizon,
+                demand=demand,
+                evidence_status=EvidenceStatus.DEMONSTRATION,
+                data_version="demo-planner-v1",
+                sources=(source,),
+            ),
+        ),
     )
 
 
@@ -63,6 +76,9 @@ class FakeRepository:
             None,
         )
 
+    def list_model_year_demand(self) -> tuple[ModelYearDemand, ...]:
+        return tuple(demand for row in self.records for demand in row.model_year_demand)
+
 
 def records() -> tuple[PlanningConfiguration, ...]:
     first = configuration(
@@ -75,20 +91,21 @@ def records() -> tuple[PlanningConfiguration, ...]:
     )
     return (
         first,
-        replace(
-            first,
-            configuration_id="demo-de-a",
+        configuration(
+            "demo-de-a",
             market="DE",
             brand="Aurora",
             model="A1",
-            forecast_horizon=2028,
-            demand=DemandRange(180, 200, 240),
+            horizon=2028,
+            base_units=200,
         ),
-        replace(
-            first,
-            configuration_id="demo-fr-b",
+        configuration(
+            "demo-fr-b",
+            market="FR",
+            brand="Renault",
             model="Scenic Vision",
-            demand=DemandRange(130, 150, 190),
+            horizon=2030,
+            base_units=150,
         ),
     )
 
