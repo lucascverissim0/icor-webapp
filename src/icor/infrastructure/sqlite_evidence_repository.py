@@ -209,8 +209,7 @@ class SQLiteEvidenceRepository:
                 );
                 CREATE TABLE canonical_vehicle (
                     vehicle_id TEXT PRIMARY KEY, make TEXT NOT NULL, model TEXT NOT NULL,
-                    model_year INTEGER NOT NULL, market TEXT NOT NULL,
-                    UNIQUE (make, model, model_year, market)
+                    model_year INTEGER NOT NULL, market TEXT NOT NULL
                 );
                 CREATE TABLE observation (
                     observation_id TEXT PRIMARY KEY, release_id TEXT NOT NULL REFERENCES source_release(release_id),
@@ -228,7 +227,7 @@ class SQLiteEvidenceRepository:
                     confidence_authority INTEGER NOT NULL, confidence_publication_status INTEGER NOT NULL,
                     confidence_coverage INTEGER NOT NULL, confidence_identity INTEGER NOT NULL,
                     confidence_independent_agreement INTEGER NOT NULL, confidence_reasons TEXT NOT NULL,
-                    confidence_applied_cap INTEGER, UNIQUE (release_id, original_row_locator)
+                    confidence_applied_cap INTEGER
                 );
                 CREATE TABLE identity_mapping (
                     mapping_id TEXT PRIMARY KEY, observation_id TEXT NOT NULL REFERENCES observation(observation_id),
@@ -265,6 +264,10 @@ class SQLiteEvidenceRepository:
                     release_position INTEGER NOT NULL,
                     PRIMARY KEY (snapshot_id, release_position), UNIQUE (snapshot_id, release_id)
                 );
+                CREATE UNIQUE INDEX canonical_vehicle_identity_idx
+                ON canonical_vehicle (make, model, model_year, market);
+                CREATE UNIQUE INDEX observation_release_row_locator_idx
+                ON observation (release_id, original_row_locator);
                 """.split(";")
             if statement.strip()
         )
@@ -297,23 +300,58 @@ class SQLiteEvidenceRepository:
         return version
 
     def _validate_v1_structure(self, connection: sqlite3.Connection) -> None:
-        expected = {
-            statement.split()[2]: self._normalize_schema_sql(statement)
-            for statement in self._migration_statements()
-            if statement.startswith("CREATE TABLE")
-        }
-        actual = {
+        expected_tables, expected_indexes = self._v1_schema_contract()
+        actual_tables = {
             row["name"]: self._normalize_schema_sql(row["sql"])
             for row in connection.execute(
                 "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
-        if actual != expected:
+        actual_indexes = {
+            row["name"]: self._normalize_schema_sql(row["sql"])
+            for row in connection.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL"
+            )
+        }
+        if actual_tables != expected_tables or actual_indexes != expected_indexes:
             raise EvidenceSchemaError("schema is structurally invalid")
+
+    def _v1_schema_contract(self) -> tuple[dict[str, str], dict[str, str]]:
+        tables: dict[str, str] = {}
+        indexes: dict[str, str] = {}
+        for statement in self._migration_statements():
+            tokens = statement.split()
+            if statement.startswith("CREATE TABLE"):
+                tables[tokens[2]] = self._normalize_schema_sql(statement)
+            elif statement.startswith("CREATE") and "INDEX" in tokens:
+                indexes[tokens[tokens.index("INDEX") + 1]] = self._normalize_schema_sql(statement)
+        return tables, indexes
 
     @staticmethod
     def _normalize_schema_sql(statement: str) -> str:
-        return " ".join(statement.removesuffix(";").split()).lower()
+        normalized: list[str] = []
+        index = 0
+        in_string = False
+        while index < len(statement):
+            character = statement[index]
+            if in_string:
+                normalized.append(character)
+                if character == "'":
+                    if index + 1 < len(statement) and statement[index + 1] == "'":
+                        normalized.append("'")
+                        index += 1
+                    else:
+                        in_string = False
+            elif character == "'":
+                normalized.append(character)
+                in_string = True
+            elif character.isspace():
+                if normalized and normalized[-1] != " ":
+                    normalized.append(" ")
+            else:
+                normalized.append(character.lower())
+            index += 1
+        return "".join(normalized).strip().removesuffix(";")
 
     def _insert_release(self, connection: sqlite3.Connection, release: ReleaseManifest) -> None:
         connection.execute(

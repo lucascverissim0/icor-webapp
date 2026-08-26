@@ -576,6 +576,18 @@ four documented strict XFAILs. The unrelated `AGENTS.md` modification remains
 untouched. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
 
+Task 4 fix round 3 closes the remaining schema-fingerprint gaps. SQL normalization now
+lowercases and collapses whitespace only outside single-quoted literals, preserving
+literal case and escaped quotes; a changed enum literal is therefore rejected. The v1
+migration now declares named unique indexes for canonical vehicle identity and source
+row location. Schema validation compares the exact set of application-owned tables and
+explicit indexes (while SQLite autoindexes remain deliberately excluded because their
+SQL is null), rejecting either a missing required index or an unexpected one. TDD RED
+reported the expected enum-literal and two index failures; focused ledger verification
+then passed 36 tests and Ruff passed. The deferred module-wide E501 suppression and
+unrelated `AGENTS.md` change remain untouched. Detailed ignored report:
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-4-report.md`.
+
 Task 4 fix round 2 completes the v1 schema-integrity boundary. Instead of checking
 only names, the ledger now derives a canonical fingerprint for every `CREATE TABLE`
 statement from the v1 migration and compares it to SQLite's persisted schema. This

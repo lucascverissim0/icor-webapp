@@ -520,6 +520,10 @@ def test_structurally_corrupt_v1_schema_is_refused(tmp_path: Path) -> None:
             "measure TEXT NOT NULL CHECK (measure IN ('new_registrations', 'active_fleet'))",
             "measure TEXT NOT NULL",
         ),
+        (
+            "'new_registrations'",
+            "'NEW_REGISTRATIONS'",
+        ),
         ("artifact_bytes INTEGER NOT NULL", "artifact_bytes TEXT NOT NULL"),
         ("publisher TEXT NOT NULL", "publisher TEXT"),
     ),
@@ -539,6 +543,35 @@ def test_schema_contract_rejects_altered_column_constraints(
 
     with pytest.raises(EvidenceSchemaError, match="schema"):
         SQLiteEvidenceRepository(path)
+
+
+def test_schema_contract_rejects_missing_required_explicit_index(tmp_path: Path) -> None:
+    path = tmp_path / "missing-index.sqlite3"
+    SQLiteEvidenceRepository(path, writable=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP INDEX IF EXISTS observation_release_row_locator_idx")
+
+    with pytest.raises(EvidenceSchemaError, match="schema"):
+        SQLiteEvidenceRepository(path)
+
+
+def test_schema_contract_rejects_unexpected_explicit_index(tmp_path: Path) -> None:
+    path = tmp_path / "unexpected-index.sqlite3"
+    SQLiteEvidenceRepository(path, writable=True)
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE INDEX unexpected_source_index ON source_release (source_id)")
+
+    with pytest.raises(EvidenceSchemaError, match="schema"):
+        SQLiteEvidenceRepository(path)
+
+
+def test_schema_normalization_preserves_escaped_string_literal_content() -> None:
+    original = "CHECK (reason = 'O''Brien')"
+    changed = "CHECK (reason = 'O''BRIEN')"
+
+    assert SQLiteEvidenceRepository._normalize_schema_sql(original) != (
+        SQLiteEvidenceRepository._normalize_schema_sql(changed)
+    )
 
 
 def test_failed_migration_leaves_no_version_table(tmp_path: Path) -> None:
