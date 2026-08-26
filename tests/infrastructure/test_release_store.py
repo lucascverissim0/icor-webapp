@@ -1,3 +1,4 @@
+import shutil
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from hashlib import sha256
@@ -52,8 +53,12 @@ def sha256_file_bytes(value: bytes) -> str:
     return sha256(value).hexdigest()
 
 
-def source_artifact(tmp_path: Path, contents: bytes = b"make,model,count\nA,B,1\n") -> Path:
-    artifact = tmp_path / "incoming.csv"
+def source_artifact(
+    tmp_path: Path,
+    contents: bytes = b"make,model,count\nA,B,1\n",
+    name: str = "incoming.csv",
+) -> Path:
+    artifact = tmp_path / name
     artifact.write_bytes(contents)
     return artifact
 
@@ -93,6 +98,35 @@ def test_existing_release_cannot_be_replaced(store: ReleaseStore, tmp_path: Path
     assert store.verify(first.release_id).artifact_path.read_bytes() == b"one"
 
 
+def test_stage_preserves_destination_created_during_publish(
+    store: ReleaseStore,
+    release_manifest: ReleaseManifest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = store.root / release_manifest.source_id / release_manifest.release_id
+    copy_with_fsync = store._copy_with_fsync
+    path_rename = Path.rename
+
+    def create_colliding_destination(source_path: Path, staged_path: Path) -> None:
+        copy_with_fsync(source_path, staged_path)
+        destination.mkdir(parents=True)
+
+    def replace_empty_destination(staging: Path, target: Path) -> Path:
+        if staging.parent.name == ".staging" and target == destination and target.exists():
+            shutil.rmtree(target)
+        return path_rename(staging, target)
+
+    monkeypatch.setattr(store, "_copy_with_fsync", create_colliding_destination)
+    monkeypatch.setattr(Path, "rename", replace_empty_destination)
+
+    with pytest.raises(ReleaseIntegrityError, match="incomplete"):
+        store.stage(source_artifact(tmp_path), release_manifest)
+
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
 def test_stage_rejects_source_artifact_that_does_not_match_manifest(
     store: ReleaseStore, release_manifest: ReleaseManifest, tmp_path: Path
 ) -> None:
@@ -112,6 +146,60 @@ def test_verify_rejects_post_stage_artifact_corruption(
 
     with pytest.raises(ReleaseIntegrityError):
         store.verify(release_manifest.release_id)
+
+
+def test_get_rejects_a_symlinked_source_directory(
+    store: ReleaseStore, release_manifest: ReleaseManifest, tmp_path: Path
+) -> None:
+    outside_store = ReleaseStore(tmp_path / "outside")
+    outside_store.stage(source_artifact(tmp_path), release_manifest)
+    store.root.mkdir()
+    source_link = store.root / release_manifest.source_id
+    try:
+        source_link.symlink_to(
+            outside_store.root / release_manifest.source_id,
+            target_is_directory=True,
+        )
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
+
+    with pytest.raises(ReleaseIntegrityError, match="symlink"):
+        store.get(release_manifest.release_id)
+
+
+def test_get_rejects_a_symlinked_release_directory(
+    store: ReleaseStore, release_manifest: ReleaseManifest, tmp_path: Path
+) -> None:
+    outside_store = ReleaseStore(tmp_path / "outside")
+    outside_store.stage(source_artifact(tmp_path), release_manifest)
+    release_link = store.root / release_manifest.source_id / release_manifest.release_id
+    release_link.parent.mkdir(parents=True)
+    try:
+        release_link.symlink_to(
+            outside_store.root / release_manifest.source_id / release_manifest.release_id,
+            target_is_directory=True,
+        )
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
+
+    with pytest.raises(ReleaseIntegrityError, match="symlink"):
+        store.get(release_manifest.release_id)
+
+
+def test_get_rejects_a_symlinked_artifact(
+    store: ReleaseStore, release_manifest: ReleaseManifest, tmp_path: Path
+) -> None:
+    stored = store.stage(source_artifact(tmp_path), release_manifest)
+    outside_artifact = tmp_path / "outside.csv"
+    outside_artifact.write_bytes(stored.artifact_path.read_bytes())
+    stored.artifact_path.unlink()
+    try:
+        stored.artifact_path.symlink_to(outside_artifact)
+    except OSError as error:
+        pytest.skip(f"symlinks are unavailable: {error}")
+
+    with pytest.raises(ReleaseIntegrityError, match="symlink"):
+        store.get(release_manifest.release_id)
 
 
 def test_get_rejects_incomplete_release_directory(store: ReleaseStore) -> None:
@@ -141,6 +229,43 @@ def test_stage_is_idempotent_for_identical_release_content(
     second = store.stage(second_source, release_manifest)
 
     assert second == first
+
+
+def test_stage_rejects_a_release_id_already_owned_by_another_source(
+    store: ReleaseStore, tmp_path: Path
+) -> None:
+    first = release_manifest_for(b"one", source_id="eea")
+    second = release_manifest_for(b"two", source_id="kba")
+    store.stage(source_artifact(tmp_path, b"one"), first)
+
+    with pytest.raises(ReleaseAlreadyExistsError):
+        store.stage(source_artifact(tmp_path, b"two"), second)
+
+    assert store.verify(first.release_id).source_id == "eea"
+
+
+def test_stage_rejects_a_release_id_locked_by_another_stager(
+    store: ReleaseStore, release_manifest: ReleaseManifest, tmp_path: Path
+) -> None:
+    lock = store.root / ".locks" / release_manifest.release_id
+    lock.mkdir(parents=True)
+
+    with pytest.raises(ReleaseAlreadyExistsError, match="in progress"):
+        store.stage(source_artifact(tmp_path), release_manifest)
+
+    assert not (store.root / release_manifest.source_id).exists()
+
+
+def test_stage_rejects_manifest_path_that_disagrees_with_source_extension(
+    store: ReleaseStore, tmp_path: Path
+) -> None:
+    artifact = b'{"release":"2024"}\n'
+    manifest = release_manifest_for(artifact)
+
+    with pytest.raises(ReleaseIntegrityError, match="artifact path"):
+        store.stage(source_artifact(tmp_path, artifact, "incoming.json"), manifest)
+
+    assert not store.root.exists()
 
 
 def test_list_releases_is_stably_sorted_by_release_id(store: ReleaseStore, tmp_path: Path) -> None:
