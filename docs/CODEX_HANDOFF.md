@@ -819,3 +819,15 @@ neutral parsing, exit classifications, and coherent active verification remain
 unchanged. Argparse help remains deferred. No network, server, production/customer
 data, push, merge, deploy, main-branch, or Streamlit action occurred; the unrelated
 `AGENTS.md` edit remains untouched.
+
+Task 7 fix round 4 corrects the cross-platform alias regression without changing
+production behavior. Unsupported POSIX descriptor anchoring must now fail before the
+test body with the exact fail-closed message and empty lexical/external roots; supported
+POSIX must complete real release `stage`, `get`, and `verify` operations before the
+exact post-substitution no-follow recheck error is accepted. Stage/get/verify results
+also directly assert descriptor/junction-spelled artifact and manifest paths. A
+temporary physical-path-return mutation failed on the new literal assertion, then the
+restored implementation passed. Fresh verification reported 1 focused pass, 67 passes
+and eight explicit Windows symlink-privilege skips across affected suites, and clean
+scoped Ruff. The unrelated `AGENTS.md` change and deferred argparse Minor remain
+untouched; no server or external process was started.

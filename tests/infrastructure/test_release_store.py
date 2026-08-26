@@ -140,8 +140,17 @@ def test_alias_root_stage_get_and_verify_preserve_the_pinned_operation_path(
         staged = store.stage(artifact, release_manifest)
         fetched = store.get(release_manifest.release_id)
         verified = store.verify(release_manifest.release_id)
+        alias_release = (
+            operation_root
+            / "releases"
+            / release_manifest.source_id
+            / release_manifest.release_id
+        )
 
         assert staged == fetched == verified
+        for stored in (staged, fetched, verified):
+            assert stored.artifact_path == alias_release / "artifact.csv"
+            assert stored.manifest_path == alias_release / "manifest.json"
         assert (
             pinned_root
             / "releases"
@@ -152,16 +161,31 @@ def test_alias_root_stage_get_and_verify_preserve_the_pinned_operation_path(
         assert list(outside.iterdir()) == []
 
     if os.name != "nt":
+        pin_entered = False
+        operation_exercised = False
+        alias_created = False
         try:
-            with (
-                pytest.raises(SnapshotPathError, match="identity"),
-                filesystem.pin_root(lexical_root, create=False) as operation_root,
-            ):
+            with filesystem.pin_root(lexical_root, create=False) as operation_root:
+                pin_entered = True
                 lexical_root.rename(pinned_root)
                 create_directory_alias(lexical_root, outside)
+                alias_created = True
                 exercise(operation_root)
+                operation_exercised = True
+        except SnapshotPathError as error:
+            if not pin_entered:
+                assert str(error) == "platform cannot anchor the evidence root safely"
+                assert lexical_root.is_dir()
+                assert list(lexical_root.iterdir()) == []
+                assert not pinned_root.exists()
+                assert list(outside.iterdir()) == []
+                return
+            assert operation_exercised
+            assert str(error) == "stable snapshot path cannot be opened"
+        else:
+            pytest.fail("substituted evidence root was not rejected")
         finally:
-            if os.path.lexists(lexical_root):
+            if alias_created:
                 remove_directory_alias(lexical_root)
         return
 
