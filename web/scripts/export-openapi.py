@@ -7,7 +7,6 @@ from pathlib import Path
 
 from icor.api.app import create_app
 
-
 WEB_ROOT = Path(__file__).resolve().parents[1]
 
 
