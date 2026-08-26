@@ -253,8 +253,8 @@ class SnapshotFilesystem:
             with _StableSnapshot(
                 self, (safe_stable_directory, *safe_stable_files)
             ) as stable:
-                verify()
                 stable.seal()
+                verify()
                 stable.assert_unchanged()
                 self.require_file(safe_source, safe_root)
                 self._reject_existing_reparse_components(safe_destination.parent)

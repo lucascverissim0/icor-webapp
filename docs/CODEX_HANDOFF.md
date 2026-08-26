@@ -715,3 +715,18 @@ Detailed ignored evidence is in
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
 The unrelated `AGENTS.md` change remains untouched; no server or external process was
 started.
+
+Task 6 fix round 3 closes the remaining POSIX verify-to-seal race. Stable no-follow
+target handles are now acquired and their identities/content sealed before any final
+promotion validation. The same held handles are re-hashed and path identities rechecked
+immediately after validation and across pointer replacement, so an in-place POSIX write
+after verification cannot become the trusted baseline. A deterministic cross-platform
+regression uses real descriptors with POSIX write-sharing semantics and reproduced the
+old acceptance (`DID NOT RAISE`); it now fails typed while preserving exact LKG pointer
+bytes. Final focused verification reported 40 passed with four explicit Windows
+symlink-privilege skips; full pytest reported 286 passed, 7 skipped, and the four
+documented strict XFAILs. `uv run ruff check src tests` passed. Detailed ignored
+evidence is in
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
+The unrelated `AGENTS.md` change remains untouched; no server or external process was
+started.

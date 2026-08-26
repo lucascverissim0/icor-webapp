@@ -629,6 +629,93 @@ def test_target_swap_after_verification_preserves_last_known_good_pointer(
     assert initial_store.active_manifest() == first.manifest
 
 
+class PosixLikeWritableHandleFilesystem(SnapshotFilesystem):
+    """Use real read descriptors that retain identity but permit external writes."""
+
+    def __init__(self, target_database: Path) -> None:
+        self.target_database = target_database
+
+    def _open_stable_path(
+        self, path: Path, *, directory: bool
+    ) -> tuple[int, tuple[int, ...]]:
+        if directory:
+            return super()._open_stable_path(path, directory=True)
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        metadata = os.fstat(descriptor)
+        return -descriptor - 1, (metadata.st_dev, metadata.st_ino)
+
+    @staticmethod
+    def _close_stable_handle(handle: int) -> None:
+        if handle < 0:
+            os.close(-handle - 1)
+            return
+        SnapshotFilesystem._close_stable_handle(handle)
+
+    @staticmethod
+    def _digest_open_file(handle: int) -> str:
+        if handle >= 0:
+            return SnapshotFilesystem._digest_open_file(handle)
+        descriptor = -handle - 1
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        digest = sha256()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+        return digest.hexdigest()
+
+    def replace_verified_file(
+        self,
+        source: Path,
+        destination: Path,
+        verify: Callable[[], None],
+        *,
+        stable_directory: Path,
+        stable_files: tuple[Path, ...],
+    ) -> None:
+        def verify_then_mutate() -> None:
+            verify()
+            self.target_database.chmod(stat.S_IREAD | stat.S_IWRITE)
+            with self.target_database.open("ab") as database:
+                database.write(b"changed-after-verify-before-seal")
+
+        super().replace_verified_file(
+            source,
+            destination,
+            verify_then_mutate,
+            stable_directory=stable_directory,
+            stable_files=stable_files,
+        )
+
+
+def test_posix_like_in_place_mutation_after_verification_preserves_lkg_pointer(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    first = builder.build(build_request)
+    second = builder.build(
+        replace(
+            build_request,
+            versions=replace(build_request.versions, survival_method="survival-v2"),
+        )
+    )
+    initial_store = SnapshotStore(evidence_root)
+    initial_store.promote(first.manifest.snapshot_id)
+    active_bytes = initial_store.active_path.read_bytes()
+    target_database = (
+        evidence_root / "snapshots" / second.manifest.snapshot_id / "evidence.sqlite3"
+    )
+    store = SnapshotStore(
+        evidence_root,
+        filesystem=PosixLikeWritableHandleFilesystem(target_database),
+    )
+
+    with pytest.raises(SnapshotPromotionError, match="changed|unsafe|failed"):
+        store.promote(second.manifest.snapshot_id)
+
+    assert initial_store.active_path.read_bytes() == active_bytes
+    assert initial_store.active_manifest() == first.manifest
+
+
 class BlockingPublishFilesystem(SnapshotFilesystem):
     def __init__(self) -> None:
         self.publication_started = threading.Event()
