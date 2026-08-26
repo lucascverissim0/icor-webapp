@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -90,6 +91,18 @@ def test_release_manifest_round_trips_without_information_loss(
     write_release_manifest(path, release_manifest)
 
     assert load_release_manifest(path) == release_manifest
+
+
+def test_writer_rejects_unsafe_artifact_path(
+    tmp_path: Path, release_manifest: ReleaseManifest
+) -> None:
+    path = tmp_path / "manifest.json"
+    unsafe_manifest = replace(release_manifest, artifact_path="../artifact.csv")
+
+    with pytest.raises(ManifestError, match="artifact path"):
+        write_release_manifest(path, unsafe_manifest)
+
+    assert not path.exists()
 
 
 def test_manifest_rejects_unknown_fields(tmp_path: Path) -> None:

@@ -77,6 +77,7 @@ def write_release_manifest(path: Path, manifest: ReleaseManifest) -> None:
     """Atomically persist a release manifest using canonical JSON."""
     if not isinstance(manifest, ReleaseManifest):
         raise TypeError("manifest must be a ReleaseManifest")
+    _validate_artifact_path(manifest.artifact_path)
     temporary_path: Path | None = None
     try:
         with NamedTemporaryFile(

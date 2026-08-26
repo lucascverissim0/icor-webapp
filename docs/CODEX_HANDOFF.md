@@ -499,3 +499,11 @@ verification: focused evidence tests passed 21/21; Ruff passed; full pytest repo
 155 passed with exactly the four documented strict XFAILs. The unrelated `AGENTS.md`
 modification remains untouched. Task report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-2-report.md`.
+
+Task 2 fix round 1 closes a writer-boundary gap: `write_release_manifest` now validates
+the domain object's artifact path before creating its temporary file, so otherwise-valid
+domain instances cannot persist absolute or traversing paths that the strict loader
+would reject. TDD evidence: the new focused writer regression first failed with no
+`ManifestError`, then `tests/evidence/test_release_manifests.py` passed 18/18 and Ruff
+reported `All checks passed!`. The deferred `load_snapshot_manifest` minor was not
+changed. The unrelated `AGENTS.md` modification remains untouched.
