@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+import stat
+import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from hashlib import sha256
@@ -10,9 +16,11 @@ import pytest
 
 from icor.application.snapshot_build import SnapshotBuilder, SnapshotBuildRequest
 from icor.domain.evidence import Measure, PublicationStatus, ReleaseManifest
-from icor.domain.snapshots import SnapshotVersions
+from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
+from icor.evidence.serialization import canonical_json_bytes, sha256_file
 from icor.evidence.validation import SnapshotValidator
 from icor.infrastructure.release_store import ReleaseStore, StoredRelease
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem
 from icor.infrastructure.snapshot_store import (
     SnapshotPromotionError,
     SnapshotStore,
@@ -239,3 +247,335 @@ def test_active_repository_is_read_only(
     assert repository.writable is False
     with pytest.raises(ImmutableEvidenceError):
         repository.add_release(_manifest())
+
+
+def _rewrite_candidate_manifest(
+    candidate_path: Path, manifest: SnapshotManifest
+) -> None:
+    (candidate_path / "snapshot.json").write_bytes(canonical_json_bytes(manifest))
+    report = SnapshotValidator().validate(
+        SQLiteEvidenceRepository(candidate_path / "evidence.sqlite3"), manifest
+    )
+    assert report.can_promote
+    (candidate_path / "validation.json").write_bytes(canonical_json_bytes(report))
+
+
+@pytest.mark.parametrize(
+    "identity_field",
+    [
+        "built_at",
+        "deterministic_seed",
+        "source_registry",
+        "identity_registry",
+        "reconciliation_method",
+        "confidence_method",
+        "estimation_method",
+        "survival_method",
+        "hazard_method",
+        "forecast_method",
+    ],
+)
+def test_promotion_rejects_manifest_identity_edits_that_retain_the_old_id(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    identity_field: str,
+) -> None:
+    candidate = builder.build(build_request)
+    manifest = candidate.manifest
+    if identity_field == "built_at":
+        changed = replace(
+            manifest, built_at=datetime(2026, 8, 26, 12, 1, tzinfo=UTC)
+        )
+    elif identity_field == "deterministic_seed":
+        changed = replace(manifest, deterministic_seed=18)
+    else:
+        changed = replace(
+            manifest,
+            versions=replace(manifest.versions, **{identity_field: "forged-v2"}),
+        )
+    _rewrite_candidate_manifest(candidate.candidate_path, changed)
+
+    with pytest.raises(SnapshotPromotionError, match="identity"):
+        snapshot_store.promote(manifest.snapshot_id)
+
+    assert not snapshot_store.active_path.exists()
+
+
+def test_promotion_rejects_changed_persisted_release_hash_with_old_snapshot_id(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    candidate = builder.build(build_request)
+    with closing(sqlite3.connect(candidate.database_path)) as connection:
+        connection.execute(
+            "UPDATE source_release SET sha256 = ? WHERE release_id = ?",
+            ("0" * 64, "sample-2024-20260826"),
+        )
+        connection.commit()
+    changed = replace(
+        candidate.manifest,
+        database_sha256=sha256_file(candidate.database_path),
+    )
+    _rewrite_candidate_manifest(candidate.candidate_path, changed)
+
+    with pytest.raises(SnapshotPromotionError, match="identity"):
+        snapshot_store.promote(candidate.manifest.snapshot_id)
+
+    assert not snapshot_store.active_path.exists()
+
+
+@pytest.mark.parametrize(
+    "manifest_change",
+    [
+        {"status": SnapshotStatus.ACTIVE},
+        {"warnings": ("forged-warning",)},
+    ],
+)
+def test_promotion_rejects_noncanonical_status_or_warnings(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    manifest_change: dict[str, object],
+) -> None:
+    candidate = builder.build(build_request)
+    _rewrite_candidate_manifest(
+        candidate.candidate_path,
+        replace(candidate.manifest, **manifest_change),
+    )
+
+    with pytest.raises(SnapshotPromotionError, match="canonical"):
+        snapshot_store.promote(candidate.manifest.snapshot_id)
+
+    assert not snapshot_store.active_path.exists()
+
+
+class RecordingFilesystem(SnapshotFilesystem):
+    def __init__(self) -> None:
+        self.events: list[tuple[str, Path]] = []
+
+    def fsync_file(self, path: Path) -> None:
+        self.events.append(("fsync_file", path))
+
+    def fsync_directory(self, path: Path) -> None:
+        self.events.append(("fsync_directory", path))
+
+    def publish_directory(self, source: Path, destination: Path) -> None:
+        self.events.append(("publish_directory", destination))
+        super().publish_directory(source, destination)
+
+    def replace_verified_file(
+        self,
+        source: Path,
+        destination: Path,
+        verify: object,
+    ) -> None:
+        self.events.append(("replace_file", destination))
+        super().replace_verified_file(source, destination, verify)  # type: ignore[arg-type]
+
+
+def test_promotion_flushes_files_and_directories_in_durable_order(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    candidate = builder.build(build_request)
+    filesystem = RecordingFilesystem()
+    store = SnapshotStore(
+        evidence_root,
+        clock=lambda: datetime(2026, 8, 26, 13, 0, tzinfo=UTC),
+        filesystem=filesystem,
+    )
+
+    store.promote(candidate.manifest.snapshot_id)
+
+    publication_index = next(
+        index
+        for index, event in enumerate(filesystem.events)
+        if event[0] == "publish_directory"
+    )
+    flushed_snapshot_files = {
+        path.name
+        for event, path in filesystem.events[:publication_index]
+        if event == "fsync_file"
+    }
+    assert flushed_snapshot_files == {
+        "evidence.sqlite3",
+        "snapshot.json",
+        "validation.json",
+    }
+    snapshots_flush_index = filesystem.events.index(
+        ("fsync_directory", evidence_root / "snapshots")
+    )
+    replace_index = filesystem.events.index(("replace_file", store.active_path))
+    root_flush_index = len(filesystem.events) - 1
+    assert publication_index < snapshots_flush_index < replace_index < root_flush_index
+    assert filesystem.events[root_flush_index] == (
+        "fsync_directory",
+        evidence_root,
+    )
+
+
+def _create_directory_symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        if os.name == "nt" and error.winerror == 1314:
+            pytest.skip(f"symlinks require Windows developer privileges: {error}")
+        raise
+
+
+@pytest.mark.parametrize("redirected_directory", ["root", "candidates", "snapshots"])
+def test_promotion_rejects_symlinked_storage_components(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+    redirected_directory: str,
+) -> None:
+    real_root = tmp_path / "real-evidence"
+    candidate = SnapshotBuilder(real_root, release_store, EmptyLoader()).build(build_request)
+    store_root = real_root
+    if redirected_directory == "root":
+        store_root = tmp_path / "linked-evidence"
+        _create_directory_symlink_or_skip(store_root, real_root)
+    elif redirected_directory == "candidates":
+        outside = tmp_path / "outside-candidates"
+        (real_root / "candidates").rename(outside)
+        _create_directory_symlink_or_skip(real_root / "candidates", outside)
+    else:
+        outside = tmp_path / "outside-snapshots"
+        outside.mkdir()
+        _create_directory_symlink_or_skip(real_root / "snapshots", outside)
+    store = SnapshotStore(store_root)
+
+    with pytest.raises(SnapshotPromotionError, match="unsafe|contain"):
+        store.promote(candidate.manifest.snapshot_id)
+
+    assert not (real_root / "active.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction contract")
+def test_promotion_rejects_windows_junction_component(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    tmp_path: Path,
+) -> None:
+    candidate = builder.build(build_request)
+    outside = tmp_path / "junction-target"
+    (evidence_root / "candidates").rename(outside)
+    junction = evidence_root / "candidates"
+    creation = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(outside)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert creation.returncode == 0, creation.stderr or creation.stdout
+    try:
+        with pytest.raises(SnapshotPromotionError, match="unsafe|contain"):
+            SnapshotStore(evidence_root).promote(candidate.manifest.snapshot_id)
+    finally:
+        os.rmdir(junction)
+
+
+class TamperingFilesystem(SnapshotFilesystem):
+    def __init__(self, target_database: Path) -> None:
+        self.target_database = target_database
+
+    def replace_verified_file(
+        self,
+        source: Path,
+        destination: Path,
+        verify: object,
+    ) -> None:
+        self.target_database.chmod(stat.S_IREAD | stat.S_IWRITE)
+        with self.target_database.open("ab") as database:
+            database.write(b"tampered-before-pointer")
+        super().replace_verified_file(source, destination, verify)  # type: ignore[arg-type]
+
+
+def test_tamper_between_target_validation_and_pointer_replace_preserves_active(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    first = builder.build(build_request)
+    second = builder.build(
+        replace(
+            build_request,
+            versions=replace(build_request.versions, hazard_method="hazard-v2"),
+        )
+    )
+    initial_store = SnapshotStore(evidence_root)
+    initial_store.promote(first.manifest.snapshot_id)
+    active_bytes = initial_store.active_path.read_bytes()
+    target_database = (
+        evidence_root / "snapshots" / second.manifest.snapshot_id / "evidence.sqlite3"
+    )
+    tampering_store = SnapshotStore(
+        evidence_root,
+        filesystem=TamperingFilesystem(target_database),
+    )
+
+    with pytest.raises(SnapshotPromotionError):
+        tampering_store.promote(second.manifest.snapshot_id)
+
+    assert initial_store.active_path.read_bytes() == active_bytes
+    assert initial_store.active_manifest() == first.manifest
+
+
+class BlockingPublishFilesystem(SnapshotFilesystem):
+    def __init__(self) -> None:
+        self.publication_started = threading.Event()
+        self.allow_publication = threading.Event()
+        self._first_publication = True
+
+    def publish_directory(self, source: Path, destination: Path) -> None:
+        if self._first_publication:
+            self._first_publication = False
+            self.publication_started.set()
+            assert self.allow_publication.wait(timeout=5)
+        super().publish_directory(source, destination)
+
+
+def test_concurrent_same_snapshot_promotion_reuses_identical_pointer_bytes(
+    evidence_root: Path,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    candidate = builder.build(build_request)
+    filesystem = BlockingPublishFilesystem()
+    clock_calls = 0
+    clock_lock = threading.Lock()
+
+    def clock() -> datetime:
+        nonlocal clock_calls
+        with clock_lock:
+            clock_calls += 1
+            return datetime(2026, 8, 26, 13, clock_calls, tzinfo=UTC)
+
+    store = SnapshotStore(evidence_root, clock=clock, filesystem=filesystem)
+
+    def promote_and_read_pointer() -> bytes:
+        store.promote(candidate.manifest.snapshot_id)
+        return store.active_path.read_bytes()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(promote_and_read_pointer)
+        assert filesystem.publication_started.wait(timeout=5)
+        second_started = threading.Event()
+
+        def run_second() -> bytes:
+            second_started.set()
+            return promote_and_read_pointer()
+
+        second = executor.submit(run_second)
+        assert second_started.wait(timeout=5)
+        filesystem.allow_publication.set()
+        first_pointer = first.result(timeout=10)
+        second_pointer = second.result(timeout=10)
+
+    assert first_pointer == second_pointer == store.active_path.read_bytes()
+    assert clock_calls == 1

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,10 +11,12 @@ from re import fullmatch
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
-from icor.domain.snapshots import SnapshotManifest
+from icor.application.snapshot_build import snapshot_id_for
+from icor.domain.snapshots import SnapshotManifest, SnapshotStatus
 from icor.evidence.release_manifests import load_snapshot_manifest
 from icor.evidence.serialization import canonical_json_bytes, sha256_file
-from icor.evidence.validation import SnapshotValidator, ValidationReport
+from icor.evidence.validation import Severity, SnapshotValidator, ValidationReport
+from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem, SnapshotPathError
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 _IDENTIFIER_PATTERN = r"[a-z0-9][a-z0-9._-]{0,79}"
@@ -41,10 +42,12 @@ class SnapshotStore:
         *,
         clock: Callable[[], datetime] | None = None,
         validator: SnapshotValidator | None = None,
+        filesystem: SnapshotFilesystem | None = None,
     ) -> None:
         self.root = Path(root)
         self.clock = clock or (lambda: datetime.now(UTC))
         self.validator = validator or SnapshotValidator()
+        self.filesystem = filesystem or SnapshotFilesystem()
 
     @property
     def active_path(self) -> Path:
@@ -58,30 +61,43 @@ class SnapshotStore:
     def promote(self, snapshot_id: str) -> SnapshotManifest:
         """Verify, publish, re-verify, then atomically activate one candidate."""
         self._require_identifier(snapshot_id)
-        if self.active_path.is_file():
-            try:
-                active = self.active_manifest()
-            except SnapshotUnavailableError:
-                pass
-            else:
-                if active.snapshot_id == snapshot_id:
-                    return active
-
-        candidate = self.candidate_path(snapshot_id)
         try:
-            self._verify_snapshot_directory(candidate, snapshot_id)
-            target = self._publish_candidate(candidate, snapshot_id)
-            manifest, manifest_digest, _ = self._verify_snapshot_directory(target, snapshot_id)
-            self._replace_active_pointer(snapshot_id, manifest_digest)
-            return manifest
+            self.root = self.filesystem.prepare_root(self.root)
+            with self.filesystem.promotion_lock(self.root):
+                if self.active_path.exists():
+                    try:
+                        active = self.active_manifest()
+                    except SnapshotUnavailableError:
+                        pass
+                    else:
+                        if active.snapshot_id == snapshot_id:
+                            return active
+
+                candidate = self.candidate_path(snapshot_id)
+                self._verify_snapshot_directory(candidate, snapshot_id)
+                target = self._publish_candidate(candidate, snapshot_id)
+                manifest, manifest_digest, _ = self._verify_snapshot_directory(
+                    target, snapshot_id
+                )
+                self._replace_active_pointer(
+                    snapshot_id,
+                    manifest_digest,
+                    target=target,
+                )
+                return manifest
         except SnapshotPromotionError:
             raise
+        except SnapshotPathError as error:
+            raise SnapshotPromotionError(
+                "candidate promotion path is unsafe or not contained"
+            ) from error
         except (OSError, RuntimeError, ValueError) as error:
             raise SnapshotPromotionError("candidate promotion failed") from error
 
     def active_manifest(self) -> SnapshotManifest:
         """Return the manifest selected by a complete and verified active pointer."""
         try:
+            self.root = self.filesystem.require_root(self.root)
             pointer = self._load_active_pointer()
             snapshot_id = pointer["snapshot_id"]
             target = self.root / "snapshots" / snapshot_id
@@ -91,6 +107,10 @@ class SnapshotStore:
             return manifest
         except SnapshotUnavailableError:
             raise
+        except SnapshotPathError as error:
+            raise SnapshotUnavailableError(
+                "active snapshot path is unsafe or not contained"
+            ) from error
         except (OSError, RuntimeError, ValueError) as error:
             raise SnapshotUnavailableError("active snapshot cannot be verified") from error
 
@@ -99,44 +119,76 @@ class SnapshotStore:
         manifest = self.active_manifest()
         path = self.root / "snapshots" / manifest.snapshot_id / "evidence.sqlite3"
         try:
-            return SQLiteEvidenceRepository(path)
+            return SQLiteEvidenceRepository(self.filesystem.require_file(path, self.root))
+        except SnapshotPathError as error:
+            raise SnapshotUnavailableError(
+                "active snapshot database path is unsafe or not contained"
+            ) from error
         except (OSError, RuntimeError, ValueError) as error:
             raise SnapshotUnavailableError("active snapshot database is unavailable") from error
 
     def _publish_candidate(self, candidate: Path, snapshot_id: str) -> Path:
-        snapshots_root = self.root / "snapshots"
-        snapshots_root.mkdir(parents=True, exist_ok=True)
+        snapshots_root = self.filesystem.prepare_directory(
+            self.root / "snapshots", self.root
+        )
         target = snapshots_root / snapshot_id
-        if target.exists():
+        if os.path.lexists(target):
+            self.filesystem.require_directory(target, self.root)
             self._verify_snapshot_directory(target, snapshot_id)
+            self.filesystem.make_immutable(target, self.root)
             return target
 
-        staging = snapshots_root / f".promoting-{snapshot_id}-{uuid4().hex}"
+        staging = self.filesystem.prepare_directory(
+            snapshots_root / f".promoting-{snapshot_id}-{uuid4().hex}", self.root
+        )
         try:
-            shutil.copytree(candidate, staging)
+            for filename in sorted(_CANDIDATE_FILES):
+                source = candidate / filename
+                destination = staging / filename
+                self.filesystem.copy_file(
+                    source,
+                    destination,
+                    source_root=self.root,
+                    destination_root=self.root,
+                )
+                self.filesystem.fsync_file(destination)
+            self.filesystem.fsync_directory(staging)
             self._verify_snapshot_directory(staging, snapshot_id)
+            self.filesystem.make_immutable(staging, self.root)
             try:
-                staging.rename(target)
+                self.filesystem.publish_directory(staging, target)
             except FileExistsError:
+                self.filesystem.require_directory(target, self.root)
                 self._verify_snapshot_directory(target, snapshot_id)
+                self.filesystem.make_immutable(target, self.root)
+            self.filesystem.fsync_directory(snapshots_root)
             return target
         finally:
-            if staging.exists() and not staging.is_symlink():
-                shutil.rmtree(staging)
+            if os.path.lexists(staging):
+                self.filesystem.cleanup_directory(staging, self.root)
 
     def _verify_snapshot_directory(
         self, directory: Path, snapshot_id: str
     ) -> tuple[SnapshotManifest, str, ValidationReport]:
-        if directory.is_symlink() or not directory.is_dir():
-            raise SnapshotPromotionError("candidate snapshot directory is unavailable")
+        try:
+            directory = self.filesystem.require_directory(directory, self.root)
+        except SnapshotPathError as error:
+            raise SnapshotPromotionError(
+                "candidate snapshot directory is unsafe or not contained"
+            ) from error
         try:
             entries = tuple(directory.iterdir())
         except OSError as error:
             raise SnapshotPromotionError("candidate snapshot directory cannot be read") from error
-        if {entry.name for entry in entries} != _CANDIDATE_FILES or any(
-            entry.is_symlink() or not entry.is_file() for entry in entries
-        ):
+        if {entry.name for entry in entries} != _CANDIDATE_FILES:
             raise SnapshotPromotionError("candidate snapshot files are incomplete or unsafe")
+        try:
+            for entry in entries:
+                self.filesystem.require_file(entry, self.root)
+        except SnapshotPathError as error:
+            raise SnapshotPromotionError(
+                "candidate snapshot files are incomplete or unsafe"
+            ) from error
 
         database_path = directory / "evidence.sqlite3"
         manifest_path = directory / "snapshot.json"
@@ -146,9 +198,39 @@ class SnapshotStore:
             if manifest.snapshot_id != snapshot_id:
                 raise SnapshotPromotionError("candidate snapshot identity does not match")
             repository = SQLiteEvidenceRepository(database_path)
+            releases_by_id = {
+                release.release_id: release for release in repository.list_releases()
+            }
+            try:
+                release_artifact_hashes = tuple(
+                    (release_id, releases_by_id[release_id].sha256)
+                    for release_id in manifest.release_ids
+                )
+            except KeyError as error:
+                raise SnapshotPromotionError(
+                    "candidate snapshot identity release is unavailable"
+                ) from error
+            expected_snapshot_id = snapshot_id_for(
+                build_as_of=manifest.built_at,
+                deterministic_seed=manifest.deterministic_seed,
+                versions=manifest.versions,
+                release_artifact_hashes=release_artifact_hashes,
+            )
+            if expected_snapshot_id != manifest.snapshot_id:
+                raise SnapshotPromotionError("candidate snapshot identity does not match")
             report = self.validator.validate(repository, manifest)
             if not report.can_promote:
                 raise SnapshotPromotionError("candidate snapshot failed validation")
+            expected_warnings = tuple(
+                finding.code
+                for finding in report.findings
+                if finding.severity is Severity.WARNING
+            )
+            if (
+                manifest.status is not SnapshotStatus.CANDIDATE
+                or manifest.warnings != expected_warnings
+            ):
+                raise SnapshotPromotionError("candidate snapshot manifest is not canonical")
             if validation_path.read_bytes() != canonical_json_bytes(report):
                 raise SnapshotPromotionError("candidate validation report does not match")
             manifest_digest = sha256_file(manifest_path)
@@ -158,7 +240,13 @@ class SnapshotStore:
             raise SnapshotPromotionError("candidate snapshot cannot be verified") from error
         return manifest, manifest_digest, report
 
-    def _replace_active_pointer(self, snapshot_id: str, manifest_digest: str) -> None:
+    def _replace_active_pointer(
+        self,
+        snapshot_id: str,
+        manifest_digest: str,
+        *,
+        target: Path,
+    ) -> None:
         promoted_at = self.clock()
         if (
             not isinstance(promoted_at, datetime)
@@ -171,7 +259,7 @@ class SnapshotStore:
             "promoted_at": promoted_at.isoformat(),
             "snapshot_id": snapshot_id,
         }
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.filesystem.require_root(self.root)
         temporary_path: Path | None = None
         try:
             with NamedTemporaryFile(
@@ -181,19 +269,38 @@ class SnapshotStore:
                 temporary.write(canonical_json_bytes(pointer))
                 temporary.flush()
                 os.fsync(temporary.fileno())
-            os.replace(temporary_path, self.active_path)
+            self.filesystem.require_file(temporary_path, self.root)
+            if os.path.lexists(self.active_path):
+                self.filesystem.require_file(self.active_path, self.root)
+
+            def verify_target() -> None:
+                _, refreshed_digest, _ = self._verify_snapshot_directory(
+                    target, snapshot_id
+                )
+                if refreshed_digest != manifest_digest:
+                    raise SnapshotPromotionError(
+                        "published snapshot changed before pointer replacement"
+                    )
+
+            self.filesystem.replace_verified_file(
+                temporary_path,
+                self.active_path,
+                verify_target,
+            )
+            self.filesystem.fsync_directory(self.root)
         except OSError as error:
             raise SnapshotPromotionError("active snapshot pointer could not be replaced") from error
         finally:
-            if temporary_path is not None and temporary_path.exists():
-                temporary_path.unlink()
+            if temporary_path is not None and os.path.lexists(temporary_path):
+                self.filesystem.require_file(temporary_path, self.root).unlink()
 
     def _load_active_pointer(self) -> dict[str, str]:
-        if self.active_path.is_symlink() or not self.active_path.is_file():
+        if not os.path.lexists(self.active_path):
             raise SnapshotUnavailableError("no active snapshot is available")
         try:
+            active_path = self.filesystem.require_file(self.active_path, self.root)
             payload = json.loads(
-                self.active_path.read_text(encoding="utf-8"),
+                active_path.read_text(encoding="utf-8"),
                 object_pairs_hook=self._reject_duplicate_fields,
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:

@@ -679,3 +679,21 @@ GREEN reported 18 passed. Fresh Ruff reported `All checks passed!`; full pytest
 reported 264 passed, 3 documented Windows symlink-privilege skips, and the four strict
 legacy XFAILs. No server or other process was started. Detailed ignored report:
 `.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
+
+Task 6 fix round 1 closes the identity and publication review findings. Builder and
+promotion now share one canonical identity function covering deterministic time, seed,
+all version fields, and persisted release hashes; promotion also requires canonical
+candidate status and warnings. Releases are compared with a second verified stored
+state after loading. A narrow no-follow filesystem boundary rejects symlink/reparse and
+out-of-root components, flushes copied files and publication directories, publishes
+read-only targets, and revalidates the stable target inside pointer replacement. An
+interprocess atomic-directory lock serializes the complete promotion and makes
+same-ID retries byte-for-byte idempotent. TDD RED reproduced 13 forged-identity
+acceptances, release replacement, the missing filesystem seam, missing durability and
+locking injection, and a real Windows junction escape. Final focused verification was
+36 passed with four explicit `WinError 1314` symlink-privilege skips; full pytest was
+282 passed, 7 skipped, and the four documented strict XFAILs. `uv run ruff check src
+tests` passed. The detailed ignored report is
+`.superpowers/sdd/2026-08-26-evidence-snapshot-foundation-implementation/task-6-report.md`.
+The unrelated `AGENTS.md` modification remains untouched; no server or external process
+was started.

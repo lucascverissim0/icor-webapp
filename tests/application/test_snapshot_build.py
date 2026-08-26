@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -10,6 +11,7 @@ import pytest
 
 from icor.application.snapshot_build import (
     SnapshotBuilder,
+    SnapshotBuildError,
     SnapshotBuildRequest,
 )
 from icor.domain.evidence import (
@@ -23,7 +25,10 @@ from icor.domain.evidence import (
     ReleaseManifest,
 )
 from icor.domain.snapshots import SnapshotStatus, SnapshotVersions
-from icor.evidence.release_manifests import load_snapshot_manifest
+from icor.evidence.release_manifests import (
+    load_snapshot_manifest,
+    write_release_manifest,
+)
 from icor.evidence.serialization import canonical_json_bytes
 from icor.infrastructure.release_store import ReleaseStore, StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
@@ -117,6 +122,26 @@ class TwoObservationLoader:
         if self.reverse:
             observations.reverse()
         repository.add_observations(observations)
+
+
+class ChangingReleaseLoader(TwoObservationLoader):
+    def load(
+        self,
+        releases: tuple[StoredRelease, ...],
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        super().load(releases, repository)
+        stored = releases[0]
+        changed_artifact = b"changed-during-build\n"
+        stored.artifact_path.write_bytes(changed_artifact)
+        write_release_manifest(
+            stored.manifest_path,
+            replace(
+                stored.manifest,
+                artifact_bytes=len(changed_artifact),
+                sha256=sha256(changed_artifact).hexdigest(),
+            ),
+        )
 
 
 @pytest.fixture
@@ -233,3 +258,45 @@ def test_build_request_rejects_nondeterministic_inputs(changes: dict[str, object
 
     with pytest.raises(ValueError):
         SnapshotBuildRequest(**values)  # type: ignore[arg-type]
+
+
+def test_build_rejects_release_replaced_during_loading(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    root = tmp_path / "evidence"
+    builder = SnapshotBuilder(
+        root,
+        release_store,
+        ChangingReleaseLoader(reverse=False),
+    )
+
+    with pytest.raises(SnapshotBuildError, match="changed during build"):
+        builder.build(build_request)
+
+    assert not (root / "candidates").exists() or not any(
+        (root / "candidates").iterdir()
+    )
+
+
+def test_build_rejects_symlinked_candidates_directory(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    root = tmp_path / "evidence"
+    root.mkdir()
+    outside = tmp_path / "outside-candidates"
+    outside.mkdir()
+    try:
+        (root / "candidates").symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        if os.name == "nt" and error.winerror == 1314:
+            pytest.skip(f"symlinks require Windows developer privileges: {error}")
+        raise
+
+    with pytest.raises(SnapshotBuildError, match="unsafe|contain"):
+        _builder(root, release_store, reverse=False).build(build_request)
+
+    assert list(outside.iterdir()) == []
