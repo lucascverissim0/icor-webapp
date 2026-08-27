@@ -278,3 +278,41 @@ class EvidenceObservationPageResponse(ApiModel):
     page: int
     page_size: int
     pages: int
+
+
+class RegistrationSummaryResponse(ApiModel):
+    snapshot_id: str
+    status: str
+    built_at: datetime
+    database_sha256: str
+    identity_registry: str
+    geographies: tuple[str, ...]
+    years: tuple[int, ...]
+    total_registrations: Decimal
+    model_count: int
+    model_year_available: bool
+    release_ids: tuple[str, ...]
+
+
+class RegistrationRowResponse(ApiModel):
+    rank: int
+    vehicle_id: str
+    make: str
+    model: str
+    model_year: None
+    registrations: Decimal
+    status: str
+    evidence_confidence: int
+    input_observation_count: int
+    release_ids: tuple[str, ...]
+    source_ids: tuple[str, ...]
+
+
+class RegistrationPageResponse(ApiModel):
+    items: tuple[RegistrationRowResponse, ...]
+    total: int
+    total_registrations: Decimal
+    page: int
+    page_size: int
+    pages: int
+    snapshot_id: str

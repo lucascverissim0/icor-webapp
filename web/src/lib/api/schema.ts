@@ -176,6 +176,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registrations/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ranking */
+        get: operations["ranking_api_v1_registrations_ranking_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registrations/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_v1_registrations_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -631,6 +665,76 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** RegistrationPageResponse */
+        RegistrationPageResponse: {
+            /** Items */
+            items: components["schemas"]["RegistrationRowResponse"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Pages */
+            pages: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Total */
+            total: number;
+            /** Total Registrations */
+            total_registrations: string;
+        };
+        /** RegistrationRowResponse */
+        RegistrationRowResponse: {
+            /** Evidence Confidence */
+            evidence_confidence: number;
+            /** Input Observation Count */
+            input_observation_count: number;
+            /** Make */
+            make: string;
+            /** Model */
+            model: string;
+            /** Model Year */
+            model_year: null;
+            /** Rank */
+            rank: number;
+            /** Registrations */
+            registrations: string;
+            /** Release Ids */
+            release_ids: string[];
+            /** Source Ids */
+            source_ids: string[];
+            /** Status */
+            status: string;
+            /** Vehicle Id */
+            vehicle_id: string;
+        };
+        /** RegistrationSummaryResponse */
+        RegistrationSummaryResponse: {
+            /**
+             * Built At
+             * Format: date-time
+             */
+            built_at: string;
+            /** Database Sha256 */
+            database_sha256: string;
+            /** Geographies */
+            geographies: string[];
+            /** Identity Registry */
+            identity_registry: string;
+            /** Model Count */
+            model_count: number;
+            /** Model Year Available */
+            model_year_available: boolean;
+            /** Release Ids */
+            release_ids: string[];
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Status */
+            status: string;
+            /** Total Registrations */
+            total_registrations: string;
+            /** Years */
+            years: number[];
         };
         /** ScenarioResponse */
         ScenarioResponse: {
@@ -1226,6 +1330,79 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    ranking_api_v1_registrations_ranking_get: {
+        parameters: {
+            query?: {
+                geography?: string;
+                year?: number;
+                search?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationPageResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    summary_api_v1_registrations_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationSummaryResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

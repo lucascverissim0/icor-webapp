@@ -209,4 +209,44 @@ describe('PlannerApiClient', () => {
     expect(fetcher.mock.calls[0]?.[0]).toBe('/api/v1/production-coverage/coverage%2Fone')
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE' })
   })
+
+  it('loads the official registration summary without a prototype route', async () => {
+    const payload = {
+      snapshot_id: 'snapshot-real-2024', status: 'candidate',
+      built_at: '2026-08-27T12:00:00Z', database_sha256: 'a'.repeat(64),
+      identity_registry: 'exact-normalized-model-family-v1',
+      geographies: ['EU27'], years: [2024], total_registrations: '15',
+      model_count: 1, model_year_available: false,
+      release_ids: ['eea-co2cars-2024-final-v30-r1'],
+    }
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await expect(new PlannerApiClient(fetcher).registrationSummary()).resolves.toEqual(payload)
+    expect(fetcher.mock.calls[0]?.[0]).toBe('/api/v1/registrations/summary')
+  })
+
+  it('serializes bounded official registration ranking filters', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        items: [], total: 0, total_registrations: '0', page: 2, page_size: 10,
+        pages: 0, snapshot_id: 'snapshot-real-2024',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await new PlannerApiClient(fetcher).registrationRanking({
+      geography: 'EU27', year: 2024, search: 'Alpha & Beta', page: 2, pageSize: 10,
+    })
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      '/api/v1/registrations/ranking?geography=EU27&year=2024&search=Alpha+%26+Beta&page=2&page_size=10',
+    )
+  })
 })

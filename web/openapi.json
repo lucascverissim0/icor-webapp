@@ -1310,6 +1310,200 @@
         "title": "ProductionCoverageResponse",
         "type": "object"
       },
+      "RegistrationPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RegistrationRowResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_registrations": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Registrations",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "total_registrations",
+          "page",
+          "page_size",
+          "pages",
+          "snapshot_id"
+        ],
+        "title": "RegistrationPageResponse",
+        "type": "object"
+      },
+      "RegistrationRowResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_confidence": {
+            "title": "Evidence Confidence",
+            "type": "integer"
+          },
+          "input_observation_count": {
+            "title": "Input Observation Count",
+            "type": "integer"
+          },
+          "make": {
+            "title": "Make",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_year": {
+            "title": "Model Year",
+            "type": "null"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "registrations": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Registrations",
+            "type": "string"
+          },
+          "release_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Release Ids",
+            "type": "array"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "vehicle_id": {
+            "title": "Vehicle Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rank",
+          "vehicle_id",
+          "make",
+          "model",
+          "model_year",
+          "registrations",
+          "status",
+          "evidence_confidence",
+          "input_observation_count",
+          "release_ids",
+          "source_ids"
+        ],
+        "title": "RegistrationRowResponse",
+        "type": "object"
+      },
+      "RegistrationSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "database_sha256": {
+            "title": "Database Sha256",
+            "type": "string"
+          },
+          "geographies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Geographies",
+            "type": "array"
+          },
+          "identity_registry": {
+            "title": "Identity Registry",
+            "type": "string"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "model_year_available": {
+            "title": "Model Year Available",
+            "type": "boolean"
+          },
+          "release_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Release Ids",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_registrations": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Registrations",
+            "type": "string"
+          },
+          "years": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Years",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "status",
+          "built_at",
+          "database_sha256",
+          "identity_registry",
+          "geographies",
+          "years",
+          "total_registrations",
+          "model_count",
+          "model_year_available",
+          "release_ids"
+        ],
+        "title": "RegistrationSummaryResponse",
+        "type": "object"
+      },
       "ScenarioResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1436,7 +1630,7 @@
     }
   },
   "info": {
-    "description": "Local demonstration contract for windshield demand planning.",
+    "description": "Local evidence-led contract for vehicle registration analysis and planning.",
     "title": "ICOR Planner API",
     "version": "1.0.0"
   },
@@ -2362,6 +2556,140 @@
           }
         },
         "summary": "Update Production Coverage"
+      }
+    },
+    "/api/v1/registrations/ranking": {
+      "get": {
+        "operationId": "ranking_api_v1_registrations_ranking_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "geography",
+            "required": false,
+            "schema": {
+              "default": "EU27",
+              "title": "Geography",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "default": 2024,
+              "title": "Year",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ranking",
+        "tags": [
+          "official registrations"
+        ]
+      }
+    },
+    "/api/v1/registrations/summary": {
+      "get": {
+        "operationId": "summary_api_v1_registrations_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Summary",
+        "tags": [
+          "official registrations"
+        ]
       }
     }
   }

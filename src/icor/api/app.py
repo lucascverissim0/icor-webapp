@@ -16,12 +16,14 @@ from fastapi.responses import JSONResponse
 from icor.api.evidence import router as evidence_router
 from icor.api.opportunities import router as opportunity_router
 from icor.api.planner import router as planner_router
+from icor.api.registrations import router as registration_router
 from icor.api.schemas import FieldError, ProblemResponse
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
 from icor.application.evidence_review import EvidenceReviewService
 from icor.application.opportunities import OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandReadinessV1
+from icor.application.registrations import RegistrationService
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
@@ -52,11 +54,12 @@ def create_app(
     repository: PlannerRepository | None = None,
     coverage_repository: CoverageRepository | None = None,
     evidence_service: EvidenceReviewService | None = None,
+    registration_service: RegistrationService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
         version="1.0.0",
-        description="Local demonstration contract for windshield demand planning.",
+        description="Local evidence-led contract for vehicle registration analysis and planning.",
     )
     selected_repository = repository or DemoPlannerRepository.from_path(DEFAULT_FIXTURE)
     selected_coverage_repository = coverage_repository or SQLiteCoverageRepository(
@@ -72,6 +75,9 @@ def create_app(
         DemandReadinessV1(),
     )
     app.state.evidence_service = evidence_service or _configured_evidence_service()
+    app.state.registration_service = (
+        registration_service or _configured_registration_service()
+    )
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -120,6 +126,7 @@ def create_app(
     app.include_router(planner_router)
     app.include_router(opportunity_router)
     app.include_router(evidence_router)
+    app.include_router(registration_router)
     return app
 
 
@@ -131,4 +138,15 @@ def _configured_evidence_service() -> EvidenceReviewService | None:
         return EvidenceReviewService.from_candidate(Path(candidate))
     except (OSError, ValueError) as error:
         LOGGER.error("Evidence candidate unavailable error_type=%s", type(error).__name__)
+        return None
+
+
+def _configured_registration_service() -> RegistrationService | None:
+    candidate = os.getenv("ICOR_EVIDENCE_CANDIDATE")
+    if not candidate:
+        return None
+    try:
+        return RegistrationService.from_candidate(Path(candidate))
+    except (OSError, RuntimeError, ValueError) as error:
+        LOGGER.error("Registration snapshot unavailable error_type=%s", type(error).__name__)
         return None

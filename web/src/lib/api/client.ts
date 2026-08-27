@@ -16,8 +16,13 @@ type EvidenceSummary = components['schemas']['EvidenceSummaryResponse']
 type EvidenceObservationPage = components['schemas']['EvidenceObservationPageResponse']
 type EvidenceMeasure = components['schemas']['Measure']
 type EvidenceMappingStatus = components['schemas']['MappingStatus']
+type RegistrationSummary = components['schemas']['RegistrationSummaryResponse']
+type RegistrationPage = components['schemas']['RegistrationPageResponse']
 type ApiQuery = NonNullable<
   operations['configurations_api_v1_planner_configurations_get']['parameters']['query']
+>
+type RegistrationApiQuery = NonNullable<
+  operations['ranking_api_v1_registrations_ranking_get']['parameters']['query']
 >
 
 export interface PlannerConfigurationsQuery {
@@ -46,6 +51,14 @@ export interface EvidenceObservationsQuery {
   search?: string
   page?: number
   pageSize?: number
+}
+
+export interface RegistrationRankingQuery {
+  geography?: RegistrationApiQuery['geography']
+  year?: RegistrationApiQuery['year']
+  search?: RegistrationApiQuery['search']
+  page?: RegistrationApiQuery['page']
+  pageSize?: RegistrationApiQuery['page_size']
 }
 
 export class ApiProblem extends Error {
@@ -194,6 +207,21 @@ export class PlannerApiClient {
     return this.request<EvidenceObservationPage>(
       `/api/v1/evidence/observations?${parameters.toString()}`,
     )
+  }
+
+  async registrationSummary(): Promise<RegistrationSummary> {
+    return this.request<RegistrationSummary>('/api/v1/registrations/summary')
+  }
+
+  async registrationRanking(query: RegistrationRankingQuery): Promise<RegistrationPage> {
+    const parameters = new URLSearchParams()
+    if (query.geography !== undefined) parameters.set('geography', query.geography)
+    if (query.year !== undefined) parameters.set('year', String(query.year))
+    if (query.search) parameters.set('search', query.search)
+    if (query.page !== undefined) parameters.set('page', String(query.page))
+    if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
+    const suffix = parameters.size > 0 ? `?${parameters.toString()}` : ''
+    return this.request<RegistrationPage>(`/api/v1/registrations/ranking${suffix}`)
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
