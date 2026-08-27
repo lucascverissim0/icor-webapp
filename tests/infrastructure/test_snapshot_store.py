@@ -252,6 +252,38 @@ def test_promotion_rejects_raw_mapping_attribution_corruption(
     assert not snapshot_store.active_path.exists()
 
 
+def test_promotion_rejects_raw_published_value_without_inputs(
+    evidence_root: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+    snapshot_store: SnapshotStore,
+) -> None:
+    candidate = SnapshotBuilder(
+        evidence_root,
+        release_store,
+        PublishedObservationLoader(),
+    ).build(build_request)
+    with sqlite3.connect(candidate.database_path) as connection:
+        connection.execute("DELETE FROM published_value_input")
+        connection.commit()
+        connection.execute("VACUUM")
+    corrupted_manifest = replace(
+        candidate.manifest,
+        database_sha256=sha256_file(candidate.database_path),
+    )
+    candidate.manifest_path.write_bytes(canonical_json_bytes(corrupted_manifest))
+
+    report = SnapshotValidator().validate(
+        SQLiteEvidenceRepository(candidate.database_path),
+        corrupted_manifest,
+    )
+    with pytest.raises(SnapshotPromotionError, match="validation"):
+        snapshot_store.promote(candidate.manifest.snapshot_id)
+
+    assert [finding.code for finding in report.findings] == ["snapshot.missing_input"]
+    assert not snapshot_store.active_path.exists()
+
+
 def test_no_active_snapshot_is_typed_unavailable(snapshot_store: SnapshotStore) -> None:
     with pytest.raises(SnapshotUnavailableError):
         snapshot_store.open_active_repository()

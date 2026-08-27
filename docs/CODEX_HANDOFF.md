@@ -946,3 +946,28 @@ close the mutable release-store path boundary, not deliberate permission reversa
 hostile loader. No source acquisition, production/customer data, server/process
 lifecycle, push, merge, deploy, or main-branch action occurred. The unrelated
 `AGENTS.md` modification remains untouched and unstaged.
+
+Final review fix round 2 closes the zero-input publication residual found by the scoped
+re-review. The previous mapping checks all began at `published_value_input`; deleting
+every join row therefore made an otherwise valid `published_value` invisible to
+validation. Repository writes already inherit the domain invariant that `input_ids` is
+non-empty, while repository reads reconstruct the domain value and fail on corruption,
+but neither gives promotion a deterministic validation finding. Snapshot validation now
+starts with a corruption-tolerant query rooted at `published_value`, emits
+`snapshot.missing_input` for every value with zero inputs, and then retains the existing
+exactly-one-mapping, publishability, and vehicle/status-coherence checks for each input.
+
+The promotion regression builds a valid published candidate, deletes all
+`published_value_input` rows through raw SQLite, runs `VACUUM`, recomputes the database
+SHA-256, and writes the canonical manifest. RED produced an empty validation report and
+failed with `DID NOT RAISE SnapshotPromotionError`; GREEN reported one pass and asserts
+both the exact `snapshot.missing_input` finding and that no active pointer is created.
+Fresh affected verification reported `117 passed, 3 skipped in 19.40s`, with only the
+documented Windows symlink-privilege skips. Fresh full verification reported `332
+passed, 8 skipped, 4 xfailed in 32.93s`; the strict XFAILs remain `ICOR-001`,
+`ICOR-006`, `ICOR-009`, and `ICOR-030`. Maintained Ruff reported `All checks passed!`,
+`uv lock --check` resolved 105 packages in 1 ms, and `uv run pip-audit` found no known
+vulnerabilities while skipping only the unpublished local package. No source
+acquisition, production/customer data, server/process lifecycle, push, merge, deploy,
+or main-branch action occurred. The unrelated `AGENTS.md` modification remains
+untouched and unstaged.

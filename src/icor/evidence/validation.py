@@ -172,6 +172,21 @@ class SnapshotValidator:
 def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     for row in connection.execute(
+        """SELECT published_value.value_id
+        FROM published_value
+        LEFT JOIN published_value_input
+        ON published_value_input.value_id = published_value.value_id
+        GROUP BY published_value.value_id
+        HAVING COUNT(published_value_input.observation_id) = 0"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.missing_input",
+                "Published value must have at least one input.",
+                row["value_id"],
+            )
+        )
+    for row in connection.execute(
         """SELECT published_value_input.value_id, published_value_input.observation_id
         FROM published_value_input
         LEFT JOIN published_value ON published_value.value_id = published_value_input.value_id
