@@ -1,4 +1,4 @@
-"""SQLite v1 implementation of the append-only evidence ledger."""
+"""Versioned SQLite implementation of the append-only evidence ledger."""
 # ruff: noqa: E501
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ class ImmutableEvidenceError(RuntimeError):
     """A write would mutate the ledger or refer to unavailable evidence."""
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _SQLITE_MULTI_CHARACTER_OPERATORS = (
     "->>",
     "!=",
@@ -153,7 +153,7 @@ class SQLiteEvidenceRepository:
         with self._connect() as connection:
             has_version_table = self._table_exists(connection, "schema_version")
             if not existing and not has_version_table:
-                self._migrate_v1(connection)
+                self._initialize_latest_schema(connection)
             else:
                 self._validate_schema(connection)
 
@@ -182,7 +182,7 @@ class SQLiteEvidenceRepository:
         except sqlite3.IntegrityError as error:
             raise self._integrity_error(error) from error
 
-    def _migrate_v1(self, connection: sqlite3.Connection) -> None:
+    def _initialize_latest_schema(self, connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
         try:
             for statement in self._migration_statements():
@@ -194,6 +194,14 @@ class SQLiteEvidenceRepository:
             connection.commit()
 
     def _migration_statements(self) -> tuple[str, ...]:
+        return self._schema_statements(version=2, model_year_sql="INTEGER")
+
+    def _v1_migration_statements(self) -> tuple[str, ...]:
+        return self._schema_statements(version=1, model_year_sql="INTEGER NOT NULL")
+
+    def _schema_statements(
+        self, *, version: int, model_year_sql: str
+    ) -> tuple[str, ...]:
         checks = {
             "measure": self._enum_check(Measure),
             "publication_status": self._enum_check(PublicationStatus),
@@ -205,8 +213,8 @@ class SQLiteEvidenceRepository:
         return tuple(
             statement.strip()
             for statement in f"""
-                CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 1));
-                INSERT INTO schema_version (version) VALUES (1);
+                CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = {version}));
+                INSERT INTO schema_version (version) VALUES ({version});
                 CREATE TABLE source_release (
                     release_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, publisher TEXT NOT NULL,
                     source_url TEXT NOT NULL, retrieved_at TEXT NOT NULL, published_at TEXT NOT NULL,
@@ -221,7 +229,7 @@ class SQLiteEvidenceRepository:
                 );
                 CREATE TABLE canonical_vehicle (
                     vehicle_id TEXT PRIMARY KEY, make TEXT NOT NULL, model TEXT NOT NULL,
-                    model_year INTEGER NOT NULL, market TEXT NOT NULL
+                    model_year {model_year_sql}, market TEXT NOT NULL
                 );
                 CREATE TABLE observation (
                     observation_id TEXT PRIMARY KEY, release_id TEXT NOT NULL REFERENCES source_release(release_id),
@@ -308,13 +316,20 @@ class SQLiteEvidenceRepository:
         version = rows[0]["version"]
         if version > _SCHEMA_VERSION:
             raise EvidenceSchemaError("evidence schema is newer than this application")
-        if version != _SCHEMA_VERSION:
+        if version < 1:
             raise EvidenceSchemaError("schema version is unsupported")
-        self._validate_v1_structure(connection)
+        statements = (
+            self._v1_migration_statements()
+            if version == 1
+            else self._migration_statements()
+        )
+        self._validate_structure(connection, statements)
         return version
 
-    def _validate_v1_structure(self, connection: sqlite3.Connection) -> None:
-        expected_tables, expected_indexes = self._v1_schema_contract()
+    def _validate_structure(
+        self, connection: sqlite3.Connection, statements: tuple[str, ...]
+    ) -> None:
+        expected_tables, expected_indexes = self._schema_contract(statements)
         actual_tables = {
             row["name"]: self._normalize_schema_sql(row["sql"])
             for row in connection.execute(
@@ -330,10 +345,12 @@ class SQLiteEvidenceRepository:
         if actual_tables != expected_tables or actual_indexes != expected_indexes:
             raise EvidenceSchemaError("schema is structurally invalid")
 
-    def _v1_schema_contract(self) -> tuple[dict[str, str], dict[str, str]]:
+    def _schema_contract(
+        self, statements: tuple[str, ...]
+    ) -> tuple[dict[str, str], dict[str, str]]:
         tables: dict[str, str] = {}
         indexes: dict[str, str] = {}
-        for statement in self._migration_statements():
+        for statement in statements:
             tokens = statement.split()
             if statement.startswith("CREATE TABLE"):
                 tables[tokens[2]] = self._normalize_schema_sql(statement)

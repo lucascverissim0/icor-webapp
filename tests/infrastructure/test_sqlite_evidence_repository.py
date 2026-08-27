@@ -176,17 +176,17 @@ def seed_dependencies(
     repository.add_observations((observation,))
 
 
-def test_empty_database_migrates_to_schema_v1(tmp_path: Path) -> None:
+def test_empty_database_migrates_to_schema_v2(tmp_path: Path) -> None:
     repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
 
-    assert repository.schema_version == 1
+    assert repository.schema_version == 2
 
 
 def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-        connection.execute("INSERT INTO schema_version (version) VALUES (2)")
+        connection.execute("INSERT INTO schema_version (version) VALUES (3)")
 
     with pytest.raises(EvidenceSchemaError, match="newer"):
         SQLiteEvidenceRepository(path, writable=True)
@@ -216,6 +216,18 @@ def test_read_only_repository_rejects_writes(
 
     with repository._connect() as connection, pytest.raises(sqlite3.OperationalError):
         connection.execute("INSERT INTO source_release (release_id) VALUES ('direct-write')")
+
+
+def test_repository_round_trips_unknown_model_year(
+    repository: SQLiteEvidenceRepository,
+) -> None:
+    vehicle = CanonicalVehicle(
+        "vehicle-example-alpha", "Example Motors", "Alpha", None, "EU"
+    )
+
+    repository.add_vehicle(vehicle)
+
+    assert repository.get_vehicle(vehicle.vehicle_id) == vehicle
 
 
 def test_observation_identity_is_immutable(

@@ -119,6 +119,18 @@ def make_vehicle(**overrides: object) -> CanonicalVehicle:
     return CanonicalVehicle(**values)  # type: ignore[arg-type]
 
 
+def test_canonical_model_family_can_record_unknown_model_year() -> None:
+    vehicle = make_vehicle(model_year=None)
+
+    assert vehicle.model_year is None
+
+
+@pytest.mark.parametrize("model_year", ["2024", 2024.0])
+def test_canonical_model_family_rejects_non_integer_known_year(model_year: object) -> None:
+    with pytest.raises(ValueError, match="model year"):
+        make_vehicle(model_year=model_year)
+
+
 def make_mapping(**overrides: object) -> IdentityMapping:
     values: dict[str, object] = {
         "mapping_id": "mapping-eea-de-2024-1",

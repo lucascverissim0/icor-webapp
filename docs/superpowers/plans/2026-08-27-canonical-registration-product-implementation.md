@@ -33,7 +33,7 @@
 
 **Interfaces:**
 - Consumes: existing `CanonicalVehicle` and schema-v1 evidence repository.
-- Produces: `CanonicalVehicle.model_year: int | None` and schema v2 with nullable `canonical_vehicle.model_year` while retaining strict structural validation and rejection of non-integer non-null years.
+- Produces: `CanonicalVehicle.model_year: int | None` and schema v2 with nullable `canonical_vehicle.model_year`, plus strict read-only validation compatibility for immutable schema-v1 snapshots and rejection of non-integer non-null years.
 
 - [ ] **Step 1: Write failing domain and repository tests**
 
@@ -49,7 +49,7 @@ def test_repository_round_trips_unknown_model_year(repository):
     assert repository.get_vehicle(vehicle.vehicle_id) == vehicle
 ```
 
-Also assert strings/floats remain invalid and a schema-v1 database migrates deterministically to schema v2 without losing rows.
+Also assert strings/floats remain invalid, new databases initialize at schema v2, and immutable schema-v1 databases remain readable without in-place mutation.
 
 - [ ] **Step 2: Run RED verification**
 
@@ -59,7 +59,7 @@ Expected: FAIL because `None` is rejected and schema v1 requires a non-null inte
 
 - [ ] **Step 3: Implement the nullable model-year contract and migration**
 
-Change the dataclass field to `model_year: int | None`, validate only non-null values as integers, advance `_SCHEMA_VERSION` to `2`, and migrate `canonical_vehicle` through a transactional replacement table whose only semantic change is nullable `model_year`. Update the exact schema fingerprint and row decoder.
+Change the dataclass field to `model_year: int | None`, validate only non-null values as integers, advance `_SCHEMA_VERSION` to `2`, and make new ledgers use nullable `model_year`. Retain the exact schema-v1 fingerprint for read-only compatibility; never rewrite an immutable old snapshot in place. Update the schema-v2 fingerprint and row decoder.
 
 - [ ] **Step 4: Run GREEN verification**
 

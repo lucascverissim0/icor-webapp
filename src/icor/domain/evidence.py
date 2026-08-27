@@ -314,7 +314,7 @@ class CanonicalVehicle:
     vehicle_id: str
     make: str
     model: str
-    model_year: int
+    model_year: int | None
     market: str
 
     def __post_init__(self) -> None:
@@ -325,7 +325,7 @@ class CanonicalVehicle:
             (self.market, "canonical vehicle market"),
         ):
             _require_text(value, label)
-        if type(self.model_year) is not int:
+        if self.model_year is not None and type(self.model_year) is not int:
             raise ValueError("canonical vehicle model year must be an integer")
 
 
