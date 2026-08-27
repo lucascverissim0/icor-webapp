@@ -894,3 +894,55 @@ integration verification reported 3 passed; direct status/verify emitted the doc
 unavailable payload and direct missing-candidate promotion emitted the documented
 validation-rejected payload. The scoped Ruff gate and `git diff --check` passed. No
 process was started or stopped; the review correction remains documentation-only.
+
+The final whole-branch integrity review from exact predecessor
+`dcd483d0a2f824ec8e7a1dc3bb1e3bd5b10cba24` is fixed in implementation commit
+`ec4a7f7` (`fix: harden evidence snapshot integrity`). Snapshot loaders now consume
+private per-build artifact copies that are copied through the no-follow filesystem
+boundary, fsynced, checked against the stored release SHA-256 and byte count, paired
+with the canonical release manifest, and made read-only before parsing. The original
+stored release is still verified again after loading. The regression transiently
+substituted values 999/888, read through the loader, and restored the stored artifact;
+RED produced a promotable database containing those transient values, while GREEN
+contains only the sealed verified values 10/5.
+
+SQLite evidence now permits one identity-mapping row per observation. Repository
+writes require mapping vehicle/status attribution to equal the observation and require
+every published input to have exactly one publishable mapping that also equals the
+published value. Independent read-only candidate validation rejects missing,
+duplicate, non-publishable, and contradictory mappings even after raw SQLite
+corruption and a recomputed candidate checksum. Repository RED reported five expected
+failures; raw-corruption validation RED reported three; and the promotion regression
+initially failed with `DID NOT RAISE SnapshotPromotionError`. GREEN reported 57
+repository passes and 27 combined validation/promotion passes.
+
+Release staging now uses the shared OS-owned byte/range lock primitive at a stable
+per-release lock-file path instead of an ownership directory. A subprocess deliberately
+exited with code 73 while holding the old staging lock; RED left an indefinitely stale
+directory, while GREEN released lock ownership with process death and allowed the next
+stage to complete. Domain constructors now reject every non-finite `Decimal` for
+observations, published values, and P10/P50/P90 bounds. The 20-case NaN/sNaN/positive-
+infinity/negative-infinity matrix failed RED and passed GREEN.
+
+Fresh final-review verification on 2026-08-27:
+
+- Cross-component evidence/snapshot verification reported `205 passed, 8 skipped in
+  26.80s`; every skip was the documented Windows symlink-privilege limitation.
+- `uv run pytest -q` reported `331 passed, 8 skipped, 4 xfailed in 44.72s`. The strict
+  XFAILs remain `ICOR-001`, `ICOR-006`, `ICOR-009`, and `ICOR-030`.
+- `uv run ruff check src tests scripts/audit_baseline.py scripts/build_evidence_snapshot.py`
+  reported `All checks passed!`.
+- `uv lock --check` reported `Resolved 105 packages in 2ms`.
+- `uv run pip-audit` reported no known vulnerabilities and skipped only the unpublished
+  local package `icor-windshield-demand`.
+- `git diff --check` exited 0 with only existing Windows line-ending warnings.
+
+Direct POSIX lock/permission execution remains a CI responsibility because this host is
+Windows; the implementation reuses the existing `fcntl.flock` promotion-lock branch.
+An ignored candidate made with an earlier schema fingerprint may still require the
+already-documented operator cleanup before rebuilding the same immutable snapshot ID.
+Path-based loaders remain trusted in-process application code; private sealed copies
+close the mutable release-store path boundary, not deliberate permission reversal by a
+hostile loader. No source acquisition, production/customer data, server/process
+lifecycle, push, merge, deploy, or main-branch action occurred. The unrelated
+`AGENTS.md` modification remains untouched and unstaged.
