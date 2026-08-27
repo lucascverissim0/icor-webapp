@@ -13,10 +13,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from icor.api.evidence import router as evidence_router
 from icor.api.opportunities import router as opportunity_router
 from icor.api.planner import router as planner_router
 from icor.api.schemas import FieldError, ProblemResponse
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
+from icor.application.evidence_review import EvidenceReviewService
 from icor.application.opportunities import OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandReadinessV1
@@ -49,6 +51,7 @@ def _local_origin(value: str) -> str:
 def create_app(
     repository: PlannerRepository | None = None,
     coverage_repository: CoverageRepository | None = None,
+    evidence_service: EvidenceReviewService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
@@ -68,6 +71,7 @@ def create_app(
         selected_coverage_repository,
         DemandReadinessV1(),
     )
+    app.state.evidence_service = evidence_service or _configured_evidence_service()
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -77,9 +81,7 @@ def create_app(
         return response
 
     @app.exception_handler(RequestValidationError)
-    async def invalid_request(
-        request: Request, error: RequestValidationError
-    ) -> JSONResponse:
+    async def invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
         field_errors = [
             FieldError(
                 field=".".join(str(part) for part in item["loc"] if part not in {"query", "path"}),
@@ -117,4 +119,16 @@ def create_app(
     )
     app.include_router(planner_router)
     app.include_router(opportunity_router)
+    app.include_router(evidence_router)
     return app
+
+
+def _configured_evidence_service() -> EvidenceReviewService | None:
+    candidate = os.getenv("ICOR_EVIDENCE_CANDIDATE")
+    if not candidate:
+        return None
+    try:
+        return EvidenceReviewService.from_candidate(Path(candidate))
+    except (OSError, ValueError) as error:
+        LOGGER.error("Evidence candidate unavailable error_type=%s", type(error).__name__)
+        return None

@@ -1,6 +1,7 @@
 """Versioned HTTP schemas for the planner API."""
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -200,3 +201,80 @@ class OpportunityDrillDownResponse(ApiModel):
 class DeleteCoverageResponse(ApiModel):
     coverage_id: str
     deleted: bool
+
+
+class SnapshotVersionsResponse(ApiModel):
+    source_registry: str
+    identity_registry: str
+    reconciliation_method: str
+    confidence_method: str
+    estimation_method: str
+    survival_method: str
+    hazard_method: str
+    forecast_method: str
+
+
+class EvidenceReleaseSummaryResponse(ApiModel):
+    release_id: str
+    source_id: str
+    publisher: str
+    source_url: str
+    terms_url: str
+    published_at: datetime
+    coverage_start: date
+    coverage_end: date
+    geography: str
+    measure: str
+    dependency_group: str
+    raw_record_count: int
+    accepted_record_count: int
+    rejected_record_count: int
+    quarantined_record_count: int
+    observation_count: int
+    total_value: Decimal
+
+
+class EvidenceSummaryResponse(ApiModel):
+    snapshot_id: str
+    status: str
+    built_at: datetime
+    database_sha256: str
+    observation_count: int
+    published_value_count: int
+    warning_count: int
+    versions: SnapshotVersionsResponse
+    releases: tuple[EvidenceReleaseSummaryResponse, ...]
+    mapping_status_counts: dict[str, int]
+    geographies: tuple[str, ...]
+    measures: tuple[str, ...]
+
+
+class EvidenceObservationResponse(ApiModel):
+    observation_id: str
+    release_id: str
+    original_row_locator: str
+    geography: str
+    period_start: date
+    period_end: date
+    period_precision: str
+    measure: str
+    value: Decimal
+    unit: str
+    publication_status: str
+    original_make: str
+    original_model: str
+    original_model_year: str | None
+    original_type: str | None
+    mapping_status: str
+    transformation_notes: tuple[str, ...]
+    validation_flags: tuple[str, ...]
+    confidence_total: int
+    confidence_reasons: tuple[str, ...]
+
+
+class EvidenceObservationPageResponse(ApiModel):
+    items: tuple[EvidenceObservationResponse, ...]
+    total: int
+    page: int
+    page_size: int
+    pages: int
