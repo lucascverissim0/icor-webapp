@@ -1023,6 +1023,7 @@ a {
 .evidence-page {
   display: grid;
   gap: 1rem;
+  min-width: 0;
 }
 
 .evidence-hero,
@@ -1034,6 +1035,10 @@ a {
   border-radius: 0.9rem;
   background: var(--surface);
   box-shadow: 0 12px 32px rgb(20 37 36 / 5%);
+}
+
+.evidence-panel {
+  min-width: 0;
 }
 
 .evidence-hero,
@@ -1203,6 +1208,7 @@ a {
 }
 
 .evidence-table-wrap {
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 0.75rem;

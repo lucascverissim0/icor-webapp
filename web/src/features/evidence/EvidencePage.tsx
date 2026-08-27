@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { ExternalLink, ShieldCheck } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 
@@ -8,10 +9,14 @@ import {
   plannerApi,
   type EvidenceObservationsQuery,
 } from '../../lib/api/client'
+import { evidenceRoute } from '../../app/router'
+import type { EvidenceSearch } from '../../lib/evidence-search'
 
 
 interface EvidenceWorkbenchProps {
   apiClient?: PlannerApiClient
+  onSearchChange?: (search: EvidenceSearch) => void
+  search?: EvidenceSearch
 }
 
 function number(value: number | string): string {
@@ -35,9 +40,20 @@ function Unavailable({ error, retry }: { error: Error; retry: () => void }) {
   )
 }
 
-export function EvidenceWorkbench({ apiClient = plannerApi }: EvidenceWorkbenchProps) {
+export function EvidenceWorkbench({
+  apiClient = plannerApi,
+  onSearchChange,
+  search,
+}: EvidenceWorkbenchProps) {
   const [draftSearch, setDraftSearch] = useState('')
-  const [query, setQuery] = useState<EvidenceObservationsQuery>({ page: 1, pageSize: 25 })
+  const [localQuery, setLocalQuery] = useState<EvidenceSearch>({ page: 1 })
+  const routeQuery = search ?? localQuery
+  const query: EvidenceObservationsQuery = { ...routeQuery, pageSize: 25 }
+  const updateQuery = (update: (current: EvidenceSearch) => EvidenceSearch) => {
+    const next = update(routeQuery)
+    if (onSearchChange) onSearchChange(next)
+    else setLocalQuery(next)
+  }
   const summary = useQuery({
     queryKey: ['evidence', 'summary'],
     queryFn: () => apiClient.evidenceSummary(),
@@ -51,7 +67,7 @@ export function EvidenceWorkbench({ apiClient = plannerApi }: EvidenceWorkbenchP
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setQuery((current) => ({ ...current, search: draftSearch.trim() || undefined, page: 1 }))
+    updateQuery((current) => ({ ...current, search: draftSearch.trim() || undefined, page: 1 }))
   }
 
   return (
@@ -112,9 +128,9 @@ export function EvidenceWorkbench({ apiClient = plannerApi }: EvidenceWorkbenchP
             </div>
             <form className="evidence-filters" onSubmit={applyFilters}>
               <label>Search source labels<input aria-label="Search source labels" maxLength={100} onChange={(event) => setDraftSearch(event.target.value)} type="search" value={draftSearch} /></label>
-              <label>Release<select onChange={(event) => setQuery((current) => ({ ...current, releaseId: event.target.value || undefined, page: 1 }))} value={query.releaseId ?? ''}><option value="">All releases</option>{summary.data.releases.map((release) => <option key={release.release_id} value={release.release_id}>{release.release_id}</option>)}</select></label>
-              <label>Geography<select onChange={(event) => setQuery((current) => ({ ...current, geography: event.target.value || undefined, page: 1 }))} value={query.geography ?? ''}><option value="">All geographies</option>{summary.data.geographies.map((geography) => <option key={geography}>{geography}</option>)}</select></label>
-              <label>Measure<select onChange={(event) => setQuery((current) => ({ ...current, measure: (event.target.value || undefined) as EvidenceObservationsQuery['measure'], page: 1 }))} value={query.measure ?? ''}><option value="">All measures</option>{summary.data.measures.map((measure) => <option key={measure}>{title(measure)}</option>)}</select></label>
+              <label>Release<select onChange={(event) => updateQuery((current) => ({ ...current, releaseId: event.target.value || undefined, page: 1 }))} value={query.releaseId ?? ''}><option value="">All releases</option>{summary.data.releases.map((release) => <option key={release.release_id} value={release.release_id}>{release.release_id}</option>)}</select></label>
+              <label>Geography<select onChange={(event) => updateQuery((current) => ({ ...current, geography: event.target.value || undefined, page: 1 }))} value={query.geography ?? ''}><option value="">All geographies</option>{summary.data.geographies.map((geography) => <option key={geography}>{geography}</option>)}</select></label>
+              <label>Measure<select onChange={(event) => updateQuery((current) => ({ ...current, measure: (event.target.value || undefined) as EvidenceObservationsQuery['measure'], page: 1 }))} value={query.measure ?? ''}><option value="">All measures</option>{summary.data.measures.map((measure) => <option key={measure} value={measure}>{title(measure)}</option>)}</select></label>
               <button className="primary-action" type="submit">Apply filters</button>
             </form>
 
@@ -122,7 +138,12 @@ export function EvidenceWorkbench({ apiClient = plannerApi }: EvidenceWorkbenchP
             {observations.isPending && <div aria-busy="true" className="evidence-state">Loading observations…</div>}
             {observations.data && (
               <>
-                <div className="evidence-table-wrap">
+                <div
+                  aria-label="Scrollable source observations"
+                  className="evidence-table-wrap"
+                  role="region"
+                  tabIndex={0}
+                >
                   <table className="evidence-table">
                     <caption>{number(observations.data.total)} source observations</caption>
                     <thead><tr><th>Reported identity</th><th>Geography &amp; period</th><th>Measure</th><th>Mapping</th><th>Provenance</th></tr></thead>
@@ -138,9 +159,9 @@ export function EvidenceWorkbench({ apiClient = plannerApi }: EvidenceWorkbenchP
                   </table>
                 </div>
                 <nav aria-label="Observation pages" className="pagination">
-                  <button disabled={observations.data.page <= 1} onClick={() => setQuery((current) => ({ ...current, page: (current.page ?? 1) - 1 }))} type="button">Previous</button>
+                  <button disabled={observations.data.page <= 1} onClick={() => updateQuery((current) => ({ ...current, page: (current.page ?? 1) - 1 }))} type="button">Previous</button>
                   <span>Page {observations.data.page} of {observations.data.pages}</span>
-                  <button disabled={observations.data.page >= observations.data.pages} onClick={() => setQuery((current) => ({ ...current, page: (current.page ?? 1) + 1 }))} type="button">Next</button>
+                  <button disabled={observations.data.page >= observations.data.pages} onClick={() => updateQuery((current) => ({ ...current, page: (current.page ?? 1) + 1 }))} type="button">Next</button>
                 </nav>
               </>
             )}
@@ -152,5 +173,10 @@ export function EvidenceWorkbench({ apiClient = plannerApi }: EvidenceWorkbenchP
 }
 
 export function EvidencePage() {
-  return <EvidenceWorkbench />
+  const navigate = useNavigate()
+  const search = evidenceRoute.useSearch()
+  return <EvidenceWorkbench
+    onSearchChange={(next) => void navigate({ to: '/evidence', search: next })}
+    search={search}
+  />
 }

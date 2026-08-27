@@ -13,6 +13,7 @@ import { OpportunitiesPage } from '../features/opportunities/OpportunitiesPage'
 import { EvidencePage } from '../features/evidence/EvidencePage'
 import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
+import { parseEvidenceSearch, type EvidenceSearch } from '../lib/evidence-search'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
 import {
   parseOpportunitySearch,
@@ -106,6 +107,9 @@ export const opportunitiesRoute = createRoute({
 export const evidenceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/evidence',
+  validateSearch: (raw: EvidenceSearch) => parseEvidenceSearch(
+    raw as unknown as Record<string, unknown>,
+  ),
   component: EvidencePage,
   errorComponent: RouteErrorFallback,
 })
