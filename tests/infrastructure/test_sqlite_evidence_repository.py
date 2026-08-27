@@ -176,17 +176,34 @@ def seed_dependencies(
     repository.add_observations((observation,))
 
 
-def test_empty_database_migrates_to_schema_v2(tmp_path: Path) -> None:
+def test_empty_database_migrates_to_schema_v3(tmp_path: Path) -> None:
     repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
 
-    assert repository.schema_version == 2
+    assert repository.schema_version == 3
+
+
+def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path) -> None:
+    path = tmp_path / "schema-v2.sqlite3"
+    uninitialized = object.__new__(SQLiteEvidenceRepository)
+    with sqlite3.connect(path) as connection:
+        for statement in uninitialized._v2_migration_statements():
+            connection.execute(statement)
+
+    repository = SQLiteEvidenceRepository(path, writable=True)
+
+    assert repository.schema_version == 3
+    with repository._connect() as connection:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(observation)")
+        }
+    assert {"registration_cohort_year", "manufacture_year", "model_year"} <= columns
 
 
 def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-        connection.execute("INSERT INTO schema_version (version) VALUES (3)")
+        connection.execute("INSERT INTO schema_version (version) VALUES (4)")
 
     with pytest.raises(EvidenceSchemaError, match="newer"):
         SQLiteEvidenceRepository(path, writable=True)
@@ -244,6 +261,25 @@ def test_observation_identity_is_immutable(
         repository.add_observations((replace(observation, value=Decimal("2")),))
 
     assert repository.get_observation(observation.observation_id) == observation
+
+
+def test_observation_round_trips_separate_year_semantics(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+) -> None:
+    evidence = replace(
+        observation,
+        registration_cohort_year=2020,
+        manufacture_year=2019,
+        model_year=2021,
+    )
+    repository.add_release(release)
+    repository.add_vehicle(vehicle)
+    repository.add_observations((evidence,))
+
+    assert repository.get_observation(evidence.observation_id) == evidence
 
 
 def test_observation_batch_rolls_back_when_one_identity_is_duplicate(

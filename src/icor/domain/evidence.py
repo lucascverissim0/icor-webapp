@@ -259,6 +259,9 @@ class Observation:
     transformation_notes: tuple[str, ...]
     validation_flags: tuple[str, ...]
     evidence_confidence: EvidenceConfidence
+    registration_cohort_year: int | None = None
+    manufacture_year: int | None = None
+    model_year: int | None = None
 
     def __post_init__(self) -> None:
         _require_identifier(self.observation_id, "observation")
@@ -290,6 +293,13 @@ class Observation:
             raise ValueError("count observation value must be an integer")
         if self.normalized_model_year is not None and type(self.normalized_model_year) is not int:
             raise ValueError("normalized model year must be an integer")
+        for value, label in (
+            (self.registration_cohort_year, "registration cohort year"),
+            (self.manufacture_year, "manufacture year"),
+            (self.model_year, "model year"),
+        ):
+            if value is not None and type(value) is not int:
+                raise ValueError(f"{label} must be an integer")
         if self.canonical_vehicle_id is not None:
             _require_identifier(self.canonical_vehicle_id, "canonical vehicle")
         if (

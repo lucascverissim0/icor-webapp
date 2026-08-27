@@ -41,7 +41,7 @@ class ImmutableEvidenceError(RuntimeError):
     """A write would mutate the ledger or refer to unavailable evidence."""
 
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _SQLITE_MULTI_CHARACTER_OPERATORS = (
     "->>",
     "!=",
@@ -177,7 +177,29 @@ class SQLiteEvidenceRepository:
             if not existing and not has_version_table:
                 self._initialize_latest_schema(connection)
             else:
-                self._validate_schema(connection)
+                version = self._validate_schema(connection)
+                if version == 2:
+                    self._migrate_v2_to_v3(connection)
+
+    def _migrate_v2_to_v3(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                "ALTER TABLE observation ADD COLUMN registration_cohort_year INTEGER"
+            )
+            connection.execute("ALTER TABLE observation ADD COLUMN manufacture_year INTEGER")
+            connection.execute("ALTER TABLE observation ADD COLUMN model_year INTEGER")
+            connection.execute("DROP TABLE schema_version")
+            connection.execute(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 3))"
+            )
+            connection.execute("INSERT INTO schema_version (version) VALUES (3)")
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        self._validate_schema(connection)
 
     @contextmanager
     def _connect(self) -> Any:
@@ -216,13 +238,26 @@ class SQLiteEvidenceRepository:
             connection.commit()
 
     def _migration_statements(self) -> tuple[str, ...]:
-        return self._schema_statements(version=2, model_year_sql="INTEGER")
+        return self._schema_statements(
+            version=3,
+            model_year_sql="INTEGER",
+            observation_year_sql=(
+                ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
+            ),
+        )
+
+    def _v2_migration_statements(self) -> tuple[str, ...]:
+        return self._schema_statements(
+            version=2, model_year_sql="INTEGER", observation_year_sql=""
+        )
 
     def _v1_migration_statements(self) -> tuple[str, ...]:
-        return self._schema_statements(version=1, model_year_sql="INTEGER NOT NULL")
+        return self._schema_statements(
+            version=1, model_year_sql="INTEGER NOT NULL", observation_year_sql=""
+        )
 
     def _schema_statements(
-        self, *, version: int, model_year_sql: str
+        self, *, version: int, model_year_sql: str, observation_year_sql: str
     ) -> tuple[str, ...]:
         checks = {
             "measure": self._enum_check(Measure),
@@ -269,7 +304,7 @@ class SQLiteEvidenceRepository:
                     confidence_authority INTEGER NOT NULL, confidence_publication_status INTEGER NOT NULL,
                     confidence_coverage INTEGER NOT NULL, confidence_identity INTEGER NOT NULL,
                     confidence_independent_agreement INTEGER NOT NULL, confidence_reasons TEXT NOT NULL,
-                    confidence_applied_cap INTEGER
+                    confidence_applied_cap INTEGER{observation_year_sql}
                 );
                 CREATE TABLE identity_mapping (
                     mapping_id TEXT PRIMARY KEY, observation_id TEXT NOT NULL REFERENCES observation(observation_id),
@@ -340,11 +375,12 @@ class SQLiteEvidenceRepository:
             raise EvidenceSchemaError("evidence schema is newer than this application")
         if version < 1:
             raise EvidenceSchemaError("schema version is unsupported")
-        statements = (
-            self._v1_migration_statements()
-            if version == 1
-            else self._migration_statements()
-        )
+        if version == 1:
+            statements = self._v1_migration_statements()
+        elif version == 2:
+            statements = self._v2_migration_statements()
+        else:
+            statements = self._migration_statements()
         self._validate_structure(connection, statements)
         return version
 
@@ -450,7 +486,7 @@ class SQLiteEvidenceRepository:
                     connection, "canonical_vehicle", "vehicle_id", observation.canonical_vehicle_id
                 )
             connection.execute(
-                """INSERT INTO observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO observation VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     observation.observation_id, observation.release_id, observation.original_row_locator,
                     observation.geography, observation.geography_version, self._date(observation.period_start),
@@ -462,7 +498,11 @@ class SQLiteEvidenceRepository:
                     observation.normalized_make, observation.normalized_model,
                     observation.normalized_model_year, observation.canonical_vehicle_id,
                     observation.mapping_status.value, self._json(observation.transformation_notes),
-                    self._json(observation.validation_flags), *self._confidence(observation.evidence_confidence),
+                    self._json(observation.validation_flags),
+                    *self._confidence(observation.evidence_confidence),
+                    observation.registration_cohort_year,
+                    observation.manufacture_year,
+                    observation.model_year,
                 ),
             )
 
@@ -661,6 +701,7 @@ class SQLiteEvidenceRepository:
 
     @classmethod
     def _observation(cls, row: sqlite3.Row) -> Observation:
+        columns = frozenset(row.keys())
         return Observation(
             observation_id=row["observation_id"], release_id=row["release_id"],
             original_row_locator=row["original_row_locator"], geography=row["geography"],
@@ -678,6 +719,13 @@ class SQLiteEvidenceRepository:
             transformation_notes=tuple(json.loads(row["transformation_notes"])),
             validation_flags=tuple(json.loads(row["validation_flags"])),
             evidence_confidence=cls._confidence_from(row),
+            registration_cohort_year=(
+                row["registration_cohort_year"]
+                if "registration_cohort_year" in columns
+                else None
+            ),
+            manufacture_year=row["manufacture_year"] if "manufacture_year" in columns else None,
+            model_year=row["model_year"] if "model_year" in columns else None,
         )
 
     @staticmethod

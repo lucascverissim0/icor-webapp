@@ -125,6 +125,27 @@ def test_canonical_model_family_can_record_unknown_model_year() -> None:
     assert vehicle.model_year is None
 
 
+def test_observation_keeps_registration_manufacture_and_model_year_separate() -> None:
+    observation = make_observation(
+        registration_cohort_year=2020,
+        manufacture_year=2019,
+        model_year=2021,
+    )
+
+    assert observation.registration_cohort_year == 2020
+    assert observation.manufacture_year == 2019
+    assert observation.model_year == 2021
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (("registration_cohort_year", "2020"), ("manufacture_year", 2020.0), ("model_year", True)),
+)
+def test_observation_rejects_non_integer_year_semantics(field: str, value: object) -> None:
+    with pytest.raises(ValueError, match="year"):
+        make_observation(**{field: value})
+
+
 @pytest.mark.parametrize("model_year", ["2024", 2024.0])
 def test_canonical_model_family_rejects_non_integer_known_year(model_year: object) -> None:
     with pytest.raises(ValueError, match="model year"):
