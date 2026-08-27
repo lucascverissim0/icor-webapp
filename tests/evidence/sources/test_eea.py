@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -156,6 +157,32 @@ def test_loader_aggregates_only_identical_documented_vehicle_keys(tmp_path: Path
     assert all(row.mapping_status is MappingStatus.UNRESOLVED for row in observations)
     assert all(row.canonical_vehicle_id is None for row in observations)
     assert all(row.normalized_model_year is None for row in observations)
+
+
+def test_loader_rejects_unidentifiable_rows_and_reconciles_manifest(tmp_path: Path) -> None:
+    release = _stored_release(
+        tmp_path,
+        [
+            _row(identifier="1", country="DE", make="VW", model="GOLF", variant="A"),
+            _row(identifier="2", country="DE", make="VW", model="", variant="B"),
+        ],
+    )
+    release = replace(
+        release,
+        manifest=replace(
+            release.manifest,
+            accepted_record_count=1,
+            rejected_record_count=1,
+        ),
+    )
+    repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
+    repository.add_release(release.manifest)
+
+    EEAPassengerCarLoader().load((release,), repository)
+
+    assert [(row.original_model, row.value) for row in repository.list_observations()] == [
+        ("GOLF", Decimal("1"))
+    ]
 
 
 @pytest.mark.parametrize(

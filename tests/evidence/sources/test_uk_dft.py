@@ -115,11 +115,12 @@ def test_active_fleet_loader_uses_licensed_stock_without_summing_sorn(
         "2026 Q1",
         "2025 Q4",
         "2024 Q4",
+        "1994 Q4",
     ]
     rows = [
-        ["Cars", "FORD", "FORD FIESTA", "FIESTA 1.0", "Petrol", "Licensed", 110, 100, 90],
-        ["Cars", "FORD", "FORD FIESTA", "FIESTA 1.5", "Diesel", "Licensed", 25, 20, 15],
-        ["Cars", "FORD", "FORD FIESTA", "FIESTA 1.0", "Petrol", "SORN", 12, 10, 8],
+        ["Cars", "FORD", "FORD FIESTA", "FIESTA 1.0", "Petrol", "Licensed", 110, 100, 90, 0],
+        ["Cars", "FORD", "FORD FIESTA", "FIESTA 1.5", "Diesel", "Licensed", 25, 20, 15, 0],
+        ["Cars", "FORD", "FORD FIESTA", "FIESTA 1.0", "Petrol", "SORN", 12, 10, 8, 0],
     ]
     release = _release(
         tmp_path,

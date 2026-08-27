@@ -106,18 +106,23 @@ class EEAPassengerCarLoader:
                 member = members[0]
                 if member.is_dir() or member.flag_bits & 0x1:
                     raise ValueError("EEA archive member is unsupported")
-                with tempfile.TemporaryDirectory(
-                    prefix="eea-aggregate-", dir=release.artifact_path.parent
-                ) as temporary:
+                with tempfile.TemporaryDirectory(prefix="eea-aggregate-") as temporary:
                     aggregate_path = Path(temporary) / "aggregate.sqlite3"
-                    raw_count = self._aggregate(archive, member.filename, aggregate_path)
-                    if raw_count != manifest.raw_record_count:
-                        raise ValueError("EEA raw record count does not match manifest")
+                    counts = self._aggregate(archive, member.filename, aggregate_path)
+                    if (*counts, 0) != (
+                        manifest.raw_record_count,
+                        manifest.accepted_record_count,
+                        manifest.rejected_record_count,
+                        manifest.quarantined_record_count,
+                    ):
+                        raise ValueError("EEA parser counts do not match manifest")
                     self._write_observations(release, aggregate_path, repository)
         except BadZipFile as error:
             raise ValueError("EEA artifact is not a valid ZIP archive") from error
 
-    def _aggregate(self, archive: ZipFile, member: str, database_path: Path) -> int:
+    def _aggregate(
+        self, archive: ZipFile, member: str, database_path: Path
+    ) -> tuple[int, int, int]:
         with closing(sqlite3.connect(database_path)) as connection:
             connection.execute(
                 """CREATE TABLE aggregate (
@@ -136,7 +141,7 @@ class EEAPassengerCarLoader:
             ON CONFLICT DO UPDATE SET last_row = excluded.last_row,
             registrations = registrations + 1"""
             batch: list[tuple[object, ...]] = []
-            raw_count = 0
+            raw_count = accepted_count = rejected_count = 0
             with (
                 archive.open(member) as binary,
                 io.TextIOWrapper(binary, encoding="utf-8-sig", newline="") as text,
@@ -148,12 +153,10 @@ class EEAPassengerCarLoader:
                     raw_count += 1
                     self._validate_row(row)
                     key = tuple((row[column] or "").strip() for column in _GROUP_COLUMNS)
-                    if normalize_vehicle_label(key[0]) is None:
-                        raise ValueError("EEA row is missing reporting country")
-                    if normalize_vehicle_label(key[1]) is None:
-                        raise ValueError("EEA row is missing make")
-                    if normalize_vehicle_label(key[2]) is None:
-                        raise ValueError("EEA row is missing commercial name")
+                    if any(normalize_vehicle_label(value) is None for value in key[:3]):
+                        rejected_count += 1
+                        continue
+                    accepted_count += 1
                     batch.append((*key, row_number, row_number))
                     if len(batch) >= _INSERT_BATCH_SIZE:
                         connection.executemany(statement, batch)
@@ -161,7 +164,7 @@ class EEAPassengerCarLoader:
                 if batch:
                     connection.executemany(statement, batch)
             connection.commit()
-            return raw_count
+            return raw_count, accepted_count, rejected_count
 
     @staticmethod
     def _validate_row(row: dict[str, str | None]) -> None:

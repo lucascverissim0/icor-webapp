@@ -25,7 +25,7 @@ from icor.evidence.normalization import normalize_vehicle_label, stable_evidence
 from icor.infrastructure.release_store import StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
-_QUARTER = re.compile(r"(20\d{2}) Q([1-4])\Z")
+_QUARTER = re.compile(r"((?:19|20)\d{2}) Q([1-4])\Z")
 _FINAL_YEAR = 2025
 _INSERT_BATCH_SIZE = 5_000
 _OBSERVATION_BATCH_SIZE = 2_000
@@ -95,9 +95,7 @@ class _UKWideCSVLoader:
         if manifest.coverage_end != date(_FINAL_YEAR, 12, 31):
             raise ValueError("UK DfT release must end at finalized 2025 Q4")
 
-        with tempfile.TemporaryDirectory(
-            prefix="uk-dft-aggregate-", dir=release.artifact_path.parent
-        ) as temporary:
+        with tempfile.TemporaryDirectory(prefix="uk-dft-aggregate-") as temporary:
             aggregate_path = Path(temporary) / "aggregate.sqlite3"
             raw, accepted, rejected = self._aggregate(release.artifact_path, aggregate_path)
             if (raw, accepted, rejected, 0) != (
