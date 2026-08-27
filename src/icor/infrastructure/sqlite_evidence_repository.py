@@ -91,6 +91,28 @@ class SQLiteEvidenceRepository:
     def add_mapping(self, mapping: IdentityMapping) -> None:
         self._write(lambda connection: self._insert_mapping(connection, mapping))
 
+    def add_identity_attributions(
+        self,
+        vehicles: Sequence[CanonicalVehicle],
+        observations: Sequence[Observation],
+        mappings: Sequence[IdentityMapping],
+    ) -> None:
+        """Append one resolved observation batch and its identities atomically."""
+
+        def insert(connection: sqlite3.Connection) -> None:
+            for vehicle in vehicles:
+                existing = connection.execute(
+                    "SELECT 1 FROM canonical_vehicle WHERE vehicle_id = ?",
+                    (vehicle.vehicle_id,),
+                ).fetchone()
+                if existing is None:
+                    self._insert_vehicle(connection, vehicle)
+            self._insert_observations(connection, observations)
+            for mapping in mappings:
+                self._insert_mapping(connection, mapping)
+
+        self._write(insert)
+
     def add_published_values(self, values: Sequence[PublishedValue]) -> None:
         self._write(lambda connection: self._insert_published_values(connection, values))
 

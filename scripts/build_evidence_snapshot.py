@@ -13,6 +13,7 @@ from pathlib import Path
 
 from icor.application.snapshot_build import (
     EvidenceLoader,
+    RepositoryTransformer,
     SnapshotBuilder,
     SnapshotBuildError,
     SnapshotBuildRequest,
@@ -20,7 +21,11 @@ from icor.application.snapshot_build import (
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
 from icor.evidence.release_manifests import ManifestError, load_release_manifest
 from icor.evidence.serialization import canonical_json_bytes
-from icor.evidence.source_registry import OFFICIAL_SOURCE_VERSIONS, official_loader_registry
+from icor.evidence.source_registry import (
+    OFFICIAL_SOURCE_VERSIONS,
+    official_loader_registry,
+    official_repository_transformer,
+)
 from icor.infrastructure.release_store import (
     ReleaseAlreadyExistsError,
     ReleaseIntegrityError,
@@ -177,6 +182,7 @@ def _build_snapshot(
     loader_registry: Mapping[str, EvidenceLoader],
     versions: SnapshotVersions,
     filesystem: SnapshotFilesystem,
+    repository_transformer: RepositoryTransformer | None,
 ) -> tuple[int, dict[str, object]]:
     release_ids = tuple(sorted(args.release))
     if len(set(release_ids)) != len(release_ids):
@@ -200,6 +206,7 @@ def _build_snapshot(
         store,
         RegistryEvidenceLoader(loader_registry),
         filesystem=filesystem,
+        repository_transformer=repository_transformer,
     ).build(request)
     if not result.validation_report.can_promote:
         return 3, {
@@ -255,9 +262,11 @@ def main(
         if loader_registry is None:
             registry = official_loader_registry()
             versions = OFFICIAL_SOURCE_VERSIONS
+            repository_transformer = official_repository_transformer
         else:
             registry = loader_registry
             versions = FOUNDATION_VERSIONS
+            repository_transformer = None
         create_root = args.command in {"stage-release", "build", "promote"}
         if not create_root and not os.path.lexists(root):
             raise SnapshotUnavailableError("no active snapshot is available")
@@ -272,6 +281,7 @@ def main(
                     registry,
                     versions,
                     filesystem,
+                    repository_transformer,
                 )
             elif args.command == "promote":
                 code, payload = _promote(args, pinned_root, filesystem)

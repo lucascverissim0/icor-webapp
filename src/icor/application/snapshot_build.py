@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from re import fullmatch
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import uuid4
 
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
@@ -45,6 +45,14 @@ class EvidenceLoader(Protocol):
         releases: tuple[StoredRelease, ...],
         repository: SQLiteEvidenceRepository,
     ) -> None: ...
+
+
+class RepositoryTransformer(Protocol):
+    """Wrap the scratch repository with one deterministic transformation boundary."""
+
+    def __call__(
+        self, repository: SQLiteEvidenceRepository, reviewed_at: datetime
+    ) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +151,7 @@ class SnapshotBuilder:
         release_validator: ReleaseValidator | None = None,
         snapshot_validator: SnapshotValidator | None = None,
         filesystem: SnapshotFilesystem | None = None,
+        repository_transformer: RepositoryTransformer | None = None,
     ) -> None:
         self.root = Path(root)
         self.release_store = release_store
@@ -150,6 +159,7 @@ class SnapshotBuilder:
         self.release_validator = release_validator or ReleaseValidator()
         self.snapshot_validator = snapshot_validator or SnapshotValidator()
         self.filesystem = filesystem or SnapshotFilesystem()
+        self.repository_transformer = repository_transformer
 
     def build(self, request: SnapshotBuildRequest) -> SnapshotBuildResult:
         """Build and validate one deterministic candidate without promoting it."""
@@ -237,7 +247,15 @@ class SnapshotBuilder:
         )
         for release in releases:
             scratch_repository.add_release(release.manifest)
-        self.loader.load(loader_releases, scratch_repository)
+        loader_repository = (
+            scratch_repository
+            if self.repository_transformer is None
+            else self.repository_transformer(scratch_repository, request.build_as_of)
+        )
+        self.loader.load(
+            loader_releases,
+            cast(SQLiteEvidenceRepository, loader_repository),
+        )
 
         database_path = staging_path / "evidence.sqlite3"
         repository = SQLiteEvidenceRepository(database_path, writable=True)
