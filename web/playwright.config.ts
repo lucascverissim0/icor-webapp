@@ -30,6 +30,12 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       ICOR_COVERAGE_DB: coverageDatabase,
+      ...(process.env.ICOR_EVIDENCE_ACTIVE_ROOT
+        ? { ICOR_EVIDENCE_ACTIVE_ROOT: process.env.ICOR_EVIDENCE_ACTIVE_ROOT }
+        : {}),
+      ...(process.env.ICOR_EVIDENCE_CANDIDATE
+        ? { ICOR_EVIDENCE_CANDIDATE: process.env.ICOR_EVIDENCE_CANDIDATE }
+        : {}),
     },
   },
 })

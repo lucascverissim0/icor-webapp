@@ -157,18 +157,27 @@ class RegistrationService:
         query.validate()
         search = query.search.strip() if query.search and query.search.strip() else None
         grouped_sql, parameters = self._grouped_query(search)
-        total, total_registrations = self._totals(search)
         offset = (query.page - 1) * query.page_size
         with self._connect() as connection:
             rows = connection.execute(
                 f"""WITH grouped AS ({grouped_sql}), ranked AS (
                     SELECT ROW_NUMBER() OVER (
                         ORDER BY registrations DESC, LOWER(make), LOWER(model), vehicle_id
-                    ) AS rank, * FROM grouped
+                    ) AS rank,
+                    COUNT(*) OVER () AS total_count,
+                    SUM(registrations) OVER () AS complete_total_registrations,
+                    * FROM grouped
                 )
                 SELECT * FROM ranked ORDER BY rank LIMIT ? OFFSET ?""",
                 (*parameters, query.page_size, offset),
             ).fetchall()
+        if rows:
+            total = int(rows[0]["total_count"])
+            total_registrations = Decimal(
+                str(rows[0]["complete_total_registrations"])
+            )
+        else:
+            total, total_registrations = self._totals(search)
         items = tuple(_registration_row(row) for row in rows)
         pages = (total + query.page_size - 1) // query.page_size if total else 0
         return RegistrationPage(

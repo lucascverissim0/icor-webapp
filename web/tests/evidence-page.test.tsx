@@ -76,12 +76,13 @@ function successFetcher() {
 }
 
 describe('EvidenceWorkbench', () => {
-  it('presents candidate provenance without implying canonical identity or publication', async () => {
+  it('presents candidate provenance with the exact identity boundary', async () => {
     renderEvidence(successFetcher())
 
     expect(await screen.findByText('542,455')).toBeVisible()
-    expect(screen.getByText(/reported source labels—not canonical vehicle identities/i)).toBeVisible()
-    expect(screen.getByText(/not active and does not feed forecasts/i)).toBeVisible()
+    expect(screen.getByText(/exact normalized model-family identity/i)).toBeVisible()
+    expect(screen.getByText(/registration year is not model year/i)).toBeVisible()
+    expect(screen.getByText(/candidate does not feed forecasts/i)).toBeVisible()
     expect(screen.getByText('ACME')).toBeVisible()
     expect(screen.getByText('ROADRUNNER')).toBeVisible()
     expect(screen.getByText('Unresolved')).toBeVisible()

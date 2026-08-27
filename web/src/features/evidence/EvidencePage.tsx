@@ -76,14 +76,14 @@ export function EvidenceWorkbench({
         <div>
           <p className="eyebrow">Official source review</p>
           <h2>Source evidence</h2>
-          <p>Inspect validated public-source records before any identity resolution, reconciliation, estimation, or forecasting.</p>
+          <p>Inspect validated public-source records and exact-normalized model-family mappings before reconciliation, estimation, or forecasting.</p>
         </div>
         <span className="candidate-pill"><ShieldCheck aria-hidden="true" size={17} /> Candidate only</span>
       </header>
 
       <section className="evidence-boundary" aria-label="Evidence interpretation boundary">
-        <strong>Reported source labels—not canonical vehicle identities</strong>
-        <p>This snapshot is validated but not active and does not feed forecasts. Zero values are published from it.</p>
+        <strong>Exact normalized model-family identity; model year unavailable</strong>
+        <p>Registration year is not model year. This candidate does not feed forecasts, and zero values are published from it.</p>
       </section>
 
       {summary.isPending && <section aria-busy="true" className="evidence-state"><h2>Validating source evidence…</h2></section>}
@@ -124,7 +124,7 @@ export function EvidenceWorkbench({
           <section className="evidence-panel">
             <div className="evidence-heading">
               <div><p className="eyebrow">Observation browser</p><h3>Publisher-supplied rows</h3></div>
-              <span>{number(summary.data.mapping_status_counts.unresolved ?? 0)} unresolved labels</span>
+              <span>{number(summary.data.mapping_status_counts.normalized_label ?? 0)} exact-normalized · {number(summary.data.mapping_status_counts.rejected ?? 0)} rejected</span>
             </div>
             <form className="evidence-filters" onSubmit={applyFilters}>
               <label>Search source labels<input aria-label="Search source labels" maxLength={100} onChange={(event) => setDraftSearch(event.target.value)} type="search" value={draftSearch} /></label>

@@ -26,8 +26,9 @@ test('reviews the sealed official candidate without forecast claims', async ({ p
   await expect(page.getByRole('heading', { name: 'Source evidence', exact: true })).toBeVisible()
   await expect(observationMetric(page)).toBeVisible({ timeout: 60_000 })
   await expect(page.locator('.release-card')).toHaveCount(4)
-  await expect(page.getByText(/reported source labels—not canonical vehicle identities/i)).toBeVisible()
-  await expect(page.getByText(/not active and does not feed forecasts/i)).toBeVisible()
+  await expect(page.getByText(/exact normalized model-family identity/i)).toBeVisible()
+  await expect(page.getByText(/registration year is not model year/i)).toBeVisible()
+  await expect(page.getByText(/candidate does not feed forecasts/i)).toBeVisible()
   await expect(page.getByRole('definition').filter({ hasText: /^0$/ })).toHaveCount(2)
 
   await page.getByRole('searchbox', { name: 'Search source labels' }).fill('ALFA ROMEO')

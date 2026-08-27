@@ -13,22 +13,29 @@ Development is local-first and isolated from the currently deployed application.
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, audit, test, and local-app
 commands.
 
-## Local planner preview
+## Local web app
 
-The React/FastAPI product slice runs entirely on deterministic **demonstration data**.
-It requires no production secrets and no customer data.
+The default React/FastAPI landing page serves a verified **official-data** product
+slice: finalized 2024 EU-27 passenger-car registrations ranked by exact-normalized
+make and model family. Registration year is explicitly not treated as model year.
+The separate planner and opportunity workflows remain clearly labelled prototypes
+using deterministic demonstration forecasts.
+Local operation uses no production secrets and no customer data.
 
 ```powershell
 uv sync --locked --all-groups
 cd web
 npm ci
 cd ..
+$env:ICOR_EVIDENCE_ACTIVE_ROOT = "$PWD\.local\evidence"
+$env:ICOR_EVIDENCE_CANDIDATE = "$PWD\.local\evidence\candidates\snapshot-2f13ba3f0cd083c7eea8"
 uv run python scripts/run_planner_dev.py
 ```
 
-Open the configuration planner at `http://127.0.0.1:5173/planner`, the opportunity
-ranking at `http://127.0.0.1:5173/opportunities`, and the API documentation at
-`http://127.0.0.1:8000/docs`.
+Open official registrations at `http://127.0.0.1:5173/`, source evidence at
+`http://127.0.0.1:5173/evidence`, and API documentation at
+`http://127.0.0.1:8000/docs`. Prototype routes remain at `/planner` and
+`/opportunities`.
 
 The opportunity ranking uses the same synthetic demonstration forecast plus shared
 local production-coverage state in an ignored SQLite database. It supports exact
@@ -42,8 +49,9 @@ The repository can now acquire checksum-pinned public releases and build immutab
 candidate snapshots from EEA 2024-final registrations, KBA FZ10 2024 registrations, and
 UK DfT/DVLA registrations and licensed fleet data through finalized 2025 Q4. See
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#official-evidence-acquisition) for exact commands,
-licences, and limitations. Source labels remain unresolved and candidates are never
-promoted automatically. A configured local app exposes the validated candidate through
-the read-only `/evidence` workspace while planner forecasts continue to use clearly
-labelled demonstration data. This view does not resolve identity, publish model values,
-or make the candidate active.
+licences, and limitations. The current active local snapshot uses an exact-normalized
+make/model-family registry, retains ambiguous labels as rejected, and exposes the
+verified EU-27 aggregation at `/registrations`. It does not infer model year,
+windshield fitment, replacement demand, or forecasts. `/evidence` remains the
+read-only provenance workspace, while prototype forecasts continue to use clearly
+labelled demonstration data.

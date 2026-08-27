@@ -236,6 +236,24 @@ def test_ranking_aggregates_observations_before_vehicle_lookup(
     assert "o.mapping_status = 'normalized_label'" in sql
 
 
+def test_populated_ranking_uses_one_read_connection(mapped_candidate: Path) -> None:
+    candidate = RegistrationService.from_candidate(mapped_candidate)
+
+    class CountingRegistrationService(RegistrationService):
+        connection_count = 0
+
+        def _connect(self) -> sqlite3.Connection:
+            self.connection_count += 1
+            return super()._connect()
+
+    service = CountingRegistrationService(candidate.database_path, candidate.manifest)
+
+    page = service.ranking(RegistrationQuery())
+
+    assert page.items
+    assert service.connection_count == 1
+
+
 def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> None:
     summary = RegistrationService.from_candidate(mapped_candidate).summary()
 

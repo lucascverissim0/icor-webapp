@@ -130,10 +130,13 @@ their overlap is not treated as independent confirmation. The UK active-fleet pa
 uses only `Cars` with `LicenceStatus=Licensed`; SORN remains in the raw artifact and is
 not added to active fleet. Columns after 2025 Q4 are excluded as provisional.
 
-The first validated live candidate is `snapshot-a92867b966f81d7966fe` with 542,455
-observations, zero warnings, and zero published model values. It was not promoted.
-Canonical make/model/model-year and windshield-fitment identity remain unresolved; no
-forecast is calculated and the planner/API still serve demonstration data.
+The current promoted local snapshot is `snapshot-2f13ba3f0cd083c7eea8` with 542,455
+observations, 10,401 exact-normalized canonical model families, zero warnings, and zero
+published forecast values. Its SHA-256 is
+`05677e564f10794ae296799fb609ffadbb5b93cfff8b8bd79ae1e327e28df968`.
+It supports the official 2024 EU-27 registration ranking only. Model year,
+windshield fitment, replacement demand, reconciliation, estimation, and forecasting
+remain unresolved and are not inferred.
 
 All source-release directories and promoted snapshot directories are immutable. A failed
 build or promotion leaves the current active snapshot unchanged, and promotion never
@@ -175,22 +178,27 @@ server with `Ctrl+C` in its terminal.
 
 ## Start the planner web app
 
-The planner uses deterministic fixture records from `data/demo/planner-v1.json`.
-They are clearly labelled as **demonstration data** and are not production forecasts.
-The local workflow requires no production secrets and no customer data.
+Configure the promoted evidence root for the official registration landing page and
+the exact candidate path for the provenance workspace. The planner and opportunity
+routes still use deterministic fixture records from `data/demo/planner-v1.json` and
+remain clearly labelled prototypes, not production forecasts.
+Those prototype routes use demonstration data.
+Local operation requires no production secrets and no customer data.
 
 From the development worktree, validate or start both local-only processes:
 
 ```powershell
 uv run python scripts/run_planner_dev.py --check
+$env:ICOR_EVIDENCE_ACTIVE_ROOT = "$PWD\.local\evidence"
+$env:ICOR_EVIDENCE_CANDIDATE = "$PWD\.local\evidence\candidates\snapshot-2f13ba3f0cd083c7eea8"
 uv run python scripts/run_planner_dev.py
 ```
 
-Open `http://127.0.0.1:5173/planner` for configuration planning,
-`http://127.0.0.1:5173/opportunities` for opportunity ranking and local production
-coverage, and `http://127.0.0.1:8000/docs` for the FastAPI contract. Stop both
-processes with `Ctrl+C`. If separate terminals are preferable, run the API from the
-repository root:
+Open `http://127.0.0.1:5173/` for official registrations,
+`http://127.0.0.1:5173/evidence` for source provenance, and
+`http://127.0.0.1:8000/docs` for the FastAPI contract. The prototype routes are
+`/planner` and `/opportunities`. Stop both processes with `Ctrl+C`. If separate
+terminals are preferable, run the API from the repository root:
 
 ```powershell
 uv run uvicorn icor.api.app:create_app --factory --host 127.0.0.1 --port 8000
@@ -214,10 +222,10 @@ $env:ICOR_EVIDENCE_CANDIDATE = 'C:\Users\LucasCravoVERISSIMO\icor-webapp-develop
 uv run python scripts/run_planner_dev.py
 ```
 
-Open `http://127.0.0.1:5173/evidence`. This workspace displays raw publisher labels and
-provenance for review. It does not activate or promote the candidate, change the demo
-planner data, resolve canonical vehicle identities, reconcile overlapping releases,
-estimate missing values, or calculate a forecast.
+Open `http://127.0.0.1:5173/evidence`. This workspace displays raw publisher labels,
+exact-normalized model-family mappings, rejected ambiguous labels, and provenance for
+review. It does not infer model year or windshield fitment, reconcile overlapping
+releases, estimate missing values, or calculate a forecast.
 
 ### Local production-coverage state
 
