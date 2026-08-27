@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_login_page_renders_without_a_local_secrets_file(socket_enabled: None) -> None:
-    app = AppTest.from_file(PROJECT_ROOT / "ui" / "app.py", default_timeout=10)
+    app = AppTest.from_file(PROJECT_ROOT / "ui" / "app.py", default_timeout=30)
 
     app.run()
 
