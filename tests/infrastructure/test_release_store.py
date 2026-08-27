@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -11,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from icor.domain.evidence import Measure, PublicationStatus, ReleaseManifest
+from icor.evidence.release_manifests import write_release_manifest
 from icor.infrastructure.release_store import (
     ReleaseAlreadyExistsError,
     ReleaseIntegrityError,
@@ -354,13 +356,70 @@ def test_stage_rejects_a_release_id_already_owned_by_another_source(
 def test_stage_rejects_a_release_id_locked_by_another_stager(
     store: ReleaseStore, release_manifest: ReleaseManifest, tmp_path: Path
 ) -> None:
-    lock = store.root / ".locks" / release_manifest.release_id
-    lock.mkdir(parents=True)
+    root = store.filesystem.prepare_root(store.root)
+    locks_root = store.filesystem.prepare_directory(root / ".locks", root)
+    lock = locks_root / f"{release_manifest.release_id}.lock"
 
-    with pytest.raises(ReleaseAlreadyExistsError, match="in progress"):
+    with store.filesystem.interprocess_lock(
+        lock,
+        root,
+        timeout=0.0,
+        unavailable_message="test lock unavailable",
+        unsafe_message="test lock unsafe",
+    ), pytest.raises(ReleaseAlreadyExistsError, match="in progress"):
         store.stage(source_artifact(tmp_path), release_manifest)
 
     assert not (store.root / release_manifest.source_id).exists()
+
+
+def test_crashed_stager_releases_lock_for_the_next_process(
+    store: ReleaseStore,
+    release_manifest: ReleaseManifest,
+    tmp_path: Path,
+) -> None:
+    artifact = source_artifact(tmp_path)
+    manifest_path = tmp_path / "incoming.manifest.json"
+    write_release_manifest(manifest_path, release_manifest)
+    script = """
+import os
+import sys
+from pathlib import Path
+
+from icor.evidence.release_manifests import load_release_manifest
+from icor.infrastructure.release_store import ReleaseStore
+
+class CrashingReleaseStore(ReleaseStore):
+    @staticmethod
+    def _copy_with_fsync(source_path, destination):
+        print("locked", flush=True)
+        os._exit(73)
+
+CrashingReleaseStore(Path(sys.argv[1])).stage(
+    Path(sys.argv[2]),
+    load_release_manifest(Path(sys.argv[3])),
+)
+"""
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(store.root),
+            str(artifact),
+            str(manifest_path),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout is not None
+    assert process.stdout.readline().strip() == "locked"
+    _, stderr = process.communicate(timeout=5)
+    assert process.returncode == 73, stderr
+
+    stored = store.stage(artifact, release_manifest)
+
+    assert stored.artifact_path.read_bytes() == artifact.read_bytes()
 
 
 def test_concurrent_distinct_releases_create_shared_directories_idempotently(

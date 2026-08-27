@@ -8,7 +8,8 @@ import os
 import re
 import shutil
 import sys
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -20,7 +21,11 @@ from icor.evidence.release_manifests import (
     write_release_manifest,
 )
 from icor.evidence.serialization import sha256_file
-from icor.infrastructure.snapshot_filesystem import SnapshotFilesystem, SnapshotPathError
+from icor.infrastructure.snapshot_filesystem import (
+    SnapshotFilesystem,
+    SnapshotLockUnavailableError,
+    SnapshotPathError,
+)
 
 _IDENTIFIER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 _AT_FDCWD = -100
@@ -81,8 +86,7 @@ class ReleaseStore:
 
         root = self._store_root(create=True)
         destination = self.root / manifest.source_id / manifest.release_id
-        lock = self._acquire_release_lock(manifest.release_id, root)
-        try:
+        with self._release_lock(manifest.release_id, root):
             matches = self._find_release_paths(manifest.release_id, root)
             if matches:
                 if len(matches) == 1 and matches[0] == destination:
@@ -111,8 +115,6 @@ class ReleaseStore:
 
             stored = self._load_release_directory(destination, root)
             return self._verify_stored_release(stored, root)
-        finally:
-            lock.rmdir()
 
     def get(self, release_id: str) -> StoredRelease:
         """Return one complete stored release without hashing its artifact again."""
@@ -202,18 +204,26 @@ class ReleaseStore:
                 matches.append(candidate)
         return matches
 
-    def _acquire_release_lock(self, release_id: str, root: Path) -> Path:
+    @contextmanager
+    def _release_lock(self, release_id: str, root: Path) -> Iterator[None]:
         locks_root = self.root / ".locks"
         self._prepare_directory(locks_root, root, "release lock directory")
-        lock = locks_root / release_id
+        lock = locks_root / f"{release_id}.lock"
         try:
-            lock.mkdir()
-        except FileExistsError as error:
+            with self.filesystem.interprocess_lock(
+                lock,
+                root,
+                timeout=0.0,
+                unavailable_message="release staging lock is unavailable",
+                unsafe_message="release staging lock is unsafe",
+            ):
+                yield
+        except SnapshotLockUnavailableError as error:
             raise ReleaseAlreadyExistsError(
                 f"release staging is already in progress: {release_id}"
             ) from error
-        self._require_safe_directory(lock, root, "release lock directory")
-        return lock
+        except SnapshotPathError as error:
+            raise ReleaseIntegrityError("release staging lock is unsafe") from error
 
     def _return_existing_or_raise(
         self, destination: Path, manifest: ReleaseManifest, root: Path

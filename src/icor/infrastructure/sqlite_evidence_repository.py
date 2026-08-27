@@ -280,6 +280,8 @@ class SQLiteEvidenceRepository:
                 ON canonical_vehicle (make, model, model_year, market);
                 CREATE UNIQUE INDEX observation_release_row_locator_idx
                 ON observation (release_id, original_row_locator);
+                CREATE UNIQUE INDEX identity_mapping_observation_idx
+                ON identity_mapping (observation_id);
                 """.split(";")
             if statement.strip()
         )
@@ -432,10 +434,25 @@ class SQLiteEvidenceRepository:
         )
 
     def _insert_mapping(self, connection: sqlite3.Connection, mapping: IdentityMapping) -> None:
-        self._require_reference(connection, "observation", "observation_id", mapping.observation_id)
+        observation = connection.execute(
+            """SELECT canonical_vehicle_id, mapping_status FROM observation
+            WHERE observation_id = ?""",
+            (mapping.observation_id,),
+        ).fetchone()
+        if observation is None:
+            raise ImmutableEvidenceError(
+                f"evidence reference does not exist: {mapping.observation_id}"
+            )
         if mapping.canonical_vehicle_id is not None:
             self._require_reference(
                 connection, "canonical_vehicle", "vehicle_id", mapping.canonical_vehicle_id
+            )
+        if (
+            mapping.canonical_vehicle_id != observation["canonical_vehicle_id"]
+            or mapping.status.value != observation["mapping_status"]
+        ):
+            raise ImmutableEvidenceError(
+                "identity mapping does not match observation attribution"
             )
         connection.execute(
             "INSERT INTO identity_mapping VALUES (?, ?, ?, ?, ?, ?)",
@@ -451,16 +468,40 @@ class SQLiteEvidenceRepository:
         for value in values:
             self._require_reference(connection, "canonical_vehicle", "vehicle_id", value.canonical_vehicle_id)
             for input_id in value.input_ids:
-                row = connection.execute(
-                    """SELECT canonical_vehicle_id, mapping_status, measure, unit, geography,
-                    geography_version, period_start, period_end FROM observation
-                    WHERE observation_id = ?""",
+                rows = connection.execute(
+                    """SELECT observation.canonical_vehicle_id, observation.mapping_status,
+                    observation.measure, observation.unit, observation.geography,
+                    observation.geography_version, observation.period_start,
+                    observation.period_end, identity_mapping.mapping_id,
+                    identity_mapping.canonical_vehicle_id AS mapping_vehicle_id,
+                    identity_mapping.status AS selected_mapping_status
+                    FROM observation
+                    LEFT JOIN identity_mapping
+                    ON identity_mapping.observation_id = observation.observation_id
+                    WHERE observation.observation_id = ?""",
                     (input_id,),
-                ).fetchone()
-                if row is None:
+                ).fetchall()
+                if not rows:
                     raise ImmutableEvidenceError(f"evidence reference does not exist: {input_id}")
-                if row["mapping_status"] in _NON_PUBLISHABLE_STATUSES:
+                if len(rows) != 1 or rows[0]["mapping_id"] is None:
+                    raise ImmutableEvidenceError(
+                        "published input requires exactly one selected mapping"
+                    )
+                row = rows[0]
+                if (
+                    row["mapping_status"] in _NON_PUBLISHABLE_STATUSES
+                    or row["selected_mapping_status"] in _NON_PUBLISHABLE_STATUSES
+                ):
                     raise ImmutableEvidenceError("unresolved observation cannot publish a model value")
+                if (
+                    row["mapping_vehicle_id"] != row["canonical_vehicle_id"]
+                    or row["selected_mapping_status"] != row["mapping_status"]
+                    or row["mapping_vehicle_id"] != value.canonical_vehicle_id
+                    or row["selected_mapping_status"] != value.mapping_status.value
+                ):
+                    raise ImmutableEvidenceError(
+                        "published value mapping attribution is incompatible"
+                    )
                 if (
                     row["canonical_vehicle_id"] != value.canonical_vehicle_id
                     or row["measure"] != value.measure.value

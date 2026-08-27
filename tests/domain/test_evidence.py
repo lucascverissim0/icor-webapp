@@ -204,6 +204,20 @@ def test_observation_requires_integral_count_values_and_units() -> None:
         make_observation(unit="")
 
 
+@pytest.mark.parametrize(
+    "value",
+    (
+        Decimal("NaN"),
+        Decimal("sNaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ),
+)
+def test_observation_rejects_every_non_finite_decimal(value: Decimal) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        make_observation(value=value)
+
+
 def test_observation_retains_original_labels_beside_normalized_labels() -> None:
     observation = make_observation(
         original_make="ExAmple MOTORS",
@@ -296,6 +310,38 @@ def test_published_value_requires_input_ids_and_ordered_intervals() -> None:
         make_published_value(input_ids=())
     with pytest.raises(ValueError, match="p10 <= p50 <= p90"):
         make_published_value(p10=Decimal("11"), p50=Decimal("10"), p90=Decimal("12"))
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        Decimal("NaN"),
+        Decimal("sNaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ),
+)
+def test_published_value_rejects_every_non_finite_decimal(value: Decimal) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        make_published_value(value=value)
+
+
+@pytest.mark.parametrize("field", ("p10", "p50", "p90"))
+@pytest.mark.parametrize(
+    "value",
+    (
+        Decimal("NaN"),
+        Decimal("sNaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ),
+)
+def test_published_intervals_reject_every_non_finite_decimal(
+    field: str,
+    value: Decimal,
+) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        make_published_value(**{field: value})
 
 
 def test_forecast_confidence_exists_only_for_forecasts() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import os
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -17,6 +18,7 @@ from icor.application.snapshot_build import (
 from icor.domain.evidence import (
     CanonicalVehicle,
     EvidenceConfidence,
+    IdentityMapping,
     MappingStatus,
     Measure,
     Observation,
@@ -34,6 +36,11 @@ from icor.infrastructure.release_store import ReleaseStore, StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 ARTIFACT = b"country,year,make,model,count\nDE,2024,Example,Alpha,10\nFR,2024,Example,Alpha,5\n"
+TRANSIENT_ARTIFACT = (
+    b"country,year,make,model,count\n"
+    b"DE,2024,Example,Alpha,999\n"
+    b"FR,2024,Example,Alpha,888\n"
+)
 BUILD_AS_OF = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 
 
@@ -125,23 +132,97 @@ class TwoObservationLoader:
 
 
 class ChangingReleaseLoader(TwoObservationLoader):
+    def __init__(
+        self,
+        *,
+        reverse: bool,
+        stored_artifact_path: Path,
+        stored_manifest_path: Path,
+    ) -> None:
+        super().__init__(reverse=reverse)
+        self.stored_artifact_path = stored_artifact_path
+        self.stored_manifest_path = stored_manifest_path
+
     def load(
         self,
         releases: tuple[StoredRelease, ...],
         repository: SQLiteEvidenceRepository,
     ) -> None:
         super().load(releases, repository)
-        stored = releases[0]
         changed_artifact = b"changed-during-build\n"
-        stored.artifact_path.write_bytes(changed_artifact)
+        self.stored_artifact_path.write_bytes(changed_artifact)
         write_release_manifest(
-            stored.manifest_path,
+            self.stored_manifest_path,
             replace(
-                stored.manifest,
+                releases[0].manifest,
                 artifact_bytes=len(changed_artifact),
                 sha256=sha256(changed_artifact).hexdigest(),
             ),
         )
+
+
+class TransientMutationLoader:
+    def __init__(self, stored_artifact_path: Path) -> None:
+        self.stored_artifact_path = stored_artifact_path
+
+    def load(
+        self,
+        releases: tuple[StoredRelease, ...],
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        original_bytes = self.stored_artifact_path.read_bytes()
+        self.stored_artifact_path.write_bytes(TRANSIENT_ARTIFACT)
+        try:
+            with releases[0].artifact_path.open(encoding="utf-8", newline="") as artifact:
+                rows = tuple(csv.DictReader(artifact))
+        finally:
+            self.stored_artifact_path.write_bytes(original_bytes)
+
+        vehicle = CanonicalVehicle(
+            "vehicle-example-alpha-2024", "Example", "Alpha", 2024, "EU"
+        )
+        repository.add_vehicle(vehicle)
+        for position, row in enumerate(rows, start=2):
+            country = row["country"]
+            observation = Observation(
+                observation_id=f"observation-{country.casefold()}-2024",
+                release_id=releases[0].release_id,
+                original_row_locator=f"row:{position}",
+                geography=country,
+                geography_version="eu-2024",
+                period_start=date(2024, 1, 1),
+                period_end=date(2024, 12, 31),
+                period_precision=PeriodPrecision.YEAR,
+                measure=Measure.NEW_REGISTRATIONS,
+                value=Decimal(row["count"]),
+                unit="vehicles",
+                publication_status=PublicationStatus.FINAL,
+                original_make=row["make"],
+                original_model=row["model"],
+                original_model_year=row["year"],
+                original_type=None,
+                source_make_identifier=None,
+                source_model_identifier=None,
+                normalized_make=row["make"],
+                normalized_model=row["model"],
+                normalized_model_year=int(row["year"]),
+                canonical_vehicle_id=vehicle.vehicle_id,
+                mapping_status=MappingStatus.NORMALIZED_LABEL,
+                transformation_notes=("source row normalized",),
+                validation_flags=(),
+                evidence_confidence=_confidence(),
+            )
+            repository.add_observations((observation,))
+            repository.add_mapping(
+                IdentityMapping(
+                    mapping_id=f"mapping-{country.casefold()}-2024",
+                    observation_id=observation.observation_id,
+                    canonical_vehicle_id=vehicle.vehicle_id,
+                    status=MappingStatus.NORMALIZED_LABEL,
+                    reason="normalized source labels matched the registry",
+                    reviewed_at=BUILD_AS_OF,
+                )
+            )
 
 
 @pytest.fixture
@@ -266,10 +347,15 @@ def test_build_rejects_release_replaced_during_loading(
     build_request: SnapshotBuildRequest,
 ) -> None:
     root = tmp_path / "evidence"
+    stored = release_store.verify(build_request.release_ids[0])
     builder = SnapshotBuilder(
         root,
         release_store,
-        ChangingReleaseLoader(reverse=False),
+        ChangingReleaseLoader(
+            reverse=False,
+            stored_artifact_path=stored.artifact_path,
+            stored_manifest_path=stored.manifest_path,
+        ),
     )
 
     with pytest.raises(SnapshotBuildError, match="changed during build"):
@@ -278,6 +364,29 @@ def test_build_rejects_release_replaced_during_loading(
     assert not (root / "candidates").exists() or not any(
         (root / "candidates").iterdir()
     )
+
+
+def test_loader_consumes_private_checksummed_release_bytes_during_transient_mutation(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    stored = release_store.verify(build_request.release_ids[0])
+    builder = SnapshotBuilder(
+        tmp_path / "evidence",
+        release_store,
+        TransientMutationLoader(stored.artifact_path),
+    )
+
+    result = builder.build(build_request)
+
+    repository = SQLiteEvidenceRepository(result.database_path)
+    assert tuple(row.value for row in repository.list_observations()) == (
+        Decimal("10"),
+        Decimal("5"),
+    )
+    assert result.validation_report.can_promote is True
+    assert release_store.verify(stored.release_id).artifact_path.read_bytes() == ARTIFACT
 
 
 def test_build_rejects_symlinked_candidates_directory(

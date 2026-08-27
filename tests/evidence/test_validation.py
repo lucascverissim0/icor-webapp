@@ -215,6 +215,16 @@ def _seed(
     repository.add_release(release)
     repository.add_vehicle(vehicle)
     repository.add_observations((observation,))
+    repository.add_mapping(
+        IdentityMapping(
+            mapping_id="mapping-eea-eu-2024-1",
+            observation_id=observation.observation_id,
+            canonical_vehicle_id=vehicle.vehicle_id,
+            status=observation.mapping_status,
+            reason="source identifier matched registry",
+            reviewed_at=datetime(2026, 8, 26, 10, 0, tzinfo=UTC),
+        )
+    )
     repository.add_published_values((value,))
 
 
@@ -432,22 +442,81 @@ def test_snapshot_rejects_unresolved_linked_identity_mapping(
     repository: SQLiteEvidenceRepository,
     evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
 ) -> None:
-    _, _, observation, _ = evidence_records
     _seed(repository, evidence_records)
-    repository.add_mapping(
-        IdentityMapping(
-            mapping_id="mapping-eea-eu-2024-unresolved",
-            observation_id=observation.observation_id,
-            canonical_vehicle_id=None,
-            status=MappingStatus.UNRESOLVED,
-            reason="requires review",
-            reviewed_at=datetime(2026, 8, 26, 10, 0, tzinfo=UTC),
-        )
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        """UPDATE identity_mapping SET canonical_vehicle_id = NULL, status = ?
+        WHERE mapping_id = ?""",
+        (MappingStatus.UNRESOLVED.value, "mapping-eea-eu-2024-1"),
     )
 
-    report = SnapshotValidator().validate(repository, _snapshot(repository))
+    report = SnapshotValidator().validate(repository, manifest)
 
     assert "snapshot.unresolved_publication" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_rejects_published_input_without_a_selected_mapping(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        "DELETE FROM identity_mapping WHERE observation_id = ?",
+        ("observation-eea-eu-2024-1",),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.mapping_cardinality" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_rejects_published_input_with_multiple_selected_mappings(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(repository, "DROP INDEX IF EXISTS identity_mapping_observation_idx", ())
+    _corrupt(
+        repository,
+        """INSERT INTO identity_mapping
+        (mapping_id, observation_id, canonical_vehicle_id, status, reason, reviewed_at)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            "mapping-eea-eu-2024-duplicate",
+            "observation-eea-eu-2024-1",
+            "vehicle-example-alpha-2024",
+            MappingStatus.EXACT_IDENTIFIER.value,
+            "duplicate selected mapping",
+            datetime(2026, 8, 26, 10, 0, tzinfo=UTC).isoformat(),
+        ),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.mapping_cardinality" in {finding.code for finding in report.findings}
+
+
+def test_snapshot_rejects_mapping_attribution_that_contradicts_publication(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    _corrupt(
+        repository,
+        "UPDATE identity_mapping SET status = ? WHERE mapping_id = ?",
+        (MappingStatus.CURATED_ALIAS.value, "mapping-eea-eu-2024-1"),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.mapping_attribution_mismatch" in {
+        finding.code for finding in report.findings
+    }
 
 
 def test_snapshot_rejects_unresolved_linked_observation(

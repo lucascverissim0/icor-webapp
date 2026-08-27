@@ -11,13 +11,26 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from icor.application.snapshot_build import SnapshotBuilder, SnapshotBuildRequest
-from icor.domain.evidence import Measure, PublicationStatus, ReleaseManifest
+from icor.domain.evidence import (
+    CanonicalVehicle,
+    EvidenceConfidence,
+    IdentityMapping,
+    MappingStatus,
+    Measure,
+    Observation,
+    PeriodPrecision,
+    PublicationStatus,
+    PublishedValue,
+    ReleaseManifest,
+    ValueStatus,
+)
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.evidence.serialization import canonical_json_bytes, sha256_file
 from icor.evidence.validation import SnapshotValidator
@@ -43,6 +56,85 @@ class EmptyLoader:
         repository: SQLiteEvidenceRepository,
     ) -> None:
         assert releases
+
+
+class PublishedObservationLoader:
+    def load(
+        self,
+        releases: tuple[StoredRelease, ...],
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        confidence = EvidenceConfidence(
+            25, 10, 25, 20, 0, ("single approved source",)
+        )
+        vehicle = CanonicalVehicle(
+            "vehicle-example-alpha-2024", "Example", "Alpha", 2024, "EU"
+        )
+        observation = Observation(
+            observation_id="observation-sample-eu-2024-1",
+            release_id=releases[0].release_id,
+            original_row_locator="row:1",
+            geography="EU",
+            geography_version="eu-2024",
+            period_start=date(2024, 1, 1),
+            period_end=date(2024, 12, 31),
+            period_precision=PeriodPrecision.YEAR,
+            measure=Measure.NEW_REGISTRATIONS,
+            value=Decimal("1"),
+            unit="vehicles",
+            publication_status=PublicationStatus.FINAL,
+            original_make="Example",
+            original_model="Alpha",
+            original_model_year="2024",
+            original_type=None,
+            source_make_identifier="example",
+            source_model_identifier="alpha",
+            normalized_make="Example",
+            normalized_model="Alpha",
+            normalized_model_year=2024,
+            canonical_vehicle_id=vehicle.vehicle_id,
+            mapping_status=MappingStatus.EXACT_IDENTIFIER,
+            transformation_notes=("source row normalized",),
+            validation_flags=(),
+            evidence_confidence=confidence,
+        )
+        repository.add_vehicle(vehicle)
+        repository.add_observations((observation,))
+        repository.add_mapping(
+            IdentityMapping(
+                mapping_id="mapping-sample-eu-2024-1",
+                observation_id=observation.observation_id,
+                canonical_vehicle_id=vehicle.vehicle_id,
+                status=MappingStatus.EXACT_IDENTIFIER,
+                reason="source identifier matched registry",
+                reviewed_at=datetime(2026, 8, 26, 10, 0, tzinfo=UTC),
+            )
+        )
+        repository.add_published_values(
+            (
+                PublishedValue(
+                    value_id="published-sample-eu-2024-1",
+                    status=ValueStatus.OBSERVED,
+                    measure=Measure.NEW_REGISTRATIONS,
+                    unit="vehicles",
+                    geography="EU",
+                    geography_version="eu-2024",
+                    period_start=date(2024, 1, 1),
+                    period_end=date(2024, 12, 31),
+                    canonical_vehicle_id=vehicle.vehicle_id,
+                    mapping_status=MappingStatus.EXACT_IDENTIFIER,
+                    value=Decimal("1"),
+                    p10=None,
+                    p50=None,
+                    p90=None,
+                    input_ids=(observation.observation_id,),
+                    method_version="observed-v1",
+                    evidence_confidence=confidence,
+                    forecast_confidence=None,
+                    warnings=(),
+                ),
+            )
+        )
 
 
 def _manifest() -> ReleaseManifest:
@@ -128,6 +220,36 @@ def test_failed_candidate_leaves_active_snapshot_unchanged(
         snapshot_store.promote(invalid_candidate)
 
     assert snapshot_store.active_manifest() == active_before
+
+
+def test_promotion_rejects_raw_mapping_attribution_corruption(
+    evidence_root: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+    snapshot_store: SnapshotStore,
+) -> None:
+    candidate = SnapshotBuilder(
+        evidence_root,
+        release_store,
+        PublishedObservationLoader(),
+    ).build(build_request)
+    with sqlite3.connect(candidate.database_path) as connection:
+        connection.execute(
+            "UPDATE identity_mapping SET status = ? WHERE mapping_id = ?",
+            (MappingStatus.CURATED_ALIAS.value, "mapping-sample-eu-2024-1"),
+        )
+        connection.commit()
+        connection.execute("VACUUM")
+    corrupted_manifest = replace(
+        candidate.manifest,
+        database_sha256=sha256_file(candidate.database_path),
+    )
+    candidate.manifest_path.write_bytes(canonical_json_bytes(corrupted_manifest))
+
+    with pytest.raises(SnapshotPromotionError, match="validation"):
+        snapshot_store.promote(candidate.manifest.snapshot_id)
+
+    assert not snapshot_store.active_path.exists()
 
 
 def test_no_active_snapshot_is_typed_unavailable(snapshot_store: SnapshotStore) -> None:

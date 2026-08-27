@@ -90,6 +90,10 @@ class SnapshotPathError(RuntimeError):
     """A snapshot filesystem path is unsafe or escaped its declared root."""
 
 
+class SnapshotLockUnavailableError(SnapshotPathError):
+    """An OS-owned interprocess lock is currently held by another process."""
+
+
 class SnapshotFilesystem:
     """No-follow path checks and durability operations used by snapshot storage."""
 
@@ -358,7 +362,28 @@ class SnapshotFilesystem:
     @contextmanager
     def promotion_lock(self, root: Path, *, timeout: float = 10.0) -> Iterator[None]:
         safe_root = self.require_root(root)
-        lock = self._contained_absolute(safe_root / ".promotion.lock", safe_root)
+        with self.interprocess_lock(
+            safe_root / ".promotion.lock",
+            safe_root,
+            timeout=timeout,
+            unavailable_message="snapshot promotion lock is unavailable",
+            unsafe_message="snapshot promotion lock is unsafe",
+        ):
+            yield
+
+    @contextmanager
+    def interprocess_lock(
+        self,
+        path: Path,
+        root: Path,
+        *,
+        timeout: float,
+        unavailable_message: str,
+        unsafe_message: str,
+    ) -> Iterator[None]:
+        """Hold one OS-owned byte/range lock whose ownership dies with the process."""
+        safe_root = self.require_root(root)
+        lock = self._contained_absolute(path, safe_root)
         self._reject_existing_reparse_components(lock)
         descriptor = os.open(
             lock,
@@ -370,14 +395,14 @@ class SnapshotFilesystem:
         )
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             os.close(descriptor)
-            raise SnapshotPathError("snapshot promotion lock is unsafe")
+            raise SnapshotPathError(unsafe_message)
         deadline = time.monotonic() + timeout
         acquired = False
         try:
             if os.fstat(descriptor).st_size == 0:
                 os.write(descriptor, b"\0")
                 os.fsync(descriptor)
-            self._acquire_file_lock(descriptor, deadline)
+            self._acquire_file_lock(descriptor, deadline, unavailable_message)
             acquired = True
             yield
         finally:
@@ -386,7 +411,11 @@ class SnapshotFilesystem:
             os.close(descriptor)
 
     @staticmethod
-    def _acquire_file_lock(descriptor: int, deadline: float) -> None:
+    def _acquire_file_lock(
+        descriptor: int,
+        deadline: float,
+        unavailable_message: str,
+    ) -> None:
         while True:
             try:
                 if os.name == "nt":
@@ -401,9 +430,7 @@ class SnapshotFilesystem:
                 return
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise SnapshotPathError(
-                        "snapshot promotion lock is unavailable"
-                    ) from None
+                    raise SnapshotLockUnavailableError(unavailable_message) from None
                 time.sleep(0.01)
 
     @staticmethod

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import stat
 from contextlib import closing, suppress
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -13,7 +14,10 @@ from typing import Protocol
 from uuid import uuid4
 
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
-from icor.evidence.release_manifests import load_snapshot_manifest
+from icor.evidence.release_manifests import (
+    load_snapshot_manifest,
+    write_release_manifest,
+)
 from icor.evidence.serialization import canonical_json_bytes, sha256_file
 from icor.evidence.validation import (
     ReleaseValidator,
@@ -224,13 +228,16 @@ class SnapshotBuilder:
         releases: tuple[StoredRelease, ...],
         snapshot_id: str,
     ) -> SnapshotBuildResult:
-        scratch_root = staging_path / ".scratch"
+        scratch_root = self.filesystem.prepare_directory(
+            staging_path / ".scratch", self.root
+        )
+        loader_releases = self._seal_loader_releases(releases, scratch_root)
         scratch_repository = SQLiteEvidenceRepository(
             scratch_root / "evidence.sqlite3", writable=True
         )
         for release in releases:
             scratch_repository.add_release(release.manifest)
-        self.loader.load(releases, scratch_repository)
+        self.loader.load(loader_releases, scratch_repository)
 
         database_path = staging_path / "evidence.sqlite3"
         repository = SQLiteEvidenceRepository(database_path, writable=True)
@@ -282,6 +289,55 @@ class SnapshotBuilder:
             manifest=manifest,
             validation_report=report,
         )
+
+    def _seal_loader_releases(
+        self,
+        releases: tuple[StoredRelease, ...],
+        scratch_root: Path,
+    ) -> tuple[StoredRelease, ...]:
+        sealed_root = self.filesystem.prepare_directory(
+            scratch_root / "releases", self.root
+        )
+        sealed: list[StoredRelease] = []
+        for release in releases:
+            release_root = self.filesystem.prepare_directory(
+                sealed_root / release.release_id, self.root
+            )
+            artifact_path = release_root / release.manifest.artifact_path
+            try:
+                self.filesystem.copy_file(
+                    release.artifact_path,
+                    artifact_path,
+                    source_root=self.release_store.root,
+                    destination_root=self.root,
+                )
+                self.filesystem.fsync_file(artifact_path)
+            except (OSError, SnapshotPathError) as error:
+                raise SnapshotBuildError(
+                    f"release cannot be sealed for loading: {release.release_id}"
+                ) from error
+            if (
+                sha256_file(artifact_path) != release.manifest.sha256
+                or artifact_path.stat().st_size != release.manifest.artifact_bytes
+            ):
+                raise SnapshotBuildError(
+                    f"release changed before loading: {release.release_id}"
+                )
+
+            manifest_path = release_root / "manifest.json"
+            write_release_manifest(manifest_path, release.manifest)
+            artifact_path.chmod(stat.S_IREAD)
+            manifest_path.chmod(stat.S_IREAD)
+            release_root.chmod(stat.S_IREAD | stat.S_IEXEC)
+            sealed.append(
+                replace(
+                    release,
+                    artifact_path=artifact_path,
+                    manifest_path=manifest_path,
+                )
+            )
+        return tuple(sealed)
+
     @staticmethod
     def _replay_canonically(
         source: SQLiteEvidenceRepository, target: SQLiteEvidenceRepository

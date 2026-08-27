@@ -221,6 +221,52 @@ def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding
                 )
             )
     for row in connection.execute(
+        """SELECT published_value_input.value_id,
+        published_value_input.observation_id,
+        COUNT(identity_mapping.mapping_id) AS mapping_count
+        FROM published_value_input
+        JOIN observation
+        ON observation.observation_id = published_value_input.observation_id
+        LEFT JOIN identity_mapping
+        ON identity_mapping.observation_id = observation.observation_id
+        GROUP BY published_value_input.value_id,
+        published_value_input.observation_id
+        HAVING COUNT(identity_mapping.mapping_id) != 1"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.mapping_cardinality",
+                "Published input must have exactly one selected identity mapping.",
+                row["value_id"],
+            )
+        )
+    for row in connection.execute(
+        """SELECT DISTINCT published_value.value_id
+        FROM published_value
+        JOIN published_value_input
+        ON published_value_input.value_id = published_value.value_id
+        JOIN observation
+        ON observation.observation_id = published_value_input.observation_id
+        JOIN identity_mapping
+        ON identity_mapping.observation_id = observation.observation_id
+        WHERE identity_mapping.canonical_vehicle_id
+            IS NOT observation.canonical_vehicle_id
+        OR identity_mapping.status != observation.mapping_status
+        OR identity_mapping.canonical_vehicle_id
+            IS NOT published_value.canonical_vehicle_id
+        OR identity_mapping.status != published_value.mapping_status
+        OR observation.canonical_vehicle_id
+            IS NOT published_value.canonical_vehicle_id
+        OR observation.mapping_status != published_value.mapping_status"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.mapping_attribution_mismatch",
+                "Published value identity mapping attribution is inconsistent.",
+                row["value_id"],
+            )
+        )
+    for row in connection.execute(
         """SELECT DISTINCT published_value.value_id FROM published_value
         LEFT JOIN published_value_input ON published_value_input.value_id = published_value.value_id
         LEFT JOIN observation ON observation.observation_id = published_value_input.observation_id

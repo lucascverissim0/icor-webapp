@@ -89,6 +89,13 @@ def _require_enum(value: object, enum_type: type[StrEnum], label: str) -> None:
         raise ValueError(f"{label} is unsupported")
 
 
+def _require_finite_decimal(value: object, label: str) -> None:
+    if not isinstance(value, Decimal):
+        raise ValueError(f"{label} must be a Decimal")
+    if not value.is_finite():
+        raise ValueError(f"{label} must be finite")
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceConfidence:
     authority: int
@@ -273,7 +280,8 @@ class Observation:
         _require_enum(self.measure, Measure, "measure")
         _require_enum(self.publication_status, PublicationStatus, "publication status")
         _require_enum(self.mapping_status, MappingStatus, "mapping status")
-        if not isinstance(self.value, Decimal) or self.value < 0:
+        _require_finite_decimal(self.value, "observation value")
+        if self.value < 0:
             raise ValueError("observation value must be non-negative")
         if (
             self.measure in {Measure.NEW_REGISTRATIONS, Measure.ACTIVE_FLEET}
@@ -383,12 +391,15 @@ class PublishedValue:
         _require_date(self.period_end, "period end")
         if self.period_start > self.period_end:
             raise ValueError("period dates must be ordered")
-        if not isinstance(self.value, Decimal) or self.value < 0:
+        _require_finite_decimal(self.value, "published value")
+        if self.value < 0:
             raise ValueError("published value must be non-negative")
         intervals = (self.p10, self.p50, self.p90)
         if any(interval is not None for interval in intervals):
             if any(not isinstance(interval, Decimal) for interval in intervals):
                 raise ValueError("p10, p50, and p90 must be supplied together")
+            if any(not interval.is_finite() for interval in intervals):  # type: ignore[union-attr]
+                raise ValueError("published intervals must be finite")
             if not 0 <= self.p10 <= self.p50 <= self.p90:  # type: ignore[operator]
                 raise ValueError("published intervals require p10 <= p50 <= p90")
         if not isinstance(self.input_ids, tuple) or not self.input_ids:

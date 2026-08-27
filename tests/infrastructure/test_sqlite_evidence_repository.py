@@ -34,6 +34,10 @@ def confidence() -> EvidenceConfidence:
     return EvidenceConfidence(25, 10, 25, 20, 20, ("authoritative source",))
 
 
+def mapping_reviewed_at() -> datetime:
+    return datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
+
+
 @pytest.fixture
 def release() -> ReleaseManifest:
     return ReleaseManifest(
@@ -294,14 +298,60 @@ def test_mapping_status_is_retained(
     assert repository.get_mapping(mapping.mapping_id) == mapping
 
 
+@pytest.mark.parametrize(
+    "change",
+    ("vehicle", "status"),
+)
+def test_mapping_must_match_its_selected_observation_attribution(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    mapping: IdentityMapping,
+    change: str,
+) -> None:
+    seed_dependencies(repository, release, vehicle, observation)
+    if change == "vehicle":
+        other_vehicle = replace(
+            vehicle,
+            vehicle_id="vehicle-vw-polo-2024",
+            model="Polo",
+        )
+        repository.add_vehicle(other_vehicle)
+        contradictory = replace(mapping, canonical_vehicle_id=other_vehicle.vehicle_id)
+    else:
+        contradictory = replace(mapping, status=MappingStatus.CURATED_ALIAS)
+
+    with pytest.raises(ImmutableEvidenceError, match="mapping.*observation"):
+        repository.add_mapping(contradictory)
+
+
+def test_observation_cannot_have_two_selected_identity_mappings(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    mapping: IdentityMapping,
+) -> None:
+    seed_dependencies(repository, release, vehicle, observation)
+    repository.add_mapping(mapping)
+
+    with pytest.raises(DuplicateEvidenceError):
+        repository.add_mapping(
+            replace(mapping, mapping_id="mapping-eea-de-2024-duplicate")
+        )
+
+
 def test_published_value_retains_every_input(
     repository: SQLiteEvidenceRepository,
     release: ReleaseManifest,
     vehicle: CanonicalVehicle,
     observation: Observation,
+    mapping: IdentityMapping,
     published_value: PublishedValue,
 ) -> None:
     seed_dependencies(repository, release, vehicle, observation)
+    repository.add_mapping(mapping)
     repository.add_published_values((published_value,))
 
     assert repository.get_published_value(published_value.value_id) == published_value
@@ -312,6 +362,36 @@ def test_published_value_requires_existing_vehicle_and_inputs(
 ) -> None:
     with pytest.raises(ImmutableEvidenceError, match="reference"):
         repository.add_published_values((published_value,))
+
+
+def test_published_value_requires_exactly_one_selected_mapping_per_input(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    published_value: PublishedValue,
+) -> None:
+    seed_dependencies(repository, release, vehicle, observation)
+
+    with pytest.raises(ImmutableEvidenceError, match="exactly one selected mapping"):
+        repository.add_published_values((published_value,))
+
+
+def test_published_value_mapping_status_must_match_selected_mapping(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+    mapping: IdentityMapping,
+    published_value: PublishedValue,
+) -> None:
+    seed_dependencies(repository, release, vehicle, observation)
+    repository.add_mapping(mapping)
+
+    with pytest.raises(ImmutableEvidenceError, match="mapping attribution"):
+        repository.add_published_values(
+            (replace(published_value, mapping_status=MappingStatus.CURATED_ALIAS),)
+        )
 
 
 def test_published_value_rejects_ambiguous_input(
@@ -327,6 +407,16 @@ def test_published_value_rejects_ambiguous_input(
         mapping_status=MappingStatus.AMBIGUOUS,
     )
     seed_dependencies(repository, release, vehicle, ambiguous)
+    repository.add_mapping(
+        IdentityMapping(
+            mapping_id="mapping-eea-de-2024-ambiguous",
+            observation_id=ambiguous.observation_id,
+            canonical_vehicle_id=None,
+            status=MappingStatus.AMBIGUOUS,
+            reason="multiple registry candidates require review",
+            reviewed_at=mapping_reviewed_at(),
+        )
+    )
 
     with pytest.raises(ImmutableEvidenceError, match="unresolved"):
         repository.add_published_values((published_value,))
@@ -348,12 +438,14 @@ def test_published_value_rejects_semantically_incompatible_input(
     release: ReleaseManifest,
     vehicle: CanonicalVehicle,
     observation: Observation,
+    mapping: IdentityMapping,
     published_value: PublishedValue,
     field: str,
     value: object,
 ) -> None:
     incompatible_observation = replace(observation, **{field: value})
     seed_dependencies(repository, release, vehicle, incompatible_observation)
+    repository.add_mapping(mapping)
 
     with pytest.raises(ImmutableEvidenceError, match="incompatible"):
         repository.add_published_values((published_value,))
@@ -372,6 +464,16 @@ def test_published_value_rejects_input_for_a_different_vehicle(
     repository.add_vehicle(different_vehicle)
     repository.add_observations(
         (replace(observation, canonical_vehicle_id=different_vehicle.vehicle_id),)
+    )
+    repository.add_mapping(
+        IdentityMapping(
+            mapping_id="mapping-eea-de-2024-different-vehicle",
+            observation_id=observation.observation_id,
+            canonical_vehicle_id=different_vehicle.vehicle_id,
+            status=observation.mapping_status,
+            reason="source identifier matched another registry vehicle",
+            reviewed_at=mapping_reviewed_at(),
+        )
     )
 
     with pytest.raises(ImmutableEvidenceError, match="incompatible"):
@@ -423,7 +525,11 @@ def test_all_lists_are_deterministically_ordered(
         observation_id="observation-eea-de-2024-2",
         original_row_locator="sheet1:3",
     )
-    later_mapping = replace(mapping, mapping_id="mapping-eea-de-2024-2")
+    later_mapping = replace(
+        mapping,
+        mapping_id="mapping-eea-de-2024-2",
+        observation_id=later_observation.observation_id,
+    )
     later_value = replace(published_value, value_id="published-eea-de-2024-2")
     later_snapshot = replace(snapshot, snapshot_id="snapshot-2025", release_ids=("eea-2025",))
     repository.add_release(later_release)
