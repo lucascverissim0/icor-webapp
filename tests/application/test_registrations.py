@@ -27,6 +27,7 @@ from icor.evidence.identity import (
     IdentityAttributingRepository,
 )
 from icor.evidence.serialization import canonical_json_bytes, sha256_file
+from icor.infrastructure.snapshot_store import SnapshotStore
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 BUILD_AS_OF = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
@@ -269,3 +270,58 @@ def test_unresolved_identity_registry_is_typed_unavailable(mapped_candidate: Pat
 
     with pytest.raises(RegistrationUnavailableError, match="unavailable"):
         RegistrationService.from_candidate(mapped_candidate)
+
+
+def test_active_snapshot_configures_registration_service(
+    mapped_candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_service = RegistrationService.from_candidate(mapped_candidate)
+    repository = SQLiteEvidenceRepository(candidate_service.database_path)
+    monkeypatch.setattr(
+        SnapshotStore,
+        "open_active_snapshot",
+        lambda self: (candidate_service.manifest, repository),
+    )
+
+    service = RegistrationService.from_active(mapped_candidate.parent)
+
+    assert service.database_path == candidate_service.database_path
+    assert service.summary().total_registrations == Decimal("20")
+
+
+def test_active_snapshot_with_unresolved_registry_fails_closed(
+    mapped_candidate: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_service = RegistrationService.from_candidate(mapped_candidate)
+    unresolved = SnapshotManifest(
+        snapshot_id=candidate_service.manifest.snapshot_id,
+        status=candidate_service.manifest.status,
+        built_at=candidate_service.manifest.built_at,
+        deterministic_seed=candidate_service.manifest.deterministic_seed,
+        release_ids=candidate_service.manifest.release_ids,
+        versions=SnapshotVersions(
+            source_registry="official-sources-v1",
+            identity_registry="unresolved-source-labels-v1",
+            reconciliation_method="not-applied-v1",
+            confidence_method="source-evidence-v1",
+            estimation_method="not-applied-v1",
+            survival_method="not-applied-v1",
+            hazard_method="not-applied-v1",
+            forecast_method="not-applied-v1",
+        ),
+        database_sha256=candidate_service.manifest.database_sha256,
+        observation_count=candidate_service.manifest.observation_count,
+        published_value_count=candidate_service.manifest.published_value_count,
+        warnings=candidate_service.manifest.warnings,
+    )
+    repository = SQLiteEvidenceRepository(candidate_service.database_path)
+    monkeypatch.setattr(
+        SnapshotStore,
+        "open_active_snapshot",
+        lambda self: (unresolved, repository),
+    )
+
+    with pytest.raises(RegistrationUnavailableError, match="unavailable"):
+        RegistrationService.from_active(mapped_candidate.parent)

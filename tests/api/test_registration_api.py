@@ -175,3 +175,20 @@ def test_candidate_path_configures_both_real_data_services(
 
     assert app.state.evidence_service is evidence
     assert app.state.registration_service is registrations
+
+
+def test_active_root_is_preferred_for_registration_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_root = "C:/local/evidence"
+    registrations = StubRegistrationService()
+    monkeypatch.setenv("ICOR_EVIDENCE_ACTIVE_ROOT", active_root)
+    monkeypatch.setenv("ICOR_EVIDENCE_CANDIDATE", "C:/local/candidate")
+    monkeypatch.setattr(
+        "icor.api.app.RegistrationService.from_active",
+        lambda path: registrations,
+    )
+
+    app = create_app()
+
+    assert app.state.registration_service is registrations

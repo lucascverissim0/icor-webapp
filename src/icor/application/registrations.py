@@ -10,6 +10,7 @@ from pathlib import Path
 
 from icor.application.evidence_review import EvidenceReviewService
 from icor.domain.snapshots import SnapshotManifest
+from icor.infrastructure.snapshot_store import SnapshotStore
 
 _SUPPORTED_GEOGRAPHY = "EU27"
 _SUPPORTED_YEAR = 2024
@@ -105,6 +106,18 @@ class RegistrationService:
             if evidence.manifest.versions.identity_registry != _IDENTITY_REGISTRY:
                 raise ValueError("canonical identity registry is unavailable")
             return cls(evidence.database_path, evidence.manifest)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise RegistrationUnavailableError(
+                "canonical registration data is unavailable"
+            ) from error
+
+    @classmethod
+    def from_active(cls, root: Path) -> RegistrationService:
+        try:
+            manifest, repository = SnapshotStore(root).open_active_snapshot()
+            if manifest.versions.identity_registry != _IDENTITY_REGISTRY:
+                raise ValueError("canonical identity registry is unavailable")
+            return cls(repository.path, manifest)
         except (OSError, RuntimeError, ValueError) as error:
             raise RegistrationUnavailableError(
                 "canonical registration data is unavailable"

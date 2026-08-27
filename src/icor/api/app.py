@@ -142,6 +142,13 @@ def _configured_evidence_service() -> EvidenceReviewService | None:
 
 
 def _configured_registration_service() -> RegistrationService | None:
+    active_root = os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT")
+    if active_root:
+        try:
+            return RegistrationService.from_active(Path(active_root))
+        except (OSError, RuntimeError, ValueError) as error:
+            LOGGER.error("Registration snapshot unavailable error_type=%s", type(error).__name__)
+            return None
     candidate = os.getenv("ICOR_EVIDENCE_CANDIDATE")
     if not candidate:
         return None
