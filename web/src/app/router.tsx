@@ -13,12 +13,17 @@ import { OpportunitiesPage } from '../features/opportunities/OpportunitiesPage'
 import { EvidencePage } from '../features/evidence/EvidencePage'
 import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
+import { RegistrationsPage } from '../features/registrations/RegistrationsPage'
 import { parseEvidenceSearch, type EvidenceSearch } from '../lib/evidence-search'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
 import {
   parseOpportunitySearch,
   type OpportunityRouteSearch,
 } from '../lib/opportunity-search'
+import {
+  parseRegistrationSearch,
+  type RegistrationSearch,
+} from '../lib/registration-search'
 
 
 function validatePlannerSearch(raw: PlannerRouteSearch): PlannerRouteSearch {
@@ -62,8 +67,8 @@ const rootRoute = createRootRoute({
     <section className="route-state">
       <p className="eyebrow">Not found</p>
       <h2>This planner view does not exist</h2>
-      <a className="primary-action" href="/planner">
-        Return to planner
+      <a className="primary-action" href="/registrations">
+        Return to official registrations
       </a>
     </section>
   ),
@@ -72,12 +77,22 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: () =>
+  beforeLoad: ({ search }) =>
     redirect({
-      to: '/planner',
-      search: { page: 1, sort: 'base_demand', direction: 'desc' },
+      to: '/registrations',
+      search: parseRegistrationSearch(search),
       throw: true,
     }),
+})
+
+export const registrationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/registrations',
+  validateSearch: (raw: RegistrationSearch) => parseRegistrationSearch(
+    raw as unknown as Record<string, unknown>,
+  ),
+  component: RegistrationsPage,
+  errorComponent: RouteErrorFallback,
 })
 
 export const plannerRoute = createRoute({
@@ -116,6 +131,7 @@ export const evidenceRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  registrationsRoute,
   plannerRoute,
   configurationRoute,
   opportunitiesRoute,

@@ -8,15 +8,16 @@ import { RouteErrorFallback } from '../src/app/ErrorBoundary'
 
 
 describe('AppShell', () => {
-  it('always labels demonstration evidence and primary navigation', () => {
+  it('leads with official evidence and separates prototype navigation', () => {
     render(
       <AppShell>
         <h2>Planner content</h2>
       </AppShell>,
     )
 
-    expect(screen.getByText('Demonstration data')).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Windshield demand planner' })).toBeVisible()
+    expect(screen.getByText('Official evidence')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Vehicle evidence and planning' })).toBeVisible()
+    expect(screen.getAllByText('Prototype').length).toBeGreaterThan(0)
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Mobile primary' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open navigation' })).toBeVisible()
@@ -28,15 +29,18 @@ describe('AppShell', () => {
   it('provides a skip link and does not rely on hover for planner access', () => {
     render(<AppShell>Planner content</AppShell>)
 
-    expect(screen.getByRole('link', { name: 'Skip to planner content' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute(
       'href',
-      '#planner-content',
+      '#app-content',
     )
-    for (const link of screen.getAllByRole('link', { name: 'Planner workbench' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Demand planner (prototype)' })) {
       expect(link).toHaveAttribute('href', '/planner')
     }
-    for (const link of screen.getAllByRole('link', { name: 'Opportunities' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Opportunities (prototype)' })) {
       expect(link).toHaveAttribute('href', '/opportunities')
+    }
+    for (const link of screen.getAllByRole('link', { name: 'Official registrations' })) {
+      expect(link).toHaveAttribute('href', '/registrations')
     }
     for (const link of screen.getAllByRole('link', { name: 'Source evidence' })) {
       expect(link).toHaveAttribute('href', '/evidence')
@@ -63,7 +67,7 @@ describe('AppShell', () => {
       </AppShell>,
     )
 
-    expect(screen.getByText('Demonstration data')).toBeVisible()
+    expect(screen.getByText('Official evidence')).toBeVisible()
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Mobile primary' })).toBeInTheDocument()
     expect(screen.getByText('This view could not be opened')).toBeVisible()

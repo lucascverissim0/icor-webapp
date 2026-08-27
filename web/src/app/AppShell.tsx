@@ -22,9 +22,11 @@ function NavigationLink({ href, label }: { href: string; label: string }) {
 function PrimaryLinks() {
   return (
     <>
-      <NavigationLink href="/planner" label="Planner workbench" />
-      <NavigationLink href="/opportunities" label="Opportunities" />
+      <NavigationLink href="/registrations" label="Official registrations" />
       <NavigationLink href="/evidence" label="Source evidence" />
+      <span className="navigation-section-label">Prototype</span>
+      <NavigationLink href="/planner" label="Demand planner (prototype)" />
+      <NavigationLink href="/opportunities" label="Opportunities (prototype)" />
     </>
   )
 }
@@ -34,28 +36,28 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#planner-content">
-        Skip to planner content
+      <a className="skip-link" href="#app-content">
+        Skip to main content
       </a>
 
       <aside className="desktop-rail">
-        <a aria-label="ICOR planner home" className="brand-mark" href="/planner">
+        <a aria-label="ICOR home" className="brand-mark" href="/registrations">
           <span className="brand-mark__symbol">I</span>
           <span>ICOR</span>
         </a>
         <nav aria-label="Primary" className="desktop-navigation">
           <PrimaryLinks />
         </nav>
-        <p className="rail-caption">Configuration-level planning</p>
+        <p className="rail-caption">Official vehicle evidence with clearly separated prototypes</p>
       </aside>
 
       <div className="shell-content">
         <header className="shell-header">
           <div>
-            <p className="eyebrow">Planning scenario</p>
-            <h1>Windshield demand planner</h1>
+            <p className="eyebrow">Official data workspace</p>
+            <h1>Vehicle evidence and planning</h1>
           </div>
-          <EvidenceBadge />
+          <EvidenceBadge label="Official evidence" />
         </header>
 
         <nav aria-label="Mobile primary" className="mobile-navigation">
@@ -75,7 +77,7 @@ export function AppShell({ children }: PropsWithChildren) {
           </div>
         </nav>
 
-        <main id="planner-content" tabIndex={-1}>
+        <main id="app-content" tabIndex={-1}>
           {children ?? <Outlet />}
         </main>
       </div>

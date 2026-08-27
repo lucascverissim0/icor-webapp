@@ -9,6 +9,7 @@ import {
   evidenceRoute,
   opportunitiesRoute,
   plannerRoute,
+  registrationsRoute,
 } from '../src/app/router'
 import { RouteErrorFallback } from '../src/app/ErrorBoundary'
 
@@ -54,6 +55,7 @@ describe('planner router', () => {
     expect(configurationRoute.options.errorComponent).toBe(RouteErrorFallback)
     expect(opportunitiesRoute.options.errorComponent).toBe(RouteErrorFallback)
     expect(evidenceRoute.options.errorComponent).toBe(RouteErrorFallback)
+    expect(registrationsRoute.options.errorComponent).toBe(RouteErrorFallback)
   })
 
   it('validates opportunity grouping independently from planner state', async () => {
@@ -68,5 +70,14 @@ describe('planner router', () => {
       groupBy: 'model_year',
       market: ['FR'],
     })
+  })
+
+  it('opens official registrations by default with bounded URL state', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/?search=Alpha&page=2'] })
+    const router = createPlannerRouter(history)
+    await router.load()
+
+    expect(router.state.location.pathname).toBe('/registrations')
+    expect(router.state.location.search).toEqual({ search: 'Alpha', page: 2 })
   })
 })
