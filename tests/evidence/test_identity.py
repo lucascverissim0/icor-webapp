@@ -207,4 +207,3 @@ def test_attributing_repository_persists_one_vehicle_and_mapping_per_observation
     assert {
         item.mapping_status for item in repository.list_observations()
     } == {MappingStatus.NORMALIZED_LABEL}
-
