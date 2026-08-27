@@ -38,6 +38,9 @@ describe('AppShell', () => {
     for (const link of screen.getAllByRole('link', { name: 'Opportunities' })) {
       expect(link).toHaveAttribute('href', '/opportunities')
     }
+    for (const link of screen.getAllByRole('link', { name: 'Source evidence' })) {
+      expect(link).toHaveAttribute('href', '/evidence')
+    }
   })
 
   it('labels the mobile disclosure according to its current action', async () => {

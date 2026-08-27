@@ -158,6 +158,276 @@
         "title": "EquipmentResponse",
         "type": "object"
       },
+      "EvidenceObservationPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceObservationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages"
+        ],
+        "title": "EvidenceObservationPageResponse",
+        "type": "object"
+      },
+      "EvidenceObservationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Confidence Reasons",
+            "type": "array"
+          },
+          "confidence_total": {
+            "title": "Confidence Total",
+            "type": "integer"
+          },
+          "geography": {
+            "title": "Geography",
+            "type": "string"
+          },
+          "mapping_status": {
+            "title": "Mapping Status",
+            "type": "string"
+          },
+          "measure": {
+            "title": "Measure",
+            "type": "string"
+          },
+          "observation_id": {
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "original_make": {
+            "title": "Original Make",
+            "type": "string"
+          },
+          "original_model": {
+            "title": "Original Model",
+            "type": "string"
+          },
+          "original_model_year": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Model Year"
+          },
+          "original_row_locator": {
+            "title": "Original Row Locator",
+            "type": "string"
+          },
+          "original_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Type"
+          },
+          "period_end": {
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_precision": {
+            "title": "Period Precision",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "publication_status": {
+            "title": "Publication Status",
+            "type": "string"
+          },
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "transformation_notes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transformation Notes",
+            "type": "array"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "validation_flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Flags",
+            "type": "array"
+          },
+          "value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "release_id",
+          "original_row_locator",
+          "geography",
+          "period_start",
+          "period_end",
+          "period_precision",
+          "measure",
+          "value",
+          "unit",
+          "publication_status",
+          "original_make",
+          "original_model",
+          "original_model_year",
+          "original_type",
+          "mapping_status",
+          "transformation_notes",
+          "validation_flags",
+          "confidence_total",
+          "confidence_reasons"
+        ],
+        "title": "EvidenceObservationResponse",
+        "type": "object"
+      },
+      "EvidenceReleaseSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_record_count": {
+            "title": "Accepted Record Count",
+            "type": "integer"
+          },
+          "coverage_end": {
+            "format": "date",
+            "title": "Coverage End",
+            "type": "string"
+          },
+          "coverage_start": {
+            "format": "date",
+            "title": "Coverage Start",
+            "type": "string"
+          },
+          "dependency_group": {
+            "title": "Dependency Group",
+            "type": "string"
+          },
+          "geography": {
+            "title": "Geography",
+            "type": "string"
+          },
+          "measure": {
+            "title": "Measure",
+            "type": "string"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "publisher": {
+            "title": "Publisher",
+            "type": "string"
+          },
+          "quarantined_record_count": {
+            "title": "Quarantined Record Count",
+            "type": "integer"
+          },
+          "raw_record_count": {
+            "title": "Raw Record Count",
+            "type": "integer"
+          },
+          "rejected_record_count": {
+            "title": "Rejected Record Count",
+            "type": "integer"
+          },
+          "release_id": {
+            "title": "Release Id",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "terms_url": {
+            "title": "Terms Url",
+            "type": "string"
+          },
+          "total_value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id",
+          "source_id",
+          "publisher",
+          "source_url",
+          "terms_url",
+          "published_at",
+          "coverage_start",
+          "coverage_end",
+          "geography",
+          "measure",
+          "dependency_group",
+          "raw_record_count",
+          "accepted_record_count",
+          "rejected_record_count",
+          "quarantined_record_count",
+          "observation_count",
+          "total_value"
+        ],
+        "title": "EvidenceReleaseSummaryResponse",
+        "type": "object"
+      },
       "EvidenceStatus": {
         "enum": [
           "demonstration",
@@ -166,6 +436,87 @@
         ],
         "title": "EvidenceStatus",
         "type": "string"
+      },
+      "EvidenceSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "database_sha256": {
+            "title": "Database Sha256",
+            "type": "string"
+          },
+          "geographies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Geographies",
+            "type": "array"
+          },
+          "mapping_status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Mapping Status Counts",
+            "type": "object"
+          },
+          "measures": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Measures",
+            "type": "array"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "published_value_count": {
+            "title": "Published Value Count",
+            "type": "integer"
+          },
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReleaseSummaryResponse"
+            },
+            "title": "Releases",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/SnapshotVersionsResponse"
+          },
+          "warning_count": {
+            "title": "Warning Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "status",
+          "built_at",
+          "database_sha256",
+          "observation_count",
+          "published_value_count",
+          "warning_count",
+          "versions",
+          "releases",
+          "mapping_status_counts",
+          "geographies",
+          "measures"
+        ],
+        "title": "EvidenceSummaryResponse",
+        "type": "object"
       },
       "FieldError": {
         "additionalProperties": false,
@@ -209,6 +560,27 @@
         ],
         "title": "HealthResponse",
         "type": "object"
+      },
+      "MappingStatus": {
+        "enum": [
+          "exact_identifier",
+          "curated_alias",
+          "normalized_label",
+          "reviewed_probable",
+          "ambiguous",
+          "rejected",
+          "unresolved"
+        ],
+        "title": "MappingStatus",
+        "type": "string"
+      },
+      "Measure": {
+        "enum": [
+          "new_registrations",
+          "active_fleet"
+        ],
+        "title": "Measure",
+        "type": "string"
       },
       "ModelYearDemandResponse": {
         "additionalProperties": false,
@@ -972,6 +1344,55 @@
         "title": "ScenarioResponse",
         "type": "object"
       },
+      "SnapshotVersionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence_method": {
+            "title": "Confidence Method",
+            "type": "string"
+          },
+          "estimation_method": {
+            "title": "Estimation Method",
+            "type": "string"
+          },
+          "forecast_method": {
+            "title": "Forecast Method",
+            "type": "string"
+          },
+          "hazard_method": {
+            "title": "Hazard Method",
+            "type": "string"
+          },
+          "identity_registry": {
+            "title": "Identity Registry",
+            "type": "string"
+          },
+          "reconciliation_method": {
+            "title": "Reconciliation Method",
+            "type": "string"
+          },
+          "source_registry": {
+            "title": "Source Registry",
+            "type": "string"
+          },
+          "survival_method": {
+            "title": "Survival Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_registry",
+          "identity_registry",
+          "reconciliation_method",
+          "confidence_method",
+          "estimation_method",
+          "survival_method",
+          "hazard_method",
+          "forecast_method"
+        ],
+        "title": "SnapshotVersionsResponse",
+        "type": "object"
+      },
       "SortDirection": {
         "enum": [
           "asc",
@@ -1037,6 +1458,186 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/evidence/observations": {
+      "get": {
+        "operationId": "observations_api_v1_evidence_observations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "release_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Release Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "geography",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Geography"
+            }
+          },
+          {
+            "in": "query",
+            "name": "measure",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Measure"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Measure"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mapping_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/MappingStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mapping Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceObservationPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Observations",
+        "tags": [
+          "source evidence"
+        ]
+      }
+    },
+    "/api/v1/evidence/summary": {
+      "get": {
+        "operationId": "summary_api_v1_evidence_summary_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Summary",
+        "tags": [
+          "source evidence"
+        ]
       }
     },
     "/api/v1/opportunities": {

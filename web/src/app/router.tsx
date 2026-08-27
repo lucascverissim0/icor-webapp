@@ -10,6 +10,7 @@ import {
 import { AppShell } from './AppShell'
 import { RouteErrorFallback } from './ErrorBoundary'
 import { OpportunitiesPage } from '../features/opportunities/OpportunitiesPage'
+import { EvidencePage } from '../features/evidence/EvidencePage'
 import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
@@ -102,11 +103,19 @@ export const opportunitiesRoute = createRoute({
   errorComponent: RouteErrorFallback,
 })
 
+export const evidenceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/evidence',
+  component: EvidencePage,
+  errorComponent: RouteErrorFallback,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   plannerRoute,
   configurationRoute,
   opportunitiesRoute,
+  evidenceRoute,
 ])
 
 export function createPlannerRouter(history?: RouterHistory) {

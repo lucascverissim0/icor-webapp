@@ -12,6 +12,10 @@ type OpportunityGroupBy = components['schemas']['OpportunityGroupBy']
 type ProductionCoverage = components['schemas']['ProductionCoverageResponse']
 type ProductionCoverageRequest = components['schemas']['ProductionCoverageRequest']
 type DeleteCoverageResponse = components['schemas']['DeleteCoverageResponse']
+type EvidenceSummary = components['schemas']['EvidenceSummaryResponse']
+type EvidenceObservationPage = components['schemas']['EvidenceObservationPageResponse']
+type EvidenceMeasure = components['schemas']['Measure']
+type EvidenceMappingStatus = components['schemas']['MappingStatus']
 type ApiQuery = NonNullable<
   operations['configurations_api_v1_planner_configurations_get']['parameters']['query']
 >
@@ -32,6 +36,16 @@ export interface OpportunitiesQuery {
   groupBy: OpportunityGroupBy
   markets?: string[]
   horizons?: number[]
+}
+
+export interface EvidenceObservationsQuery {
+  releaseId?: string
+  geography?: string
+  measure?: EvidenceMeasure
+  mappingStatus?: EvidenceMappingStatus
+  search?: string
+  page?: number
+  pageSize?: number
 }
 
 export class ApiProblem extends Error {
@@ -161,6 +175,24 @@ export class PlannerApiClient {
     return this.request<DeleteCoverageResponse>(
       `/api/v1/production-coverage/${encodeURIComponent(coverageId)}`,
       { method: 'DELETE' },
+    )
+  }
+
+  async evidenceSummary(): Promise<EvidenceSummary> {
+    return this.request<EvidenceSummary>('/api/v1/evidence/summary')
+  }
+
+  async evidenceObservations(query: EvidenceObservationsQuery): Promise<EvidenceObservationPage> {
+    const parameters = new URLSearchParams()
+    if (query.releaseId) parameters.set('release_id', query.releaseId)
+    if (query.geography) parameters.set('geography', query.geography)
+    if (query.measure) parameters.set('measure', query.measure)
+    if (query.mappingStatus) parameters.set('mapping_status', query.mappingStatus)
+    if (query.search) parameters.set('search', query.search)
+    if (query.page !== undefined) parameters.set('page', String(query.page))
+    if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
+    return this.request<EvidenceObservationPage>(
+      `/api/v1/evidence/observations?${parameters.toString()}`,
     )
   }
 

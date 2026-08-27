@@ -24,6 +24,7 @@ function PrimaryLinks() {
     <>
       <NavigationLink href="/planner" label="Planner workbench" />
       <NavigationLink href="/opportunities" label="Opportunities" />
+      <NavigationLink href="/evidence" label="Source evidence" />
     </>
   )
 }

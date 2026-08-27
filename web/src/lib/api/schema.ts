@@ -21,6 +21,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evidence/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Observations */
+        get: operations["observations_api_v1_evidence_observations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evidence/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_v1_evidence_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/opportunities": {
         parameters: {
             query?: never;
@@ -196,11 +230,150 @@ export interface components {
             /** Rain Light Sensor */
             rain_light_sensor: boolean | null;
         };
+        /** EvidenceObservationPageResponse */
+        EvidenceObservationPageResponse: {
+            /** Items */
+            items: components["schemas"]["EvidenceObservationResponse"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Pages */
+            pages: number;
+            /** Total */
+            total: number;
+        };
+        /** EvidenceObservationResponse */
+        EvidenceObservationResponse: {
+            /** Confidence Reasons */
+            confidence_reasons: string[];
+            /** Confidence Total */
+            confidence_total: number;
+            /** Geography */
+            geography: string;
+            /** Mapping Status */
+            mapping_status: string;
+            /** Measure */
+            measure: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Original Make */
+            original_make: string;
+            /** Original Model */
+            original_model: string;
+            /** Original Model Year */
+            original_model_year: string | null;
+            /** Original Row Locator */
+            original_row_locator: string;
+            /** Original Type */
+            original_type: string | null;
+            /**
+             * Period End
+             * Format: date
+             */
+            period_end: string;
+            /** Period Precision */
+            period_precision: string;
+            /**
+             * Period Start
+             * Format: date
+             */
+            period_start: string;
+            /** Publication Status */
+            publication_status: string;
+            /** Release Id */
+            release_id: string;
+            /** Transformation Notes */
+            transformation_notes: string[];
+            /** Unit */
+            unit: string;
+            /** Validation Flags */
+            validation_flags: string[];
+            /** Value */
+            value: string;
+        };
+        /** EvidenceReleaseSummaryResponse */
+        EvidenceReleaseSummaryResponse: {
+            /** Accepted Record Count */
+            accepted_record_count: number;
+            /**
+             * Coverage End
+             * Format: date
+             */
+            coverage_end: string;
+            /**
+             * Coverage Start
+             * Format: date
+             */
+            coverage_start: string;
+            /** Dependency Group */
+            dependency_group: string;
+            /** Geography */
+            geography: string;
+            /** Measure */
+            measure: string;
+            /** Observation Count */
+            observation_count: number;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /** Publisher */
+            publisher: string;
+            /** Quarantined Record Count */
+            quarantined_record_count: number;
+            /** Raw Record Count */
+            raw_record_count: number;
+            /** Rejected Record Count */
+            rejected_record_count: number;
+            /** Release Id */
+            release_id: string;
+            /** Source Id */
+            source_id: string;
+            /** Source Url */
+            source_url: string;
+            /** Terms Url */
+            terms_url: string;
+            /** Total Value */
+            total_value: string;
+        };
         /**
          * EvidenceStatus
          * @enum {string}
          */
         EvidenceStatus: "demonstration" | "prototype" | "validated";
+        /** EvidenceSummaryResponse */
+        EvidenceSummaryResponse: {
+            /**
+             * Built At
+             * Format: date-time
+             */
+            built_at: string;
+            /** Database Sha256 */
+            database_sha256: string;
+            /** Geographies */
+            geographies: string[];
+            /** Mapping Status Counts */
+            mapping_status_counts: {
+                [key: string]: number;
+            };
+            /** Measures */
+            measures: string[];
+            /** Observation Count */
+            observation_count: number;
+            /** Published Value Count */
+            published_value_count: number;
+            /** Releases */
+            releases: components["schemas"]["EvidenceReleaseSummaryResponse"][];
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Status */
+            status: string;
+            versions: components["schemas"]["SnapshotVersionsResponse"];
+            /** Warning Count */
+            warning_count: number;
+        };
         /** FieldError */
         FieldError: {
             /** Field */
@@ -217,6 +390,16 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * MappingStatus
+         * @enum {string}
+         */
+        MappingStatus: "exact_identifier" | "curated_alias" | "normalized_label" | "reviewed_probable" | "ambiguous" | "rejected" | "unresolved";
+        /**
+         * Measure
+         * @enum {string}
+         */
+        Measure: "new_registrations" | "active_fleet";
         /** ModelYearDemandResponse */
         ModelYearDemandResponse: {
             /** Configuration Id */
@@ -464,6 +647,25 @@ export interface components {
              */
             updated_at: string;
         };
+        /** SnapshotVersionsResponse */
+        SnapshotVersionsResponse: {
+            /** Confidence Method */
+            confidence_method: string;
+            /** Estimation Method */
+            estimation_method: string;
+            /** Forecast Method */
+            forecast_method: string;
+            /** Hazard Method */
+            hazard_method: string;
+            /** Identity Registry */
+            identity_registry: string;
+            /** Reconciliation Method */
+            reconciliation_method: string;
+            /** Source Registry */
+            source_registry: string;
+            /** Survival Method */
+            survival_method: string;
+        };
         /**
          * SortDirection
          * @enum {string}
@@ -506,6 +708,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    observations_api_v1_evidence_observations_get: {
+        parameters: {
+            query?: {
+                release_id?: string | null;
+                geography?: string | null;
+                measure?: components["schemas"]["Measure"] | null;
+                mapping_status?: components["schemas"]["MappingStatus"] | null;
+                search?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceObservationPageResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    summary_api_v1_evidence_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceSummaryResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
         };

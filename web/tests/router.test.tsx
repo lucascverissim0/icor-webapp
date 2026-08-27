@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   configurationRoute,
   createPlannerRouter,
+  evidenceRoute,
   opportunitiesRoute,
   plannerRoute,
 } from '../src/app/router'
@@ -52,6 +53,7 @@ describe('planner router', () => {
     expect(plannerRoute.options.errorComponent).toBe(RouteErrorFallback)
     expect(configurationRoute.options.errorComponent).toBe(RouteErrorFallback)
     expect(opportunitiesRoute.options.errorComponent).toBe(RouteErrorFallback)
+    expect(evidenceRoute.options.errorComponent).toBe(RouteErrorFallback)
   })
 
   it('validates opportunity grouping independently from planner state', async () => {
