@@ -367,8 +367,9 @@ class SnapshotBuilder:
         observations = source.list_observations()
         if observations:
             target.add_observations(observations)
-        for mapping in source.list_mappings():
-            target.add_mapping(mapping)
+        mappings = source.list_mappings()
+        if mappings:
+            target.add_identity_attributions((), (), mappings)
         published_values = source.list_published_values()
         if published_values:
             target.add_published_values(published_values)

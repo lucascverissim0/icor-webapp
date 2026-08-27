@@ -389,6 +389,32 @@ def test_loader_consumes_private_checksummed_release_bytes_during_transient_muta
     assert release_store.verify(stored.release_id).artifact_path.read_bytes() == ARTIFACT
 
 
+def test_canonical_replay_batches_identity_mappings(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = release_store.verify(build_request.release_ids[0])
+    built = SnapshotBuilder(
+        tmp_path / "source",
+        release_store,
+        TransientMutationLoader(stored.artifact_path),
+    ).build(build_request)
+    source = SQLiteEvidenceRepository(built.database_path)
+    target = SQLiteEvidenceRepository(tmp_path / "target.sqlite3", writable=True)
+
+    def reject_single_mapping(mapping: IdentityMapping) -> None:
+        del mapping
+        raise AssertionError("canonical replay must not write mappings one at a time")
+
+    monkeypatch.setattr(target, "add_mapping", reject_single_mapping)
+
+    SnapshotBuilder._replay_canonically(source, target)
+
+    assert target.list_mappings() == source.list_mappings()
+
+
 def test_build_rejects_symlinked_candidates_directory(
     tmp_path: Path,
     release_store: ReleaseStore,
