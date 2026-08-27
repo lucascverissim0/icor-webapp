@@ -971,3 +971,23 @@ vulnerabilities while skipping only the unpublished local package. No source
 acquisition, production/customer data, server/process lifecycle, push, merge, deploy,
 or main-branch action occurred. The unrelated `AGENTS.md` modification remains
 untouched and unstaged.
+
+Coordinator rulings retained from the completed subagent-driven implementation:
+
+- The canonical serialization example uses SHA-256
+  `5ba45a928128f18ed081de659501374802968f3fc00d37ec9158bab5dd210777`, the digest of
+  the exact specified UTF-8 bytes. If this ruling is wrong, only the deterministic
+  serialization test and dependent hash fixtures require rework.
+- `SnapshotBuildRequest.build_as_of` is deterministic and identity-bearing; wall-clock
+  time is reserved for the active pointer's `promoted_at`. If this ruling is wrong,
+  snapshot identities and manifests require a versioned migration.
+- The shipped CLI source registry remains empty until a real approved parser exists;
+  the fictional two-row loader is injected only by integration tests. If this ruling
+  is wrong, the later EEA implementation must revise the CLI composition API.
+- The maintained Ruff gate is scoped to `src`, `tests`, `scripts/audit_baseline.py`,
+  and `scripts/build_evidence_snapshot.py`; 486 findings in untouched legacy scripts
+  remain diagnostic and out of this foundation's scope. Expanding that ruling would
+  require a separate legacy-script remediation slice.
+- The fictional-sample safety regression exercises the repository's real credential
+  scanner boundary rather than matching source-text keywords. Reverting this ruling
+  would affect only the security test, not production behavior.
