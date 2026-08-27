@@ -222,6 +222,20 @@ def test_ranking_is_stable_paginated_and_searchable(mapped_candidate: Path) -> N
     assert escaped.items == ()
 
 
+def test_ranking_aggregates_observations_before_vehicle_lookup(
+    mapped_candidate: Path,
+) -> None:
+    service = RegistrationService.from_candidate(mapped_candidate)
+
+    sql, _ = service._grouped_query(None)
+
+    assert "JOIN identity_mapping" not in sql
+    assert sql.index("GROUP BY o.canonical_vehicle_id") < sql.index(
+        "JOIN canonical_vehicle"
+    )
+    assert "o.mapping_status = 'normalized_label'" in sql
+
+
 def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> None:
     summary = RegistrationService.from_candidate(mapped_candidate).summary()
 

@@ -203,41 +203,47 @@ class RegistrationService:
             ELSE o.confidence_authority + o.confidence_publication_status +
                 o.confidence_coverage + o.confidence_identity +
                 o.confidence_independent_agreement END"""
-        clauses = [
-            "r.source_id = ?",
-            "r.parser_name = ?",
-            "r.publication_status = 'final'",
+        observation_clauses = [
+            "o.release_id IN (SELECT release_id FROM source_release "
+            "WHERE source_id = ? AND parser_name = ? AND publication_status = 'final')",
             "o.publication_status = 'final'",
             "o.measure = 'new_registrations'",
             "o.unit = 'vehicles'",
             "o.period_start = '2024-01-01'",
             "o.period_end = '2024-12-31'",
             "o.mapping_status = 'normalized_label'",
-            "m.status = o.mapping_status",
-            "m.canonical_vehicle_id = o.canonical_vehicle_id",
-            "v.model_year IS NULL",
             f"o.geography IN ({country_placeholders})",
         ]
-        parameters: list[object] = [_EEA_SOURCE_ID, _EEA_PARSER_NAME, *_EU27_EEA_CODES]
+        vehicle_clauses = ["v.model_year IS NULL"]
+        parameters: list[object] = [
+            _EEA_SOURCE_ID,
+            _EEA_SOURCE_ID,
+            _EEA_PARSER_NAME,
+            *_EU27_EEA_CODES,
+        ]
         if search is not None:
             escaped = _escape_like(search.casefold())
-            clauses.append(
+            vehicle_clauses.append(
                 "(LOWER(v.make) LIKE ? ESCAPE '\\' OR LOWER(v.model) LIKE ? ESCAPE '\\')"
             )
             parameters.extend((f"%{escaped}%", f"%{escaped}%"))
         return (
-            f"""SELECT v.vehicle_id, v.make, v.model,
-            SUM(CAST(o.value AS NUMERIC)) AS registrations,
-            MIN({confidence}) AS evidence_confidence,
-            COUNT(o.observation_id) AS input_observation_count,
-            GROUP_CONCAT(DISTINCT r.release_id) AS release_ids,
-            GROUP_CONCAT(DISTINCT r.source_id) AS source_ids
-            FROM observation o
-            JOIN source_release r ON r.release_id = o.release_id
-            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
-            JOIN identity_mapping m ON m.observation_id = o.observation_id
-            WHERE {' AND '.join(clauses)}
-            GROUP BY v.vehicle_id, v.make, v.model""",
+            f"""SELECT v.vehicle_id, v.make, v.model, grouped.registrations,
+            grouped.evidence_confidence, grouped.input_observation_count,
+            grouped.release_ids, ? AS source_ids
+            FROM (
+                SELECT o.canonical_vehicle_id,
+                SUM(CAST(o.value AS NUMERIC)) AS registrations,
+                MIN({confidence}) AS evidence_confidence,
+                COUNT(o.observation_id) AS input_observation_count,
+                GROUP_CONCAT(DISTINCT o.release_id) AS release_ids
+                FROM observation o
+                WHERE {' AND '.join(observation_clauses)}
+                GROUP BY o.canonical_vehicle_id
+            ) AS grouped
+            JOIN canonical_vehicle v
+                ON v.vehicle_id = grouped.canonical_vehicle_id
+            WHERE {' AND '.join(vehicle_clauses)}""",
             tuple(parameters),
         )
 
