@@ -202,6 +202,23 @@ Then run the web client from `web`:
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
+### Review a validated evidence candidate
+
+Set `ICOR_EVIDENCE_CANDIDATE` to one exact candidate directory before starting the
+planner launcher, then open `/evidence`. The API revalidates the candidate manifest,
+database hash, schema, counts, and releases before serving it read-only. An absent or
+invalid candidate returns a typed unavailable response; it never falls back to fixtures.
+
+```powershell
+$env:ICOR_EVIDENCE_CANDIDATE = 'C:\Users\LucasCravoVERISSIMO\icor-webapp-development\.local\evidence\candidates\snapshot-a92867b966f81d7966fe'
+uv run python scripts/run_planner_dev.py
+```
+
+Open `http://127.0.0.1:5173/evidence`. This workspace displays raw publisher labels and
+provenance for review. It does not activate or promote the candidate, change the demo
+planner data, resolve canonical vehicle identities, reconcile overlapping releases,
+estimate missing values, or calculate a forecast.
+
 ### Local production-coverage state
 
 By default the opportunity page stores coverage records at the ignored path

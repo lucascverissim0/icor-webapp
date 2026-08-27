@@ -18,7 +18,6 @@ from icor.application.evidence_review import (
 from icor.domain.snapshots import SnapshotVersions
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
-
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
 
 

@@ -43,5 +43,7 @@ candidate snapshots from EEA 2024-final registrations, KBA FZ10 2024 registratio
 UK DfT/DVLA registrations and licensed fleet data through finalized 2025 Q4. See
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#official-evidence-acquisition) for exact commands,
 licences, and limitations. Source labels remain unresolved and candidates are never
-promoted automatically, so the running planner continues to use clearly labelled demo
-data until reviewed identity reconciliation and a snapshot-backed API are implemented.
+promoted automatically. A configured local app exposes the validated candidate through
+the read-only `/evidence` workspace while planner forecasts continue to use clearly
+labelled demonstration data. This view does not resolve identity, publish model values,
+or make the candidate active.
