@@ -20,6 +20,7 @@ from icor.application.snapshot_build import (
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
 from icor.evidence.release_manifests import ManifestError, load_release_manifest
 from icor.evidence.serialization import canonical_json_bytes
+from icor.evidence.source_registry import OFFICIAL_SOURCE_VERSIONS, official_loader_registry
 from icor.infrastructure.release_store import (
     ReleaseAlreadyExistsError,
     ReleaseIntegrityError,
@@ -82,9 +83,7 @@ def _add_root_arguments(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = SafeArgumentParser(description="Build local immutable evidence snapshots.")
-    commands = parser.add_subparsers(
-        dest="command", required=True, parser_class=SafeArgumentParser
-    )
+    commands = parser.add_subparsers(dest="command", required=True, parser_class=SafeArgumentParser)
 
     stage = commands.add_parser("stage-release")
     _add_root_arguments(stage)
@@ -176,6 +175,7 @@ def _build_snapshot(
     args: argparse.Namespace,
     root: Path,
     loader_registry: Mapping[str, EvidenceLoader],
+    versions: SnapshotVersions,
     filesystem: SnapshotFilesystem,
 ) -> tuple[int, dict[str, object]]:
     release_ids = tuple(sorted(args.release))
@@ -191,7 +191,7 @@ def _build_snapshot(
         raise UnsupportedParserError("release parser is not registered")
     request = SnapshotBuildRequest(
         release_ids=release_ids,
-        versions=FOUNDATION_VERSIONS,
+        versions=versions,
         deterministic_seed=args.deterministic_seed,
         build_as_of=_build_as_of(args.build_as_of),
     )
@@ -204,9 +204,7 @@ def _build_snapshot(
     if not result.validation_report.can_promote:
         return 3, {
             "error": {"code": "snapshot_validation_failed"},
-            "finding_codes": tuple(
-                finding.code for finding in result.validation_report.findings
-            ),
+            "finding_codes": tuple(finding.code for finding in result.validation_report.findings),
             "state": "validation_failed",
         }
     return 0, _snapshot_payload(result.manifest, state="candidate")
@@ -250,11 +248,16 @@ def main(
     *,
     loader_registry: Mapping[str, EvidenceLoader] | None = None,
 ) -> int:
-    """Run one CLI command; production composition intentionally has no source loaders."""
+    """Run one CLI command with reviewed official loaders unless tests inject a registry."""
     try:
         args = build_parser().parse_args(argv)
         root = _safe_root(args.root, allow_external=args.allow_external_root)
-        registry = {} if loader_registry is None else loader_registry
+        if loader_registry is None:
+            registry = official_loader_registry()
+            versions = OFFICIAL_SOURCE_VERSIONS
+        else:
+            registry = loader_registry
+            versions = FOUNDATION_VERSIONS
         create_root = args.command in {"stage-release", "build", "promote"}
         if not create_root and not os.path.lexists(root):
             raise SnapshotUnavailableError("no active snapshot is available")
@@ -267,6 +270,7 @@ def main(
                     args,
                     pinned_root,
                     registry,
+                    versions,
                     filesystem,
                 )
             elif args.command == "promote":
