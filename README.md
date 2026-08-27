@@ -36,11 +36,12 @@ configuration/SKU coverage and an explicitly lower-precision vehicle-year fallba
 it is not a multi-user or production data store. The existing Streamlit application
 remains available separately and is not modified or deployed by this workflow.
 
-## Evidence snapshot foundation
+## Official evidence snapshots
 
-The repository now has a local, immutable evidence-release and snapshot foundation.
-Its operator workflow, recovery rules, and data-handling constraints are documented in
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#evidence-snapshot-foundation). This is only
-the safety foundation: it contains no real EEA, KBA, or UK parser; no forecast; no API
-replacement; and no fixture fallback. The retained CSV fixture is fictional contract-test
-data, not an acquisition source or an application data fallback.
+The repository can now acquire checksum-pinned public releases and build immutable local
+candidate snapshots from EEA 2024-final registrations, KBA FZ10 2024 registrations, and
+UK DfT/DVLA registrations and licensed fleet data through finalized 2025 Q4. See
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#official-evidence-acquisition) for exact commands,
+licences, and limitations. Source labels remain unresolved and candidates are never
+promoted automatically, so the running planner continues to use clearly labelled demo
+data until reviewed identity reconciliation and a snapshot-backed API are implemented.

@@ -97,15 +97,43 @@ when validation permits promotion; `promote` revalidates it before atomically ch
 the active pointer; `status` reports the active pointer state; and `verify` opens the
 active SQLite repository read-only and validates the pointed snapshot.
 
-At this checkpoint the public CLI deliberately has no registered parser. The example
-`build` therefore returns the typed `unsupported_parser` result (exit 2), and `promote`
-has no candidate ID to use. If it is invoked with `$candidateSnapshotId` anyway,
-promotion rejects the missing candidate (exit 3). `status` and `verify` then each emit
-`{"active_snapshot_id": null, "state": "unavailable"}` and exit 4 because no active
-snapshot exists. That is intentional: there is no real EEA, KBA, or UK parser, no
-forecast, no API replacement, and no fixture fallback. A future approved source plan
-must add a reviewed parser through application composition before a candidate can be
-built; it must not substitute the test fixture.
+The production composition registers only the reviewed official parsers. Unknown parser
+names still fail closed with `unsupported_parser`; the fictional fixture remains test-only
+and is never an application fallback. A candidate is not active until an operator runs
+the separate `promote` command.
+
+### Official evidence acquisition
+
+The acquisition command accepts only four exact HTTPS resources and verifies an exact
+byte size and SHA-256 before immutable staging. `--artifact` can stage a previously
+downloaded copy of the same pinned file; omit it to download from the allowlisted URL.
+
+```powershell
+$evidenceRoot = '.local/evidence'
+uv run python scripts/acquire_official_evidence.py --source eea-2024-final --root $evidenceRoot
+uv run python scripts/acquire_official_evidence.py --source kba-fz10-2024 --root $evidenceRoot
+uv run python scripts/acquire_official_evidence.py --source uk-veh0160-gb --root $evidenceRoot
+uv run python scripts/acquire_official_evidence.py --source uk-veh0120-gb --root $evidenceRoot
+
+uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
+  --release eea-co2cars-2024-final-v30-r1 `
+  --release kba-fz10-2024-12-final-v3 `
+  --release uk-dft-veh0160-gb-2025-final-20260713 `
+  --release uk-dft-veh0120-gb-2025-final-20260713 `
+  --build-as-of 2026-08-27T12:00:00+00:00 --deterministic-seed 20260827
+```
+
+EEA data is reused under CC BY 4.0 with EEA/DG CLIMA attribution; KBA data uses
+DL-DE/BY-2.0 with KBA attribution; UK data uses the Open Government Licence v3.0 with
+Crown copyright/DfT attribution. EEA and KBA are placed in the same dependency group so
+their overlap is not treated as independent confirmation. The UK active-fleet parser
+uses only `Cars` with `LicenceStatus=Licensed`; SORN remains in the raw artifact and is
+not added to active fleet. Columns after 2025 Q4 are excluded as provisional.
+
+The first validated live candidate is `snapshot-a92867b966f81d7966fe` with 542,455
+observations, zero warnings, and zero published model values. It was not promoted.
+Canonical make/model/model-year and windshield-fitment identity remain unresolved; no
+forecast is calculated and the planner/API still serve demonstration data.
 
 All source-release directories and promoted snapshot directories are immutable. A failed
 build or promotion leaves the current active snapshot unchanged, and promotion never
