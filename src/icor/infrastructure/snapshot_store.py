@@ -233,7 +233,21 @@ class SnapshotStore:
                 versions=manifest.versions,
                 release_artifact_hashes=release_artifact_hashes,
             )
-            if expected_snapshot_id != manifest.snapshot_id:
+            accepted_snapshot_ids = {expected_snapshot_id}
+            if (
+                manifest.versions.generation_registry == "generation-registry-v0"
+                and manifest.versions.generation_resolver == "generation-resolver-v0"
+            ):
+                accepted_snapshot_ids.add(
+                    snapshot_id_for(
+                        build_as_of=manifest.built_at,
+                        deterministic_seed=manifest.deterministic_seed,
+                        versions=manifest.versions,
+                        release_artifact_hashes=release_artifact_hashes,
+                        legacy_generation_versions=True,
+                    )
+                )
+            if manifest.snapshot_id not in accepted_snapshot_ids:
                 raise SnapshotPromotionError("candidate snapshot identity does not match")
             report = self.validator.validate(repository, manifest)
             if not report.can_promote:

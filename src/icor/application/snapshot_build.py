@@ -117,6 +117,7 @@ def snapshot_id_for(
     deterministic_seed: int,
     versions: SnapshotVersions,
     release_artifact_hashes: tuple[tuple[str, str], ...],
+    legacy_generation_versions: bool = False,
 ) -> str:
     """Derive the canonical identity shared by candidate build and promotion."""
     release_ids = tuple(release_id for release_id, _ in release_artifact_hashes)
@@ -136,6 +137,26 @@ def snapshot_id_for(
         deterministic_seed=deterministic_seed,
         build_as_of=build_as_of,
     )
+    version_identity: object = request.versions
+    if legacy_generation_versions:
+        if (
+            request.versions.generation_registry != "generation-registry-v0"
+            or request.versions.generation_resolver != "generation-resolver-v0"
+        ):
+            raise ValueError("legacy snapshot identity requires generation v0")
+        version_identity = {
+            field: getattr(request.versions, field)
+            for field in (
+                "source_registry",
+                "identity_registry",
+                "reconciliation_method",
+                "confidence_method",
+                "estimation_method",
+                "survival_method",
+                "hazard_method",
+                "forecast_method",
+            )
+        }
     identity_payload = {
         "build_as_of": request.build_as_of,
         "deterministic_seed": request.deterministic_seed,
@@ -143,7 +164,7 @@ def snapshot_id_for(
             {"release_id": release_id, "sha256": artifact_hash}
             for release_id, artifact_hash in release_artifact_hashes
         ),
-        "versions": request.versions,
+        "versions": version_identity,
     }
     digest = sha256(canonical_json_bytes(identity_payload)).hexdigest()
     return f"snapshot-{digest[:20]}"

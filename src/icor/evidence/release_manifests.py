@@ -23,6 +23,10 @@ class ManifestError(ValueError):
 _RELEASE_FIELDS = frozenset(field.name for field in fields(ReleaseManifest))
 _SNAPSHOT_FIELDS = frozenset(field.name for field in fields(SnapshotManifest))
 _VERSION_FIELDS = frozenset(field.name for field in fields(SnapshotVersions))
+_LEGACY_VERSION_FIELDS = _VERSION_FIELDS - {
+    "generation_registry",
+    "generation_resolver",
+}
 
 
 def load_release_manifest(path: Path) -> ReleaseManifest:
@@ -55,7 +59,8 @@ def load_snapshot_manifest(path: Path) -> SnapshotManifest:
     versions = payload["versions"]
     if not isinstance(versions, dict):
         raise ManifestError("snapshot versions must be an object")
-    _require_exact_keys(versions, _VERSION_FIELDS, "snapshot versions")
+    if frozenset(versions) != _LEGACY_VERSION_FIELDS:
+        _require_exact_keys(versions, _VERSION_FIELDS, "snapshot versions")
     try:
         release_ids = _parse_string_list(payload["release_ids"], "release_ids")
         warnings = _parse_string_list(payload["warnings"], "warnings")

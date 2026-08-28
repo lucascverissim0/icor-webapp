@@ -15,6 +15,7 @@ from icor.application.snapshot_build import (
     SnapshotBuilder,
     SnapshotBuildError,
     SnapshotBuildRequest,
+    snapshot_id_for,
 )
 from icor.domain.evidence import (
     CanonicalVehicle,
@@ -303,6 +304,35 @@ def test_snapshot_id_changes_when_method_version_changes(
     )
 
     assert builder.build(changed).manifest.snapshot_id != first.manifest.snapshot_id
+
+
+def test_legacy_snapshot_identity_is_available_only_for_generation_v0() -> None:
+    versions = SnapshotVersions(*("v1",) * 8)
+    hashes = (("sample-2024-20260826", "a" * 64),)
+
+    current = snapshot_id_for(
+        build_as_of=BUILD_AS_OF,
+        deterministic_seed=17,
+        versions=versions,
+        release_artifact_hashes=hashes,
+    )
+    legacy = snapshot_id_for(
+        build_as_of=BUILD_AS_OF,
+        deterministic_seed=17,
+        versions=versions,
+        release_artifact_hashes=hashes,
+        legacy_generation_versions=True,
+    )
+
+    assert legacy != current
+    with pytest.raises(ValueError, match="generation v0"):
+        snapshot_id_for(
+            build_as_of=BUILD_AS_OF,
+            deterministic_seed=17,
+            versions=replace(versions, generation_registry="generation-registry-v1"),
+            release_artifact_hashes=hashes,
+            legacy_generation_versions=True,
+        )
 
 
 def test_snapshot_id_changes_when_build_as_of_changes(

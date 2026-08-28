@@ -196,6 +196,36 @@ def test_snapshot_manifest_rejects_duplicate_release_ids(tmp_path: Path) -> None
         load_snapshot_manifest(path)
 
 
+def test_snapshot_manifest_loads_legacy_versions_with_generation_v0(tmp_path: Path) -> None:
+    payload = {
+        "snapshot_id": "snapshot-20260826-abc123",
+        "status": "candidate",
+        "built_at": "2026-08-26T10:00:00+00:00",
+        "deterministic_seed": 42,
+        "release_ids": ["eea-2024-20260826"],
+        "versions": {
+            "source_registry": "source-registry-v1",
+            "identity_registry": "identity-registry-v1",
+            "reconciliation_method": "reconciliation-v1",
+            "confidence_method": "confidence-v1",
+            "estimation_method": "estimation-v1",
+            "survival_method": "survival-v1",
+            "hazard_method": "hazard-v1",
+            "forecast_method": "forecast-v1",
+        },
+        "database_sha256": "b" * 64,
+        "observation_count": 10,
+        "published_value_count": 3,
+        "warnings": [],
+    }
+    path = write_json(tmp_path, payload, "legacy-snapshot.json")
+
+    manifest = load_snapshot_manifest(path)
+
+    assert manifest.versions.generation_registry == "generation-registry-v0"
+    assert manifest.versions.generation_resolver == "generation-resolver-v0"
+
+
 def test_manifest_rejects_non_utf8_content(tmp_path: Path) -> None:
     path = tmp_path / "manifest.json"
     path.write_bytes(b"\xff\xfe")
