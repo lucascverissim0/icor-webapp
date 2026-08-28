@@ -1621,4 +1621,25 @@ published or promoted. The paused immutable release directory, active snapshot,
 protected production checkout, remote, and deployment were not changed. Codespaces
 implementation now proceeds exclusively from the approved remote-storage plan.
 
+## 2026-08-28 Codespaces checkpoint: preview configuration boundary
+
+The first preview-specific TDD slice is complete. `src/icor/preview/config.py` now
+strictly decodes individually named Argon2id password verifiers, a base64url signing
+secret of at least 32 decoded bytes, and a bounded 300-43,200 second session lifetime.
+It rejects absent, malformed, weak, duplicate-casefolded, and plaintext configuration
+without echoing submitted values. `argon2-cffi` 25.1.0 is a direct locked dependency;
+`argon2-cffi-bindings` 26.1.0 is locked transitively.
+
+The test was observed RED with `ModuleNotFoundError: No module named 'icor.preview'`
+before implementation. Fresh GREEN verification is 14 passed in 0.16 seconds, and
+Ruff reports all checks passed for the configuration implementation and tests. The
+generation runtime checkpoint remains `fc723af`; `AGENTS.md` remains the only unrelated
+unstaged user change. No GitHub branch, Codespace, secret, port, production checkout,
+active snapshot, or paused local release store was changed.
+
+Resume with Task 3 of
+`docs/superpowers/plans/2026-08-28-codespaces-preview-storage-implementation.md`:
+signed sessions, Argon2id credential checks, bounded login throttling, authentication
+middleware, and security headers, continuing strict RED-GREEN cycles.
+
 Context safety: SAFE TO CLEAR — durable handoff is current.
