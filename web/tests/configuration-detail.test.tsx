@@ -128,7 +128,7 @@ describe('ConfigurationDetail', () => {
   it('offers a safe return for a missing configuration', async () => {
     renderDetail(notFound, 404)
 
-    expect(await screen.findByRole('heading', { name: 'Configuration not found' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Opportunity not found' })).toBeVisible()
     expect(screen.getByRole('link', { name: 'Return to planner' })).toHaveAttribute(
       'href',
       '/planner?market=FR&horizon=2030&page=1&sort=base_demand&direction=desc',

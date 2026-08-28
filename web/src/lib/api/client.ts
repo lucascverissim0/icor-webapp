@@ -18,6 +18,7 @@ type EvidenceMeasure = components['schemas']['Measure']
 type EvidenceMappingStatus = components['schemas']['MappingStatus']
 type RegistrationSummary = components['schemas']['RegistrationSummaryResponse']
 type RegistrationPage = components['schemas']['RegistrationPageResponse']
+type CompletenessReport = components['schemas']['CompletenessResponse']
 type ApiQuery = NonNullable<
   operations['configurations_api_v1_planner_configurations_get']['parameters']['query']
 >
@@ -222,6 +223,35 @@ export class PlannerApiClient {
     if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
     const suffix = parameters.size > 0 ? `?${parameters.toString()}` : ''
     return this.request<RegistrationPage>(`/api/v1/registrations/ranking${suffix}`)
+  }
+
+  async completeness(): Promise<CompletenessReport> {
+    return this.request<CompletenessReport>('/api/completeness')
+  }
+
+  async mlExport(cutoff: string, token: string): Promise<Blob> {
+    const response = await this.fetcher(
+      `${this.baseUrl}/api/exports/ml.csv?cutoff=${encodeURIComponent(cutoff)}`,
+      {
+        headers: {
+          Accept: 'text/csv',
+          'X-ICOR-Export-Token': token,
+        },
+      },
+    )
+    if (response.ok) return response.blob()
+    let body: unknown
+    try { body = await response.json() } catch { body = null }
+    if (isProblem(body)) {
+      throw new ApiProblem(
+        body.code,
+        body.message,
+        body.correlation_id,
+        body.field_errors ?? [],
+        response.status,
+      )
+    }
+    throw new ApiProblem('invalid_response', 'The export service returned an invalid response.', null, [], response.status)
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {

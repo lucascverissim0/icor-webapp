@@ -138,7 +138,7 @@ describe('OpportunitiesWorkbench', () => {
     expect(screen.getByText('Score 82.3')).toHaveAccessibleDescription(
       /80 points from relative demand and 2.3 points from production readiness/i,
     )
-    expect(screen.getByText('Demonstration forecast')).toBeVisible()
+    expect(screen.getByText('Validated snapshot')).toBeVisible()
   })
 
   it('switches grouping without discarding market intent', async () => {

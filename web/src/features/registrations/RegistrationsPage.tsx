@@ -41,12 +41,12 @@ export function RegistrationsWorkbench({
   onSearchChange,
   search,
 }: RegistrationsWorkbenchProps) {
-  const [localSearch, setLocalSearch] = useState<RegistrationSearch>({ page: 1 })
+  const [localSearch, setLocalSearch] = useState<RegistrationSearch>({ geography: 'EU27', year: 2024, page: 1 })
   const routeSearch = search ?? localSearch
   const [draftSearch, setDraftSearch] = useState(routeSearch.search ?? '')
   const query: RegistrationRankingQuery = {
-    geography: 'EU27',
-    year: 2024,
+    geography: routeSearch.geography ?? 'EU27',
+    year: routeSearch.year ?? 2024,
     search: routeSearch.search,
     page: routeSearch.page ?? 1,
     pageSize: 25,
@@ -81,7 +81,7 @@ export function RegistrationsWorkbench({
       <header className="registrations-hero">
         <div>
           <p className="eyebrow">European passenger-car evidence</p>
-          <h2>Official 2024 registrations</h2>
+          <h2>Official {query.year} registrations</h2>
           <p>Ranked make and model families derived from finalized EEA member-state records.</p>
         </div>
         <span className="official-pill"><ShieldCheck aria-hidden="true" size={17} /> Official source</span>
@@ -98,9 +98,9 @@ export function RegistrationsWorkbench({
       {summary.isPending && <section aria-busy="true" className="registration-state"><h2>Verifying official snapshot…</h2></section>}
       {summary.data && (
         <section className="registration-summary" aria-label="Official registration summary">
-          <div><span>EU27 registrations</span><strong>{number(summary.data.total_registrations)}</strong></div>
+          <div><span>Latest EU27 registrations</span><strong>{number(summary.data.total_registrations)}</strong></div>
           <div><span>Canonical model families</span><strong>{number(summary.data.model_count)}</strong></div>
-          <div><span>Evidence year</span><strong>{summary.data.years[0]}</strong></div>
+          <div><span>History</span><strong>{summary.data.years[0]}–{summary.data.years.at(-1)}</strong></div>
           <div><span>Snapshot</span><code>{summary.data.snapshot_id.replace('snapshot-', '')}</code></div>
         </section>
       )}
@@ -111,6 +111,10 @@ export function RegistrationsWorkbench({
           <a href="/evidence">Inspect source evidence</a>
         </div>
         <form className="registration-search" onSubmit={applySearch}>
+          {summary.data && <div className="registration-scope">
+            <label>Geography<select value={query.geography} onChange={(event) => updateSearch({ ...routeSearch, geography: event.target.value, page: 1 })}>{summary.data.geographies.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+            <label>Registration year<select value={query.year} onChange={(event) => updateSearch({ ...routeSearch, year: Number(event.target.value), page: 1 })}>{summary.data.years.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          </div>}
           <label htmlFor="registration-search">Search make or model</label>
           <div>
             <Search aria-hidden="true" size={18} />
@@ -136,12 +140,12 @@ export function RegistrationsWorkbench({
             <div className="registration-table-wrap">
               <table className="registration-table">
                 <caption>{number(ranking.data.total)} canonical model families</caption>
-                <thead><tr><th>Rank</th><th>Make and model</th><th>2024 registrations</th><th>Evidence</th></tr></thead>
+                <thead><tr><th>Rank</th><th>Make and model</th><th>{query.year} registrations</th><th>Evidence</th></tr></thead>
                 <tbody>{ranking.data.items.map((row) => (
                   <tr key={row.vehicle_id}>
                     <td data-label="Rank"><strong>#{row.rank}</strong></td>
                     <td data-label="Make and model"><strong>{row.make}</strong><span>{row.model}</span><small>Model year unavailable</small></td>
-                    <td data-label="2024 registrations"><strong>{number(row.registrations)}</strong><span>Derived observed total</span></td>
+                    <td data-label={`${query.year} registrations`}><strong>{number(row.registrations)}</strong><span>Derived observed total</span></td>
                     <td data-label="Evidence"><strong>{row.evidence_confidence}/100</strong><span>{number(row.input_observation_count)} source groups</span></td>
                   </tr>
                 ))}</tbody>

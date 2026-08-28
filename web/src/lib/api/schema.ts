@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/completeness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Completeness */
+        get: operations["completeness_api_completeness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exports/ml.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ml Export */
+        get: operations["ml_export_api_exports_ml_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -214,6 +248,50 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CompletenessRecordResponse */
+        CompletenessRecordResponse: {
+            /** Assigned Observation Count */
+            assigned_observation_count: number;
+            /** Canonical Family Count */
+            canonical_family_count: number;
+            /** Completeness Id */
+            completeness_id: string;
+            /** Estimated Generation Count */
+            estimated_generation_count: number;
+            /** Evidence Only Count */
+            evidence_only_count: number;
+            /** Forecastable Count */
+            forecastable_count: number;
+            /** Geography */
+            geography: string;
+            /** Observation Count */
+            observation_count: number;
+            /** Reason Codes */
+            reason_codes: string[];
+            /** Rejected Record Count */
+            rejected_record_count: number;
+            /** Release Count */
+            release_count: number;
+            /** Sourced Generation Count */
+            sourced_generation_count: number;
+            /** Usable Observation Count */
+            usable_observation_count: number;
+            /** Year */
+            year: number;
+        };
+        /** CompletenessResponse */
+        CompletenessResponse: {
+            /**
+             * Built At
+             * Format: date-time
+             */
+            built_at: string;
+            /** Items */
+            items: components["schemas"]["CompletenessRecordResponse"][];
+            /** Snapshot Id */
+            snapshot_id: string;
+            versions: components["schemas"]["SnapshotVersionsResponse"];
+        };
         /**
          * ConfidenceLevel
          * @enum {string}
@@ -415,6 +493,11 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** HealthResponse */
         HealthResponse: {
             /** Data Version */
@@ -568,6 +651,8 @@ export interface components {
         };
         /** PlanningConfigurationResponse */
         PlanningConfigurationResponse: {
+            /** Assumption Ids */
+            assumption_ids: string[];
             /** Body Style */
             body_style: string;
             /** Brand */
@@ -581,6 +666,8 @@ export interface components {
             /** Drive Side */
             drive_side: string | null;
             equipment: components["schemas"]["EquipmentResponse"];
+            /** Evidence Ids */
+            evidence_ids: string[];
             evidence_status: components["schemas"]["EvidenceStatus"];
             /** Facelift */
             facelift: string | null;
@@ -588,6 +675,10 @@ export interface components {
             forecast_horizon: number;
             /** Generation */
             generation: string;
+            /** Generation Id */
+            generation_id: string | null;
+            /** Generation Identity Kind */
+            generation_identity_kind: string | null;
             identity_confidence: components["schemas"]["ConfidenceResponse"];
             /** Market */
             market: string;
@@ -599,6 +690,8 @@ export interface components {
             model_year_start: number;
             /** Part Family */
             part_family: string | null;
+            /** Reason Codes */
+            reason_codes: string[];
             /** Replacement Rate */
             replacement_rate: number;
             /** Sku */
@@ -612,6 +705,8 @@ export interface components {
             updated_at: string;
             /** Vehicle Exposure Units */
             vehicle_exposure_units: number;
+            /** Year Semantics */
+            year_semantics: string;
         };
         /** ProblemResponse */
         ProblemResponse: {
@@ -759,6 +854,10 @@ export interface components {
             estimation_method: string;
             /** Forecast Method */
             forecast_method: string;
+            /** Generation Registry */
+            generation_registry: string;
+            /** Generation Resolver */
+            generation_resolver: string;
             /** Hazard Method */
             hazard_method: string;
             /** Identity Registry */
@@ -787,6 +886,19 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -796,6 +908,87 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    completeness_api_completeness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletenessResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    ml_export_api_exports_ml_csv_get: {
+        parameters: {
+            query: {
+                cutoff: string;
+            };
+            header?: {
+                "X-ICOR-Export-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;

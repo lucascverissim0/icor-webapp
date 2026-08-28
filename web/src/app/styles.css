@@ -1266,6 +1266,50 @@ a {
   min-width: 0;
 }
 
+.completeness-page,
+.export-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.table-scroll table {
+  border-collapse: collapse;
+  min-width: 760px;
+  width: 100%;
+}
+
+.table-scroll th,
+.table-scroll td {
+  border-bottom: 1px solid var(--line, #d9dde2);
+  padding: 0.75rem;
+  text-align: left;
+}
+
+.export-form,
+.registration-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.export-form label,
+.registration-scope label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.export-form input,
+.registration-scope select {
+  border: 1px solid var(--line, #aeb6bf);
+  border-radius: 0.45rem;
+  min-height: 2.7rem;
+  padding: 0.55rem 0.7rem;
+}
+
 .registrations-hero,
 .registration-panel,
 .registration-state,

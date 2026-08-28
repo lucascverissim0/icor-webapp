@@ -106,11 +106,11 @@ function ConfigurationRow({ configuration, onSelect }: { configuration: Configur
     <div className="configuration-row" role="row">
       <div className="configuration-identity" role="cell">
         <p className="configuration-title">{configuration.brand} {configuration.model}</p>
+        <p>{configuration.generation}</p>
         <p>{configuration.market} · {configuration.forecast_horizon} · {configuration.body_style}</p>
-        <p className="sku">{configuration.sku}</p>
       </div>
       <div role="cell">
-        <span className="cell-label">Base demand</span>
+        <span className="cell-label">P50 opportunity</span>
         <strong>{formatUnits(configuration.demand.base_units)}</strong>
         <span>{new Intl.NumberFormat('en-US').format(configuration.demand.downside_units)}–{formatUnits(configuration.demand.upside_units)}</span>
       </div>
@@ -130,7 +130,7 @@ function ProblemState({ error, onRetry }: { error: Error; onRetry: () => void })
   const correlation = error instanceof ApiProblem ? error.correlationId : null
   return (
     <section className="planner-state" role="alert">
-      <p className="eyebrow">Planner unavailable</p><h2>We could not load these configurations</h2>
+      <p className="eyebrow">Planner unavailable</p><h2>We could not load these generation opportunities</h2>
       <p>{error.message}</p>{correlation && <p className="correlation">Reference: {correlation}</p>}
       <button className="primary-action" onClick={onRetry} type="button">Retry</button>
     </section>
@@ -175,7 +175,7 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
     <div className="planner-layout">
       <Filters key={JSON.stringify(canonicalSearch)} options={optionsQuery.data} search={canonicalSearch} onApply={onSearchChange} />
       <section className="planner-results" aria-labelledby="results-title">
-        <div className="results-heading"><div><p className="eyebrow">Configuration-level outlook</p><h2 id="results-title">Windshield demand planner</h2><p>Synthetic planning evidence for workflow decisions, not production forecasting.</p></div><span className="status-pill">Demonstration data</span></div>
+        <div className="results-heading"><div><p className="eyebrow">Generation-level outlook</p><h2 id="results-title">Replacement opportunity planner</h2><p>Official registration history with explicit survival, hazard, and forecast assumptions. Values are opportunity ranges, not exact fitment demand.</p></div><span className="status-pill">Validated snapshot</span></div>
         {normalizedKeys.length > 0 && <p className="url-notice" role="status">Adjusted URL filters: {normalizedKeys.join(', ')}</p>}
         {constraints.length > 0 && (
           <div className="active-constraints">
@@ -212,11 +212,11 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
           </button>
         </div>
         {configurationsQuery.data?.items.length === 0 && (
-          <section className="planner-state"><p className="eyebrow">No matching configurations</p><h2>No results for the selected filters</h2><p>Reset the active constraints to return to the full demonstration set.</p></section>
+          <section className="planner-state"><p className="eyebrow">No matching generations</p><h2>No results for the selected filters</h2><p>Reset the active constraints to return to the complete forecastable set.</p></section>
         )}
         {configurationsQuery.data && configurationsQuery.data.items.length > 0 && (
-          <div className="configuration-grid" role="table" aria-label="Planning configurations">
-            <div className="configuration-header" role="row"><span role="columnheader">Configuration</span><span role="columnheader">Demand</span><span role="columnheader">Evidence</span><span role="columnheader">Action</span></div>
+          <div className="configuration-grid" role="table" aria-label="Generation opportunities">
+            <div className="configuration-header" role="row"><span role="columnheader">Generation</span><span role="columnheader">Opportunity</span><span role="columnheader">Evidence</span><span role="columnheader">Action</span></div>
             {configurationsQuery.data.items.map((configuration) => <ConfigurationRow key={configuration.configuration_id} configuration={configuration} onSelect={onSelect} />)}
           </div>
         )}

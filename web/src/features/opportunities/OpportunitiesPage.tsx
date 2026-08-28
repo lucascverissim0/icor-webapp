@@ -63,9 +63,9 @@ export function OpportunitiesWorkbench({
         <div>
           <p className="eyebrow">Production opportunity planning</p>
           <h2>Where demand and readiness meet</h2>
-          <p>Rank forecast windshield replacements without changing raw demand, then see the separate advantage from existing ICOR production.</p>
+          <p>Rank generation-level replacement opportunities without changing the baseline, then inspect the separate advantage from existing ICOR production.</p>
         </div>
-        <span className="status-pill">Demonstration forecast</span>
+        <span className="status-pill">Validated snapshot</span>
       </header>
 
       {invalidKeys.length > 0 && (

@@ -24,9 +24,11 @@ function PrimaryLinks() {
     <>
       <NavigationLink href="/registrations" label="Official registrations" />
       <NavigationLink href="/evidence" label="Source evidence" />
-      <span className="navigation-section-label">Prototype</span>
-      <NavigationLink href="/planner" label="Demand planner (prototype)" />
-      <NavigationLink href="/opportunities" label="Opportunities (prototype)" />
+      <NavigationLink href="/completeness" label="Completeness" />
+      <span className="navigation-section-label">Planning</span>
+      <NavigationLink href="/planner" label="Generation planner" />
+      <NavigationLink href="/opportunities" label="Opportunities" />
+      <NavigationLink href="/exports" label="ML export" />
     </>
   )
 }
@@ -48,7 +50,7 @@ export function AppShell({ children }: PropsWithChildren) {
         <nav aria-label="Primary" className="desktop-navigation">
           <PrimaryLinks />
         </nav>
-        <p className="rail-caption">Official vehicle evidence with clearly separated prototypes</p>
+        <p className="rail-caption">Official vehicle evidence with generation-level planning assumptions</p>
       </aside>
 
       <div className="shell-content">

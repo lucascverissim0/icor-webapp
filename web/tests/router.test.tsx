@@ -78,6 +78,8 @@ describe('planner router', () => {
     await router.load()
 
     expect(router.state.location.pathname).toBe('/registrations')
-    expect(router.state.location.search).toEqual({ search: 'Alpha', page: 2 })
+    expect(router.state.location.search).toEqual({
+      geography: 'EU27', year: 2024, search: 'Alpha', page: 2,
+    })
   })
 })

@@ -8,7 +8,7 @@ import { RouteErrorFallback } from '../src/app/ErrorBoundary'
 
 
 describe('AppShell', () => {
-  it('leads with official evidence and separates prototype navigation', () => {
+  it('leads with official evidence and generation planning navigation', () => {
     render(
       <AppShell>
         <h2>Planner content</h2>
@@ -17,7 +17,7 @@ describe('AppShell', () => {
 
     expect(screen.getByText('Official evidence')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Vehicle evidence and planning' })).toBeVisible()
-    expect(screen.getAllByText('Prototype').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Planning').length).toBeGreaterThan(0)
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Mobile primary' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open navigation' })).toBeVisible()
@@ -33,10 +33,10 @@ describe('AppShell', () => {
       'href',
       '#app-content',
     )
-    for (const link of screen.getAllByRole('link', { name: 'Demand planner (prototype)' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Generation planner' })) {
       expect(link).toHaveAttribute('href', '/planner')
     }
-    for (const link of screen.getAllByRole('link', { name: 'Opportunities (prototype)' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Opportunities' })) {
       expect(link).toHaveAttribute('href', '/opportunities')
     }
     for (const link of screen.getAllByRole('link', { name: 'Official registrations' })) {
@@ -44,6 +44,9 @@ describe('AppShell', () => {
     }
     for (const link of screen.getAllByRole('link', { name: 'Source evidence' })) {
       expect(link).toHaveAttribute('href', '/evidence')
+    }
+    for (const link of screen.getAllByRole('link', { name: 'Completeness' })) {
+      expect(link).toHaveAttribute('href', '/completeness')
     }
   })
 

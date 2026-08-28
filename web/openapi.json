@@ -1,6 +1,120 @@
 {
   "components": {
     "schemas": {
+      "CompletenessRecordResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_observation_count": {
+            "title": "Assigned Observation Count",
+            "type": "integer"
+          },
+          "canonical_family_count": {
+            "title": "Canonical Family Count",
+            "type": "integer"
+          },
+          "completeness_id": {
+            "title": "Completeness Id",
+            "type": "string"
+          },
+          "estimated_generation_count": {
+            "title": "Estimated Generation Count",
+            "type": "integer"
+          },
+          "evidence_only_count": {
+            "title": "Evidence Only Count",
+            "type": "integer"
+          },
+          "forecastable_count": {
+            "title": "Forecastable Count",
+            "type": "integer"
+          },
+          "geography": {
+            "title": "Geography",
+            "type": "string"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "rejected_record_count": {
+            "title": "Rejected Record Count",
+            "type": "integer"
+          },
+          "release_count": {
+            "title": "Release Count",
+            "type": "integer"
+          },
+          "sourced_generation_count": {
+            "title": "Sourced Generation Count",
+            "type": "integer"
+          },
+          "usable_observation_count": {
+            "title": "Usable Observation Count",
+            "type": "integer"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "completeness_id",
+          "geography",
+          "year",
+          "release_count",
+          "observation_count",
+          "usable_observation_count",
+          "assigned_observation_count",
+          "canonical_family_count",
+          "sourced_generation_count",
+          "estimated_generation_count",
+          "forecastable_count",
+          "evidence_only_count",
+          "rejected_record_count",
+          "reason_codes"
+        ],
+        "title": "CompletenessRecordResponse",
+        "type": "object"
+      },
+      "CompletenessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CompletenessRecordResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/SnapshotVersionsResponse"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "built_at",
+          "versions",
+          "items"
+        ],
+        "title": "CompletenessResponse",
+        "type": "object"
+      },
       "ConfidenceLevel": {
         "enum": [
           "low",
@@ -537,6 +651,19 @@
         "title": "FieldError",
         "type": "object"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -984,6 +1111,13 @@
       "PlanningConfigurationResponse": {
         "additionalProperties": false,
         "properties": {
+          "assumption_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumption Ids",
+            "type": "array"
+          },
           "body_style": {
             "title": "Body Style",
             "type": "string"
@@ -1020,6 +1154,13 @@
           "equipment": {
             "$ref": "#/components/schemas/EquipmentResponse"
           },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
           "evidence_status": {
             "$ref": "#/components/schemas/EvidenceStatus"
           },
@@ -1041,6 +1182,28 @@
           "generation": {
             "title": "Generation",
             "type": "string"
+          },
+          "generation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Id"
+          },
+          "generation_identity_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Identity Kind"
           },
           "identity_confidence": {
             "$ref": "#/components/schemas/ConfidenceResponse"
@@ -1072,6 +1235,13 @@
             ],
             "title": "Part Family"
           },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
           "replacement_rate": {
             "title": "Replacement Rate",
             "type": "number"
@@ -1102,6 +1272,10 @@
           "vehicle_exposure_units": {
             "title": "Vehicle Exposure Units",
             "type": "integer"
+          },
+          "year_semantics": {
+            "title": "Year Semantics",
+            "type": "string"
           }
         },
         "required": [
@@ -1127,7 +1301,13 @@
           "evidence_status",
           "sources",
           "updated_at",
-          "data_version"
+          "data_version",
+          "generation_id",
+          "generation_identity_kind",
+          "year_semantics",
+          "assumption_ids",
+          "reason_codes",
+          "evidence_ids"
         ],
         "title": "PlanningConfigurationResponse",
         "type": "object"
@@ -1553,6 +1733,14 @@
             "title": "Forecast Method",
             "type": "string"
           },
+          "generation_registry": {
+            "title": "Generation Registry",
+            "type": "string"
+          },
+          "generation_resolver": {
+            "title": "Generation Resolver",
+            "type": "string"
+          },
           "hazard_method": {
             "title": "Hazard Method",
             "type": "string"
@@ -1582,7 +1770,9 @@
           "estimation_method",
           "survival_method",
           "hazard_method",
-          "forecast_method"
+          "forecast_method",
+          "generation_registry",
+          "generation_resolver"
         ],
         "title": "SnapshotVersionsResponse",
         "type": "object"
@@ -1626,6 +1816,46 @@
         ],
         "title": "SourceSummaryResponse",
         "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
       }
     }
   },
@@ -1636,6 +1866,115 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/completeness": {
+      "get": {
+        "operationId": "completeness_api_completeness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompletenessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Completeness",
+        "tags": [
+          "completeness"
+        ]
+      }
+    },
+    "/api/exports/ml.csv": {
+      "get": {
+        "operationId": "ml_export_api_exports_ml_csv_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cutoff",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Cutoff",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ICOR-Export-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Icor-Export-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "text/csv": {}
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ml Export",
+        "tags": [
+          "exports"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health_api_health_get",

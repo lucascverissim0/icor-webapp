@@ -14,6 +14,8 @@ import { EvidencePage } from '../features/evidence/EvidencePage'
 import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
 import { RegistrationsPage } from '../features/registrations/RegistrationsPage'
+import { CompletenessPage } from '../features/completeness/CompletenessPage'
+import { ExportPage } from '../features/exports/ExportPage'
 import { parseEvidenceSearch, type EvidenceSearch } from '../lib/evidence-search'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
 import {
@@ -129,6 +131,20 @@ export const evidenceRoute = createRoute({
   errorComponent: RouteErrorFallback,
 })
 
+export const completenessRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/completeness',
+  component: CompletenessPage,
+  errorComponent: RouteErrorFallback,
+})
+
+export const exportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/exports',
+  component: ExportPage,
+  errorComponent: RouteErrorFallback,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   registrationsRoute,
@@ -136,6 +152,8 @@ const routeTree = rootRoute.addChildren([
   configurationRoute,
   opportunitiesRoute,
   evidenceRoute,
+  completenessRoute,
+  exportRoute,
 ])
 
 export function createPlannerRouter(history?: RouterHistory) {
