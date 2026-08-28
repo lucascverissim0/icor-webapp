@@ -10,7 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from icor.domain.evidence import MappingStatus, Measure
-from icor.domain.snapshots import SnapshotStatus, SnapshotVersions
+from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.evidence.release_manifests import load_snapshot_manifest
 from icor.evidence.serialization import sha256_file
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
@@ -118,6 +118,16 @@ class EvidenceReviewService:
         self.candidate_path = candidate_path
         self.database_path = candidate_path / "evidence.sqlite3"
         self.manifest = load_snapshot_manifest(candidate_path / "snapshot.json")
+
+    @classmethod
+    def from_snapshot(
+        cls, database_path: Path, manifest: SnapshotManifest
+    ) -> EvidenceReviewService:
+        service = object.__new__(cls)
+        service.candidate_path = Path(database_path).parent
+        service.database_path = Path(database_path)
+        service.manifest = manifest
+        return service
 
     @classmethod
     def from_candidate(cls, path: Path) -> EvidenceReviewService:

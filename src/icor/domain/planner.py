@@ -137,6 +137,12 @@ class PlanningConfiguration:
     updated_at: datetime
     data_version: str
     model_year_demand: tuple[ModelYearDemand, ...]
+    generation_id: str | None = None
+    generation_identity_kind: str | None = None
+    year_semantics: str = "registration_cohort_year"
+    assumption_ids: tuple[str, ...] = ()
+    reason_codes: tuple[str, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         required_text = (
@@ -160,6 +166,12 @@ class PlanningConfiguration:
             raise ValueError("replacement rate must be between zero and one")
         if not self.sources:
             raise ValueError("at least one source summary is required")
+        if self.generation_id is not None and not self.generation_id.strip():
+            raise ValueError("generation identity cannot be blank")
+        if self.generation_identity_kind is not None and not self.generation_identity_kind.strip():
+            raise ValueError("generation identity kind cannot be blank")
+        if not self.year_semantics.strip():
+            raise ValueError("year semantics are required")
         if self.updated_at.tzinfo is None or self.updated_at.utcoffset() is None:
             raise ValueError("updated_at must include a timezone")
         identities = {

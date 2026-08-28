@@ -13,25 +13,30 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from icor.api.completeness import router as completeness_router
 from icor.api.evidence import router as evidence_router
+from icor.api.exports import router as export_router
 from icor.api.opportunities import router as opportunity_router
 from icor.api.planner import router as planner_router
 from icor.api.registrations import router as registration_router
 from icor.api.schemas import FieldError, ProblemResponse
+from icor.application.completeness import CompletenessQueryService
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
 from icor.application.evidence_review import EvidenceReviewService
+from icor.application.ml_export import MLExportService
 from icor.application.opportunities import OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandReadinessV1
 from icor.application.registrations import RegistrationService
-from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
+from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
+from icor.infrastructure.snapshot_store import SnapshotStore, SnapshotUnavailableError
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_FIXTURE = ROOT / "data" / "demo" / "planner-v1.json"
 DEFAULT_WEB_ORIGIN = "http://127.0.0.1:5173"
 DEFAULT_COVERAGE_DB = ROOT / ".local" / "production-coverage.sqlite3"
+DEFAULT_EVIDENCE_ROOT = ROOT / ".local" / "evidence"
 
 
 def _problem(request: Request, *, code: str, message: str, status_code: int) -> JSONResponse:
@@ -55,29 +60,85 @@ def create_app(
     coverage_repository: CoverageRepository | None = None,
     evidence_service: EvidenceReviewService | None = None,
     registration_service: RegistrationService | None = None,
+    completeness_service=None,
+    ml_export_service=None,
+    export_token: str | None = None,
+    snapshot_root: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
         version="1.0.0",
         description="Local evidence-led contract for vehicle registration analysis and planning.",
     )
-    selected_repository = repository or DemoPlannerRepository.from_path(DEFAULT_FIXTURE)
+    selected_repository = repository
+    snapshot_manifest = None
+    snapshot_ledger = None
+    if selected_repository is None:
+        root = snapshot_root or Path(
+            os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT", DEFAULT_EVIDENCE_ROOT)
+        )
+        try:
+            snapshot_manifest, snapshot_ledger = SnapshotStore(root).open_active_snapshot()
+            if (
+                snapshot_manifest.versions.generation_registry.endswith("-v0")
+                or snapshot_manifest.versions.generation_resolver.endswith("-v0")
+            ):
+                raise SnapshotUnavailableError(
+                    "active snapshot does not contain generation planning data"
+                )
+            selected_repository = SnapshotPlannerRepository(
+                snapshot_ledger, snapshot_manifest
+            )
+        except SnapshotUnavailableError as error:
+            snapshot_manifest = None
+            snapshot_ledger = None
+            LOGGER.warning("Planning snapshot unavailable error_type=%s", type(error).__name__)
     selected_coverage_repository = coverage_repository or SQLiteCoverageRepository(
         Path(os.getenv("ICOR_COVERAGE_DB", DEFAULT_COVERAGE_DB))
     )
-    app.state.planner_service = PlannerService(selected_repository)
-    app.state.coverage_service = ProductionCoverageService(
-        selected_repository, selected_coverage_repository
+    app.state.planner_service = (
+        PlannerService(selected_repository) if selected_repository is not None else None
     )
-    app.state.opportunity_service = OpportunityService(
-        selected_repository,
-        selected_coverage_repository,
-        DemandReadinessV1(),
+    app.state.coverage_service = (
+        ProductionCoverageService(selected_repository, selected_coverage_repository)
+        if selected_repository is not None
+        else None
     )
-    app.state.evidence_service = evidence_service or _configured_evidence_service()
-    app.state.registration_service = (
-        registration_service or _configured_registration_service()
+    app.state.opportunity_service = (
+        OpportunityService(
+            selected_repository,
+            selected_coverage_repository,
+            DemandReadinessV1(),
+        )
+        if selected_repository is not None
+        else None
     )
+    if evidence_service is None and snapshot_manifest is not None and snapshot_ledger is not None:
+        evidence_service = EvidenceReviewService.from_snapshot(
+            snapshot_ledger.path, snapshot_manifest
+        )
+    if (
+        registration_service is None
+        and snapshot_manifest is not None
+        and snapshot_ledger is not None
+    ):
+        registration_service = RegistrationService(snapshot_ledger.path, snapshot_manifest)
+    app.state.snapshot_manifest = snapshot_manifest
+    app.state.snapshot_repository = snapshot_ledger
+    if completeness_service is None and snapshot_manifest is not None:
+        completeness_service = CompletenessQueryService(
+            snapshot_ledger, snapshot_manifest
+        )
+    if ml_export_service is None and snapshot_manifest is not None:
+        ml_export_service = MLExportService(snapshot_ledger, snapshot_manifest.snapshot_id)
+    configured_export_token = export_token or os.getenv("ICOR_EXPORT_TOKEN")
+    if configured_export_token is not None and len(configured_export_token) < 32:
+        raise ValueError("ICOR_EXPORT_TOKEN must contain at least 32 characters")
+    app.state.completeness_service = completeness_service
+    app.state.ml_export_service = ml_export_service
+    app.state.export_token = configured_export_token
+    app.state.evidence_service = evidence_service
+    app.state.registration_service = registration_service
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -127,33 +188,6 @@ def create_app(
     app.include_router(opportunity_router)
     app.include_router(evidence_router)
     app.include_router(registration_router)
+    app.include_router(completeness_router)
+    app.include_router(export_router)
     return app
-
-
-def _configured_evidence_service() -> EvidenceReviewService | None:
-    candidate = os.getenv("ICOR_EVIDENCE_CANDIDATE")
-    if not candidate:
-        return None
-    try:
-        return EvidenceReviewService.from_candidate(Path(candidate))
-    except (OSError, ValueError) as error:
-        LOGGER.error("Evidence candidate unavailable error_type=%s", type(error).__name__)
-        return None
-
-
-def _configured_registration_service() -> RegistrationService | None:
-    active_root = os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT")
-    if active_root:
-        try:
-            return RegistrationService.from_active(Path(active_root))
-        except (OSError, RuntimeError, ValueError) as error:
-            LOGGER.error("Registration snapshot unavailable error_type=%s", type(error).__name__)
-            return None
-    candidate = os.getenv("ICOR_EVIDENCE_CANDIDATE")
-    if not candidate:
-        return None
-    try:
-        return RegistrationService.from_candidate(Path(candidate))
-    except (OSError, RuntimeError, ValueError) as error:
-        LOGGER.error("Registration snapshot unavailable error_type=%s", type(error).__name__)
-        return None

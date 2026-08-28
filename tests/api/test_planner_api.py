@@ -6,15 +6,22 @@ from fastapi.testclient import TestClient
 
 from icor.api.app import create_app
 from icor.domain.planner import PlanningConfiguration
+from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
+FIXTURE = Path(__file__).parents[2] / "data" / "demo" / "planner-v1.json"
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
     coverage = SQLiteCoverageRepository(tmp_path / "coverage.sqlite3")
-    with TestClient(create_app(coverage_repository=coverage)) as test_client:
+    with TestClient(
+        create_app(
+            repository=DemoPlannerRepository.from_path(FIXTURE),
+            coverage_repository=coverage,
+        )
+    ) as test_client:
         yield test_client
 
 

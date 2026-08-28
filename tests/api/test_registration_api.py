@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from icor.api.app import create_app
-from icor.application.evidence_review import EvidenceReviewService
 from icor.application.registrations import (
     RegistrationPage,
     RegistrationQuery,
     RegistrationRow,
     RegistrationSummary,
 )
+from icor.infrastructure.snapshot_store import SnapshotStore, SnapshotUnavailableError
 
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
 
@@ -124,7 +125,9 @@ def test_registration_ranking_passes_bounded_filters() -> None:
 
 def test_registration_routes_fail_closed_without_real_snapshot(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.delenv("ICOR_EVIDENCE_CANDIDATE", raising=False)
-    client = TestClient(create_app())
+    client = TestClient(
+        create_app(snapshot_root=Path("C:/local/missing-active-root"))
+    )
 
     response = client.get("/api/v1/registrations/summary")
 
@@ -154,41 +157,32 @@ def test_openapi_describes_real_registration_contract() -> None:
     assert "demonstration contract" not in app.description.casefold()
 
 
-def test_candidate_path_configures_both_real_data_services(
+def test_candidate_path_is_not_a_runtime_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    candidate = "C:/local/candidate"
-    evidence = object()
-    registrations = StubRegistrationService()
-    monkeypatch.setenv("ICOR_EVIDENCE_CANDIDATE", candidate)
-    monkeypatch.setattr(
-        EvidenceReviewService,
-        "from_candidate",
-        classmethod(lambda cls, path: evidence),
-    )
-    monkeypatch.setattr(
-        "icor.api.app.RegistrationService.from_candidate",
-        lambda path: registrations,
-    )
+    monkeypatch.setenv("ICOR_EVIDENCE_CANDIDATE", "C:/local/candidate")
 
-    app = create_app()
+    app = create_app(snapshot_root=Path("C:/local/missing-active-root"))
 
-    assert app.state.evidence_service is evidence
-    assert app.state.registration_service is registrations
+    assert app.state.evidence_service is None
+    assert app.state.registration_service is None
 
 
 def test_active_root_is_preferred_for_registration_service(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     active_root = "C:/local/evidence"
-    registrations = StubRegistrationService()
+    opened = []
     monkeypatch.setenv("ICOR_EVIDENCE_ACTIVE_ROOT", active_root)
     monkeypatch.setenv("ICOR_EVIDENCE_CANDIDATE", "C:/local/candidate")
-    monkeypatch.setattr(
-        "icor.api.app.RegistrationService.from_active",
-        lambda path: registrations,
-    )
+
+    def unavailable(store):
+        opened.append(store.root)
+        raise SnapshotUnavailableError("missing")
+
+    monkeypatch.setattr(SnapshotStore, "open_active_snapshot", unavailable)
 
     app = create_app()
 
-    assert app.state.registration_service is registrations
+    assert opened == [Path(active_root)]
+    assert app.state.registration_service is None

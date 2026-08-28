@@ -27,7 +27,7 @@ PROBLEM_RESPONSES = {
 }
 
 
-def _service(request: Request) -> PlannerService:
+def _service(request: Request) -> PlannerService | None:
     return request.app.state.planner_service
 
 
@@ -36,8 +36,11 @@ def _correlation_id(request: Request) -> str:
 
 
 @router.get("/api/health", response_model=HealthResponse)
-def health(request: Request) -> HealthResponse:
-    options = _service(request).options()
+def health(request: Request) -> HealthResponse | JSONResponse:
+    service = _service(request)
+    if service is None:
+        return _unavailable(request)
+    options = service.options()
     return HealthResponse(
         status="ok",
         fixture_ready=True,
@@ -51,7 +54,10 @@ def health(request: Request) -> HealthResponse:
     responses=PROBLEM_RESPONSES,
 )
 def planner_options(request: Request) -> PlannerOptionsResponse:
-    return PlannerOptionsResponse.model_validate(_service(request).options())
+    service = _service(request)
+    if service is None:
+        return _unavailable(request)
+    return PlannerOptionsResponse.model_validate(service.options())
 
 
 @router.get(
@@ -70,7 +76,10 @@ def configurations(
     direction: SortDirection = SortDirection.DESC,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
-) -> PlannerPageResponse:
+) -> PlannerPageResponse | JSONResponse:
+    service = _service(request)
+    if service is None:
+        return _unavailable(request)
     query = PlannerQuery(
         markets=tuple(market or ()),
         horizons=tuple(horizon or ()),
@@ -82,7 +91,7 @@ def configurations(
         page=page,
         page_size=page_size,
     )
-    return PlannerPageResponse.model_validate(_service(request).search(query))
+    return PlannerPageResponse.model_validate(service.search(query))
 
 
 @router.get(
@@ -98,7 +107,10 @@ def configuration_detail(
     configuration_id: str,
     request: Request,
 ) -> PlanningConfigurationResponse | JSONResponse:
-    configuration = _service(request).detail(configuration_id)
+    service = _service(request)
+    if service is None:
+        return _unavailable(request)
+    configuration = service.detail(configuration_id)
     if configuration is None:
         problem = ProblemResponse(
             code="configuration_not_found",
@@ -107,3 +119,12 @@ def configuration_detail(
         )
         return JSONResponse(status_code=404, content=problem.model_dump(mode="json"))
     return PlanningConfigurationResponse.model_validate(configuration)
+
+
+def _unavailable(request: Request) -> JSONResponse:
+    problem = ProblemResponse(
+        code="planning_snapshot_unavailable",
+        message="No verified active planning snapshot is available.",
+        correlation_id=_correlation_id(request),
+    )
+    return JSONResponse(status_code=503, content=problem.model_dump(mode="json"))

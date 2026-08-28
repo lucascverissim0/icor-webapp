@@ -67,6 +67,7 @@ class PlannerService:
                 key=_EVIDENCE_RANK.__getitem__,
             )
         )
+        is_validated_snapshot = evidence_statuses == (EvidenceStatus.VALIDATED,)
         return PlannerOptions(
             markets=tuple(sorted({record.market for record in records})),
             horizons=tuple(sorted({record.forecast_horizon for record in records})),
@@ -74,9 +75,16 @@ class PlannerService:
             models=tuple(sorted({record.model for record in records})),
             evidence_statuses=evidence_statuses,
             scenario=ScenarioMetadata(
-                name="Windshield demand planning demonstration",
+                name=(
+                    "Generation replacement opportunity baseline"
+                    if is_validated_snapshot
+                    else "Windshield demand planning demonstration"
+                ),
                 description=(
-                    "Synthetic configuration-level demand for product workflow review."
+                    "Official registration history projected to generation-level "
+                    "replacement opportunity ranges. This is not exact fitment demand."
+                    if is_validated_snapshot
+                    else "Synthetic configuration-level demand for product workflow review."
                 ),
                 evidence_status=evidence_statuses[0],
                 data_version=data_versions.pop(),

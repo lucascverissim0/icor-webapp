@@ -166,12 +166,9 @@ def test_invalid_evidence_query_uses_existing_safe_problem_shape(tmp_path: Path)
     assert response.json()["code"] == "invalid_request"
 
 
-def test_demo_health_contract_remains_unchanged_with_real_evidence_service(tmp_path: Path) -> None:
+def test_health_fails_closed_when_only_evidence_service_is_injected(tmp_path: Path) -> None:
     with _client(tmp_path, StaticEvidenceService()) as client:
         response = client.get("/api/health")
 
-    assert response.json() == {
-        "status": "ok",
-        "fixture_ready": True,
-        "data_version": "demo-planner-v1",
-    }
+    assert response.status_code == 503
+    assert response.json()["code"] == "planning_snapshot_unavailable"

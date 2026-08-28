@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from icor.domain.cohorts import CompletenessRecord
 from icor.domain.evidence import MappingStatus, Measure
 from icor.domain.generations import GenerationIdentityKind
+from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
 from icor.evidence.normalization import stable_evidence_id
 
 _UNUSABLE = frozenset(
@@ -118,3 +120,25 @@ class CompletenessService:
         for start in range(0, len(records), 2_000):
             repository.add_completeness_records(records[start : start + 2_000])
         return len(records)
+
+
+@dataclass(frozen=True, slots=True)
+class CompletenessReport:
+    snapshot_id: str
+    built_at: datetime
+    versions: SnapshotVersions
+    items: tuple[CompletenessRecord, ...]
+
+
+class CompletenessQueryService:
+    def __init__(self, repository, manifest: SnapshotManifest) -> None:
+        self._repository = repository
+        self._manifest = manifest
+
+    def report(self) -> CompletenessReport:
+        return CompletenessReport(
+            snapshot_id=self._manifest.snapshot_id,
+            built_at=self._manifest.built_at,
+            versions=self._manifest.versions,
+            items=self._repository.list_completeness_records(),
+        )

@@ -12,10 +12,7 @@ from icor.application.evidence_review import EvidenceReviewService
 from icor.domain.snapshots import SnapshotManifest
 from icor.infrastructure.snapshot_store import SnapshotStore
 
-_SUPPORTED_GEOGRAPHY = "EU27"
-_SUPPORTED_YEAR = 2024
 _EEA_SOURCE_ID = "eea-co2-monitoring"
-_EEA_PARSER_NAME = "eea_co2_cars_zip_v1"
 _IDENTITY_REGISTRY = "exact-normalized-model-family-v1"
 _EU27_EEA_CODES = (
     "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES", "FI", "FR",
@@ -30,16 +27,16 @@ class RegistrationUnavailableError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class RegistrationQuery:
-    geography: str = _SUPPORTED_GEOGRAPHY
-    year: int = _SUPPORTED_YEAR
+    geography: str = "EU27"
+    year: int = 2024
     search: str | None = None
     page: int = 1
     page_size: int = 25
 
     def validate(self) -> None:
-        if self.geography != _SUPPORTED_GEOGRAPHY:
-            raise ValueError("registration geography is unsupported")
-        if self.year != _SUPPORTED_YEAR:
+        if type(self.geography) is not str or not self.geography.strip():
+            raise ValueError("registration geography is required")
+        if type(self.year) is not int or not 1900 <= self.year <= 2200:
             raise ValueError("registration year is unsupported")
         if type(self.page) is not int or self.page < 1:
             raise ValueError("registration page must be positive")
@@ -124,15 +121,21 @@ class RegistrationService:
             ) from error
 
     def summary(self) -> RegistrationSummary:
-        total, total_registrations = self._totals(search=None)
+        years, geographies = self._available_scope()
+        if not years:
+            raise RegistrationUnavailableError(
+                "canonical registration data is unavailable"
+            )
+        latest_year = max(years)
+        total, total_registrations = self._totals("EU27", latest_year, search=None)
         with self._connect() as connection:
             release_ids = tuple(
                 row["release_id"]
                 for row in connection.execute(
                     """SELECT release_id FROM source_release
-                    WHERE source_id = ? AND parser_name = ? AND publication_status = 'final'
+                    WHERE source_id = ? AND publication_status = 'final'
                     ORDER BY release_id""",
-                    (_EEA_SOURCE_ID, _EEA_PARSER_NAME),
+                    (_EEA_SOURCE_ID,),
                 )
             )
         if not release_ids:
@@ -145,8 +148,8 @@ class RegistrationService:
             built_at=self.manifest.built_at,
             database_sha256=self.manifest.database_sha256,
             identity_registry=self.manifest.versions.identity_registry,
-            geographies=(_SUPPORTED_GEOGRAPHY,),
-            years=(_SUPPORTED_YEAR,),
+            geographies=("EU27", *geographies),
+            years=years,
             total_registrations=total_registrations,
             model_count=total,
             model_year_available=False,
@@ -155,8 +158,15 @@ class RegistrationService:
 
     def ranking(self, query: RegistrationQuery) -> RegistrationPage:
         query.validate()
+        years, geographies = self._available_scope()
+        if query.year not in years or (
+            query.geography != "EU27" and query.geography not in geographies
+        ):
+            raise RegistrationUnavailableError("requested registration scope is unavailable")
         search = query.search.strip() if query.search and query.search.strip() else None
-        grouped_sql, parameters = self._grouped_query(search)
+        grouped_sql, parameters = self._grouped_query(
+            query.geography, query.year, search
+        )
         offset = (query.page - 1) * query.page_size
         with self._connect() as connection:
             rows = connection.execute(
@@ -177,7 +187,9 @@ class RegistrationService:
                 str(rows[0]["complete_total_registrations"])
             )
         else:
-            total, total_registrations = self._totals(search)
+            total, total_registrations = self._totals(
+                query.geography, query.year, search
+            )
         items = tuple(_registration_row(row) for row in rows)
         pages = (total + query.page_size - 1) // query.page_size if total else 0
         return RegistrationPage(
@@ -190,8 +202,10 @@ class RegistrationService:
             snapshot_id=self.manifest.snapshot_id,
         )
 
-    def _totals(self, search: str | None) -> tuple[int, Decimal]:
-        grouped_sql, parameters = self._grouped_query(search)
+    def _totals(
+        self, geography: str, year: int, search: str | None
+    ) -> tuple[int, Decimal]:
+        grouped_sql, parameters = self._grouped_query(geography, year, search)
         with self._connect() as connection:
             row = connection.execute(
                 f"""WITH grouped AS ({grouped_sql})
@@ -201,8 +215,11 @@ class RegistrationService:
             ).fetchone()
         return int(row["model_count"]), Decimal(str(row["total_registrations"]))
 
-    def _grouped_query(self, search: str | None) -> tuple[str, tuple[object, ...]]:
-        country_placeholders = ", ".join("?" for _ in _EU27_EEA_CODES)
+    def _grouped_query(
+        self, geography: str, year: int, search: str | None
+    ) -> tuple[str, tuple[object, ...]]:
+        country_codes = _EU27_EEA_CODES if geography == "EU27" else (geography,)
+        country_placeholders = ", ".join("?" for _ in country_codes)
         confidence = """CASE
             WHEN o.confidence_applied_cap IS NOT NULL AND o.confidence_applied_cap < (
                 o.confidence_authority + o.confidence_publication_status +
@@ -214,12 +231,12 @@ class RegistrationService:
                 o.confidence_independent_agreement END"""
         observation_clauses = [
             "o.release_id IN (SELECT release_id FROM source_release "
-            "WHERE source_id = ? AND parser_name = ? AND publication_status = 'final')",
+            "WHERE source_id = ? AND publication_status = 'final')",
             "o.publication_status = 'final'",
             "o.measure = 'new_registrations'",
             "o.unit = 'vehicles'",
-            "o.period_start = '2024-01-01'",
-            "o.period_end = '2024-12-31'",
+            "o.period_start = ?",
+            "o.period_end = ?",
             "o.mapping_status = 'normalized_label'",
             f"o.geography IN ({country_placeholders})",
         ]
@@ -227,8 +244,9 @@ class RegistrationService:
         parameters: list[object] = [
             _EEA_SOURCE_ID,
             _EEA_SOURCE_ID,
-            _EEA_PARSER_NAME,
-            *_EU27_EEA_CODES,
+            f"{year:04d}-01-01",
+            f"{year:04d}-12-31",
+            *country_codes,
         ]
         if search is not None:
             escaped = _escape_like(search.casefold())
@@ -255,6 +273,30 @@ class RegistrationService:
             WHERE {' AND '.join(vehicle_clauses)}""",
             tuple(parameters),
         )
+
+    def _available_scope(self) -> tuple[tuple[int, ...], tuple[str, ...]]:
+        with self._connect() as connection:
+            years = tuple(
+                int(row["year"])
+                for row in connection.execute(
+                    """SELECT DISTINCT CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER) AS year
+                    FROM observation o JOIN source_release r ON r.release_id = o.release_id
+                    WHERE r.source_id = ? AND r.publication_status = 'final'
+                    AND o.measure = 'new_registrations' ORDER BY year""",
+                    (_EEA_SOURCE_ID,),
+                )
+            )
+            geographies = tuple(
+                row["geography"]
+                for row in connection.execute(
+                    """SELECT DISTINCT o.geography FROM observation o
+                    JOIN source_release r ON r.release_id = o.release_id
+                    WHERE r.source_id = ? AND r.publication_status = 'final'
+                    AND o.measure = 'new_registrations' ORDER BY o.geography""",
+                    (_EEA_SOURCE_ID,),
+                )
+            )
+        return years, geographies
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(

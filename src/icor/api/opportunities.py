@@ -37,11 +37,11 @@ PROBLEM_RESPONSES = {
 }
 
 
-def _opportunity_service(request: Request) -> OpportunityService:
+def _opportunity_service(request: Request) -> OpportunityService | None:
     return request.app.state.opportunity_service
 
 
-def _coverage_service(request: Request) -> ProductionCoverageService:
+def _coverage_service(request: Request) -> ProductionCoverageService | None:
     return request.app.state.coverage_service
 
 
@@ -78,8 +78,11 @@ def opportunities(
     group_by: OpportunityGroupBy = OpportunityGroupBy.BRAND,
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
-) -> OpportunityPageResponse:
-    result = _opportunity_service(request).list(_query(group_by, market, horizon))
+) -> OpportunityPageResponse | JSONResponse:
+    service = _opportunity_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
+    result = service.list(_query(group_by, market, horizon))
     return OpportunityPageResponse.model_validate(result)
 
 
@@ -95,7 +98,10 @@ def opportunity_configurations(
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
 ) -> list[OpportunityDrillDownResponse] | JSONResponse:
-    rows = _opportunity_service(request).drill_down(
+    service = _opportunity_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
+    rows = service.drill_down(
         group_id, _query(group_by, market, horizon)
     )
     if not rows:
@@ -113,10 +119,15 @@ def opportunity_configurations(
     response_model=list[ProductionCoverageResponse],
     responses={500: {"model": ProblemResponse}},
 )
-def production_coverage(request: Request) -> list[ProductionCoverageResponse]:
+def production_coverage(
+    request: Request,
+) -> list[ProductionCoverageResponse] | JSONResponse:
+    service = _coverage_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
     return [
         ProductionCoverageResponse.model_validate(row)
-        for row in _coverage_service(request).list_all()
+        for row in service.list_all()
     ]
 
 
@@ -163,8 +174,11 @@ def _mutation_error(request: Request, error: Exception) -> JSONResponse:
 def create_production_coverage(
     payload: ProductionCoverageRequest, request: Request
 ) -> ProductionCoverageResponse | JSONResponse:
+    service = _coverage_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
     try:
-        saved = _coverage_service(request).create(_command(payload))
+        saved = service.create(_command(payload))
     except (CanonicalCoverageError, DuplicateCoverageError) as error:
         return _mutation_error(request, error)
     return ProductionCoverageResponse.model_validate(saved)
@@ -178,8 +192,11 @@ def create_production_coverage(
 def update_production_coverage(
     coverage_id: str, payload: ProductionCoverageRequest, request: Request
 ) -> ProductionCoverageResponse | JSONResponse:
+    service = _coverage_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
     try:
-        saved = _coverage_service(request).update(coverage_id, _command(payload))
+        saved = service.update(coverage_id, _command(payload))
     except (
         CanonicalCoverageError,
         DuplicateCoverageError,
@@ -197,8 +214,20 @@ def update_production_coverage(
 def delete_production_coverage(
     coverage_id: str, request: Request
 ) -> DeleteCoverageResponse | JSONResponse:
+    service = _coverage_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
     try:
-        _coverage_service(request).delete(coverage_id)
+        service.delete(coverage_id)
     except CoverageNotFoundError as error:
         return _mutation_error(request, error)
     return DeleteCoverageResponse(coverage_id=coverage_id, deleted=True)
+
+
+def _snapshot_unavailable(request: Request) -> JSONResponse:
+    return _problem(
+        request,
+        status_code=503,
+        code="planning_snapshot_unavailable",
+        message="No verified active planning snapshot is available.",
+    )

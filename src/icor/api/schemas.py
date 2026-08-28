@@ -96,6 +96,12 @@ class PlanningConfigurationResponse(ApiModel):
     sources: tuple[SourceSummaryResponse, ...]
     updated_at: datetime
     data_version: str
+    generation_id: str | None
+    generation_identity_kind: str | None
+    year_semantics: str
+    assumption_ids: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
 
 
 class PlannerSummaryResponse(ApiModel):
@@ -212,6 +218,32 @@ class SnapshotVersionsResponse(ApiModel):
     survival_method: str
     hazard_method: str
     forecast_method: str
+    generation_registry: str
+    generation_resolver: str
+
+
+class CompletenessRecordResponse(ApiModel):
+    completeness_id: str
+    geography: str
+    year: int
+    release_count: int
+    observation_count: int
+    usable_observation_count: int
+    assigned_observation_count: int
+    canonical_family_count: int
+    sourced_generation_count: int
+    estimated_generation_count: int
+    forecastable_count: int
+    evidence_only_count: int
+    rejected_record_count: int
+    reason_codes: tuple[str, ...]
+
+
+class CompletenessResponse(ApiModel):
+    snapshot_id: str
+    built_at: datetime
+    versions: SnapshotVersionsResponse
+    items: tuple[CompletenessRecordResponse, ...]
 
 
 class EvidenceReleaseSummaryResponse(ApiModel):

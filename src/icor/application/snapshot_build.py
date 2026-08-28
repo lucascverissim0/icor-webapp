@@ -395,34 +395,54 @@ class SnapshotBuilder:
     def _replay_canonically(
         source: SQLiteEvidenceRepository, target: SQLiteEvidenceRepository
     ) -> None:
-        for release in source.list_releases():
-            target.add_release(release)
-        for vehicle in source.list_vehicles():
-            target.add_vehicle(vehicle)
-        observations = source.list_observations()
-        if observations:
-            target.add_observations(observations)
-        mappings = source.list_mappings()
-        if mappings:
-            target.add_identity_attributions((), (), mappings)
-        published_values = source.list_published_values()
-        if published_values:
-            target.add_published_values(published_values)
-        generations = source.list_generations()
-        if generations:
-            target.add_generations(generations)
-        assignments = source.list_generation_assignments()
-        if assignments:
-            target.add_generation_assignments(assignments)
-        cohorts = source.list_cohort_estimates()
-        if cohorts:
-            target.add_cohort_estimates(cohorts)
-        opportunities = source.list_opportunity_estimates()
-        if opportunities:
-            target.add_opportunity_estimates(opportunities)
-        completeness = source.list_completeness_records()
-        if completeness:
-            target.add_completeness_records(completeness)
+        tables = (
+            "schema_version",
+            "source_release",
+            "canonical_vehicle",
+            "observation",
+            "identity_mapping",
+            "published_value",
+            "published_value_input",
+            "snapshot",
+            "snapshot_release",
+            "generation_entry",
+            "generation_assignment",
+            "generation_alternative",
+            "cohort_estimate",
+            "cohort_input",
+            "opportunity_estimate",
+            "opportunity_input",
+            "completeness_record",
+        )
+        with closing(sqlite3.connect(target.path)) as connection:
+            connection.execute("ATTACH DATABASE ? AS source", (str(source.path),))
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                for table in reversed(tables):
+                    connection.execute(f"DELETE FROM main.{table}")
+                for table in tables:
+                    metadata = connection.execute(
+                        f"PRAGMA main.table_info({table})"
+                    ).fetchall()
+                    columns = tuple(row[1] for row in metadata)
+                    primary_key = tuple(
+                        row[1]
+                        for row in sorted(metadata, key=lambda item: item[5])
+                        if row[5]
+                    )
+                    order = primary_key or columns
+                    selected = ", ".join(f'"{column}"' for column in columns)
+                    ordering = ", ".join(f'"{column}"' for column in order)
+                    connection.execute(
+                        f"INSERT INTO main.{table} ({selected}) "
+                        f"SELECT {selected} FROM source.{table} ORDER BY {ordering}"
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.execute("DETACH DATABASE source")
 
     @staticmethod
     def _finalize_database(path: Path) -> None:
