@@ -111,3 +111,62 @@ def test_sparse_series_without_backtest_history_remains_evidence_only() -> None:
     assert result.cohort_count == 0
     assert result.opportunity_count == 0
     assert result.evidence_only_series_count == 1
+
+
+def test_planning_flushes_bounded_dependency_complete_series_batches() -> None:
+    class StreamingRepository(Repository):
+        def __init__(self) -> None:
+            super().__init__()
+            france = tuple(
+                SimpleNamespace(
+                    **{
+                        **vars(item),
+                        "observation_id": item.observation_id.replace("golf", "golf-fr"),
+                        "geography": "FR",
+                    }
+                )
+                for item in self.observations
+            )
+            self.observations += france
+            self.assignments += tuple(
+                SimpleNamespace(
+                    observation_id=item.observation_id,
+                    selected_generation_id=self.generation.generation_id,
+                    confidence=ConfidenceBand.LOW,
+                )
+                for item in france
+            )
+            self.write_events: list[tuple[str, int]] = []
+
+        def add_cohort_estimates(self, values):
+            batch = tuple(values)
+            self.write_events.append(("cohort", len(batch)))
+            super().add_cohort_estimates(batch)
+
+        def add_opportunity_estimates(self, values):
+            batch = tuple(values)
+            cohort_ids = {item.cohort_id for item in self.cohorts}
+            assert all(
+                set(item.input_cohort_ids) <= cohort_ids for item in batch
+            ), "opportunities must be written only after their cohorts"
+            self.write_events.append(("opportunity", len(batch)))
+            super().add_opportunity_estimates(batch)
+
+    repository = StreamingRepository()
+
+    result = GenerationPlanningService(batch_size=5).apply(
+        repository, horizons=(2028,), seed=20260827
+    )
+
+    assert result.cohort_count == 18
+    assert result.opportunity_count == 2
+    assert max(size for _, size in repository.write_events) <= 5
+    first_opportunity = next(
+        index
+        for index, event in enumerate(repository.write_events)
+        if event[0] == "opportunity"
+    )
+    assert any(
+        event[0] == "cohort"
+        for event in repository.write_events[first_opportunity + 1 :]
+    )

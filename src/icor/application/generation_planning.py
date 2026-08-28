@@ -17,7 +17,7 @@ from icor.forecasting.replacement_hazard import ReplacementHazardModel
 from icor.forecasting.survival import CohortSurvivalModel
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 
-_BATCH_SIZE = 2_000
+_BATCH_SIZE = 20_000
 _SUPPORTED_HORIZONS = frozenset({2028, 2031})
 
 
@@ -54,7 +54,10 @@ class _AnnualValue:
 class GenerationPlanningService:
     """Create one reproducible cohort/opportunity baseline from assigned evidence."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, batch_size: int = _BATCH_SIZE) -> None:
+        if type(batch_size) is not int or batch_size < 1:
+            raise ValueError("planning batch size must be a positive integer")
+        self.batch_size = batch_size
         self.reconciler = RegistrationReconciler()
         self.forecaster = RegistrationForecaster()
         self.survival = CohortSurvivalModel()
@@ -153,8 +156,27 @@ class GenerationPlanningService:
                 result.status,
             )
 
-        cohorts: list[CohortEstimate] = []
-        opportunities: list[OpportunityEstimate] = []
+        cohort_buffer: list[CohortEstimate] = []
+        opportunity_buffer: list[OpportunityEstimate] = []
+        cohort_count = opportunity_count = 0
+
+        def flush_planning_records() -> None:
+            nonlocal cohort_count, opportunity_count
+            _write_batches(
+                repository.add_cohort_estimates,
+                cohort_buffer,
+                batch_size=self.batch_size,
+            )
+            _write_batches(
+                repository.add_opportunity_estimates,
+                opportunity_buffer,
+                batch_size=self.batch_size,
+            )
+            cohort_count += len(cohort_buffer)
+            opportunity_count += len(opportunity_buffer)
+            cohort_buffer.clear()
+            opportunity_buffer.clear()
+
         evidence_only_series_count = 0
         for series_key in sorted(series):
             generation_id, vehicle_id, geography = series_key
@@ -217,7 +239,7 @@ class GenerationPlanningService:
                         geography=geography,
                     )
                     opportunity_components.append((fleet, hazard))
-                cohorts.extend(horizon_cohorts)
+                cohort_buffer.extend(horizon_cohorts)
                 fleet_p10 = sum(
                     (item.active_fleet_p10 for item in horizon_cohorts), Decimal(0)
                 )
@@ -245,7 +267,7 @@ class GenerationPlanningService:
                         ),
                     ),
                 )
-                opportunities.append(
+                opportunity_buffer.append(
                     OpportunityEstimate(
                         opportunity_id=stable_evidence_id(
                             "opportunity", generation_id, geography, str(horizon)
@@ -274,12 +296,16 @@ class GenerationPlanningService:
                         ),
                     )
                 )
+            if (
+                len(cohort_buffer) >= self.batch_size
+                or len(opportunity_buffer) >= self.batch_size
+            ):
+                flush_planning_records()
 
-        _write_batches(repository.add_cohort_estimates, cohorts)
-        _write_batches(repository.add_opportunity_estimates, opportunities)
+        flush_planning_records()
         return GenerationPlanningResult(
-            len(cohorts),
-            len(opportunities),
+            cohort_count,
+            opportunity_count,
             selected_count,
             excluded_count,
             evidence_only_series_count,
@@ -354,6 +380,6 @@ def _effective_hazard(components: list, position: int) -> Decimal:
     return opportunity_total / fleet_total
 
 
-def _write_batches(write, records: list) -> None:
-    for start in range(0, len(records), _BATCH_SIZE):
-        write(records[start : start + _BATCH_SIZE])
+def _write_batches(write, records: list, *, batch_size: int) -> None:
+    for start in range(0, len(records), batch_size):
+        write(records[start : start + batch_size])
