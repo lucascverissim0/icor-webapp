@@ -1,7 +1,9 @@
 # ICOR GitHub Codespaces Preview and Remote Evidence Storage Design
 
-**Date:** 2026-08-28  
-**Status:** Approved in conversation; awaiting written-spec review  
+**Date:** 2026-08-28
+
+**Status:** Approved in conversation; awaiting written-spec review
+
 **Scope:** Temporary authenticated ICOR preview, remote snapshot construction, and
 remote evidence retention on a personal GitHub Codespace
 
@@ -244,4 +246,3 @@ This design is implemented only when all of the following are true:
 8. `main`, the protected production checkout, and unrelated user changes remain
    untouched.
 9. The durable handoff records exact remote lifecycle and recovery instructions.
-
