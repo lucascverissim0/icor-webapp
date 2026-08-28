@@ -16,6 +16,8 @@ def make_versions(**overrides: object) -> SnapshotVersions:
         "survival_method": "survival-v1",
         "hazard_method": "hazard-v1",
         "forecast_method": "forecast-v1",
+        "generation_registry": "generation-registry-v1",
+        "generation_resolver": "generation-resolver-v1",
     }
     values.update(overrides)
     return SnapshotVersions(**values)  # type: ignore[arg-type]
@@ -78,6 +80,8 @@ def test_snapshot_manifest_requires_stable_identifier_and_nonblank_warnings() ->
 def test_snapshot_versions_require_every_reproducibility_version() -> None:
     with pytest.raises(ValueError, match="version"):
         make_versions(forecast_method="")
+    with pytest.raises(ValueError, match="version"):
+        make_versions(generation_resolver="")
 
 
 def test_snapshot_contracts_are_frozen_and_revalidate_on_replace() -> None:

@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from icor.domain.cohorts import CohortEstimate, CompletenessRecord, OpportunityEstimate
 from icor.domain.evidence import (
     CanonicalVehicle,
+    ConfidenceBand,
     EvidenceConfidence,
     IdentityMapping,
     MappingStatus,
@@ -20,6 +22,13 @@ from icor.domain.evidence import (
     PublishedValue,
     ReleaseManifest,
     ValueStatus,
+)
+from icor.domain.generations import (
+    AssignmentMethod,
+    GenerationAlternative,
+    GenerationAssignment,
+    GenerationEntry,
+    GenerationIdentityKind,
 )
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.infrastructure.sqlite_evidence_repository import (
@@ -176,10 +185,141 @@ def seed_dependencies(
     repository.add_observations((observation,))
 
 
-def test_empty_database_migrates_to_schema_v3(tmp_path: Path) -> None:
+def generation_records(
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+) -> tuple[
+    GenerationEntry,
+    GenerationAssignment,
+    CohortEstimate,
+    OpportunityEstimate,
+    CompletenessRecord,
+]:
+    generation = GenerationEntry(
+        generation_id="generation-vw-golf-8-de",
+        canonical_vehicle_id=vehicle.vehicle_id,
+        display_name="Golf VIII",
+        market="DE",
+        start_month=date(2019, 10, 1),
+        end_month=None,
+        identity_kind=GenerationIdentityKind.REGISTRY_CORROBORATED,
+        body_style=None,
+        facelift=None,
+        platform="MQB Evo",
+        evidence_ids=("evidence-vw-golf-history",),
+        dependency_groups=("volkswagen-archive",),
+        confidence_reasons=("Reviewed European generation window.",),
+        registry_version="de-generation-registry-v1",
+    )
+    assignment = GenerationAssignment(
+        assignment_id="assignment-eea-de-golf-2024",
+        observation_id=observation.observation_id,
+        selected_generation_id=generation.generation_id,
+        alternatives=(
+            GenerationAlternative(
+                "generation-vw-golf-7-de",
+                2,
+                "generation-window-ended",
+            ),
+        ),
+        method=AssignmentMethod.UNIQUE_WINDOW,
+        evidence_ids=("evidence-vw-golf-history",),
+        confidence=ConfidenceBand.HIGH,
+        reason_codes=("unique-active-window",),
+        training_weight=Decimal("0.85"),
+        resolver_version="generation-resolver-v1",
+        registry_version="de-generation-registry-v1",
+        reviewed_at=mapping_reviewed_at(),
+    )
+    cohort = CohortEstimate(
+        cohort_id="cohort-vw-golf-8-de-2024-2028",
+        generation_id=generation.generation_id,
+        canonical_vehicle_id=vehicle.vehicle_id,
+        geography="DE",
+        registration_cohort_year=2024,
+        as_of_year=2028,
+        registrations=Decimal("1"),
+        active_fleet_p10=Decimal("0.70"),
+        active_fleet_p50=Decimal("0.75"),
+        active_fleet_p90=Decimal("0.80"),
+        input_observation_ids=(observation.observation_id,),
+        survival_method="de-passenger-car-survival-v1",
+        confidence=ConfidenceBand.MEDIUM,
+        reason_codes=("cohort-survival-reconstruction",),
+    )
+    opportunity = OpportunityEstimate(
+        opportunity_id="opportunity-vw-golf-8-de-2028",
+        generation_id=generation.generation_id,
+        canonical_vehicle_id=vehicle.vehicle_id,
+        geography="DE",
+        horizon_year=2028,
+        p10=Decimal("0.008"),
+        p50=Decimal("0.010"),
+        p90=Decimal("0.014"),
+        active_fleet_p50=Decimal("0.75"),
+        input_cohort_ids=(cohort.cohort_id,),
+        hazard_method="assumption-led-windshield-hazard-v1",
+        forecast_method="generation-opportunity-v1",
+        confidence=ConfidenceBand.LOW,
+        assumption_ids=("assumption-windshield-hazard-de-v1",),
+        reason_codes=("uncalibrated-proprietary-fitment",),
+    )
+    completeness = CompletenessRecord(
+        completeness_id="completeness-de-2024",
+        geography="DE",
+        year=2024,
+        release_count=1,
+        observation_count=1,
+        usable_observation_count=1,
+        assigned_observation_count=1,
+        canonical_family_count=1,
+        sourced_generation_count=1,
+        estimated_generation_count=0,
+        forecastable_count=1,
+        evidence_only_count=0,
+        rejected_record_count=0,
+        reason_codes=("annual-completeness",),
+    )
+    return generation, assignment, cohort, opportunity, completeness
+
+
+def test_repository_round_trips_generation_planning_records(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+) -> None:
+    seed_dependencies(repository, release, vehicle, observation)
+    generation, assignment, cohort, opportunity, completeness = generation_records(
+        vehicle,
+        observation,
+    )
+    alternative = replace(
+        generation,
+        generation_id="generation-vw-golf-7-de",
+        display_name="Golf VII",
+        start_month=date(2012, 9, 1),
+        end_month=date(2020, 12, 1),
+        platform="MQB",
+    )
+
+    repository.add_generations((alternative, generation))
+    repository.add_generation_assignments((assignment,))
+    repository.add_cohort_estimates((cohort,))
+    repository.add_opportunity_estimates((opportunity,))
+    repository.add_completeness_records((completeness,))
+
+    assert repository.list_generations() == (alternative, generation)
+    assert repository.list_generation_assignments() == (assignment,)
+    assert repository.list_cohort_estimates() == (cohort,)
+    assert repository.list_opportunity_estimates() == (opportunity,)
+    assert repository.list_completeness_records() == (completeness,)
+
+
+def test_empty_database_migrates_to_schema_v4(tmp_path: Path) -> None:
     repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
 
-    assert repository.schema_version == 3
+    assert repository.schema_version == 4
 
 
 def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path) -> None:
@@ -191,7 +331,7 @@ def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path)
 
     repository = SQLiteEvidenceRepository(path, writable=True)
 
-    assert repository.schema_version == 3
+    assert repository.schema_version == 4
     with repository._connect() as connection:
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(observation)")
@@ -199,11 +339,38 @@ def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path)
     assert {"registration_cohort_year", "manufacture_year", "model_year"} <= columns
 
 
+def test_writable_schema_v3_migrates_forward_with_generation_tables(tmp_path: Path) -> None:
+    path = tmp_path / "schema-v3.sqlite3"
+    uninitialized = object.__new__(SQLiteEvidenceRepository)
+    with sqlite3.connect(path) as connection:
+        for statement in uninitialized._v3_migration_statements():
+            connection.execute(statement)
+
+    repository = SQLiteEvidenceRepository(path, writable=True)
+
+    assert repository.schema_version == 4
+    with repository._connect() as connection:
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert {
+        "generation_entry",
+        "generation_assignment",
+        "generation_alternative",
+        "cohort_estimate",
+        "opportunity_estimate",
+        "completeness_record",
+    } <= tables
+
+
 def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-        connection.execute("INSERT INTO schema_version (version) VALUES (4)")
+        connection.execute("INSERT INTO schema_version (version) VALUES (5)")
 
     with pytest.raises(EvidenceSchemaError, match="newer"):
         SQLiteEvidenceRepository(path, writable=True)

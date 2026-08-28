@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 
+from icor.application.generation_mapping import GenerationMappingService
 from icor.application.snapshot_build import EvidenceLoader
 from icor.domain.snapshots import SnapshotVersions
 from icor.evidence.identity import (
@@ -29,6 +30,8 @@ OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     survival_method="not-applied-v1",
     hazard_method="not-applied-v1",
     forecast_method="not-applied-v1",
+    generation_registry="generation-registry-v1",
+    generation_resolver="generation-resolver-v1",
 )
 
 
@@ -54,3 +57,17 @@ def official_repository_transformer(
         ExactNormalizedIdentityResolver(),
         reviewed_at=reviewed_at,
     )
+
+
+def official_repository_finalizer(
+    repository: SQLiteEvidenceRepository,
+    reviewed_at: datetime,
+) -> None:
+    """Materialize deterministic generation assignments after official loading."""
+
+    result = GenerationMappingService(
+        registry_version=OFFICIAL_SOURCE_VERSIONS.generation_registry,
+        resolver_version=OFFICIAL_SOURCE_VERSIONS.generation_resolver,
+    ).apply(repository, reviewed_at=reviewed_at)
+    if result.unassigned_ids or result.assigned_count != result.usable_count:
+        raise ValueError("official generation mapping is incomplete")

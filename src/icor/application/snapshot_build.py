@@ -55,6 +55,16 @@ class RepositoryTransformer(Protocol):
     ) -> object: ...
 
 
+class RepositoryFinalizer(Protocol):
+    """Materialize deterministic derived records after all releases are loaded."""
+
+    def __call__(
+        self,
+        repository: SQLiteEvidenceRepository,
+        reviewed_at: datetime,
+    ) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class SnapshotBuildRequest:
     """All inputs that determine one snapshot's identity and contents."""
@@ -152,6 +162,7 @@ class SnapshotBuilder:
         snapshot_validator: SnapshotValidator | None = None,
         filesystem: SnapshotFilesystem | None = None,
         repository_transformer: RepositoryTransformer | None = None,
+        repository_finalizer: RepositoryFinalizer | None = None,
     ) -> None:
         self.root = Path(root)
         self.release_store = release_store
@@ -160,6 +171,7 @@ class SnapshotBuilder:
         self.snapshot_validator = snapshot_validator or SnapshotValidator()
         self.filesystem = filesystem or SnapshotFilesystem()
         self.repository_transformer = repository_transformer
+        self.repository_finalizer = repository_finalizer
 
     def build(self, request: SnapshotBuildRequest) -> SnapshotBuildResult:
         """Build and validate one deterministic candidate without promoting it."""
@@ -256,6 +268,8 @@ class SnapshotBuilder:
             loader_releases,
             cast(SQLiteEvidenceRepository, loader_repository),
         )
+        if self.repository_finalizer is not None:
+            self.repository_finalizer(scratch_repository, request.build_as_of)
 
         database_path = staging_path / "evidence.sqlite3"
         repository = SQLiteEvidenceRepository(database_path, writable=True)
@@ -373,6 +387,21 @@ class SnapshotBuilder:
         published_values = source.list_published_values()
         if published_values:
             target.add_published_values(published_values)
+        generations = source.list_generations()
+        if generations:
+            target.add_generations(generations)
+        assignments = source.list_generation_assignments()
+        if assignments:
+            target.add_generation_assignments(assignments)
+        cohorts = source.list_cohort_estimates()
+        if cohorts:
+            target.add_cohort_estimates(cohorts)
+        opportunities = source.list_opportunity_estimates()
+        if opportunities:
+            target.add_opportunity_estimates(opportunities)
+        completeness = source.list_completeness_records()
+        if completeness:
+            target.add_completeness_records(completeness)
 
     @staticmethod
     def _finalize_database(path: Path) -> None:

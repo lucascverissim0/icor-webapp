@@ -12,8 +12,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, TypeVar
 
+from icor.domain.cohorts import CohortEstimate, CompletenessRecord, OpportunityEstimate
 from icor.domain.evidence import (
     CanonicalVehicle,
+    ConfidenceBand,
     EvidenceConfidence,
     IdentityMapping,
     MappingStatus,
@@ -24,6 +26,13 @@ from icor.domain.evidence import (
     PublishedValue,
     ReleaseManifest,
     ValueStatus,
+)
+from icor.domain.generations import (
+    AssignmentMethod,
+    GenerationAlternative,
+    GenerationAssignment,
+    GenerationEntry,
+    GenerationIdentityKind,
 )
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.evidence.serialization import canonical_json_bytes
@@ -41,7 +50,7 @@ class ImmutableEvidenceError(RuntimeError):
     """A write would mutate the ledger or refer to unavailable evidence."""
 
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _SQLITE_MULTI_CHARACTER_OPERATORS = (
     "->>",
     "!=",
@@ -119,6 +128,32 @@ class SQLiteEvidenceRepository:
     def add_snapshot(self, snapshot: SnapshotManifest) -> None:
         self._write(lambda connection: self._insert_snapshot(connection, snapshot))
 
+    def add_generations(self, generations: Sequence[GenerationEntry]) -> None:
+        self._write(lambda connection: self._insert_generations(connection, generations))
+
+    def add_generation_assignments(
+        self,
+        assignments: Sequence[GenerationAssignment],
+    ) -> None:
+        self._write(
+            lambda connection: self._insert_generation_assignments(connection, assignments)
+        )
+
+    def add_cohort_estimates(self, estimates: Sequence[CohortEstimate]) -> None:
+        self._write(lambda connection: self._insert_cohorts(connection, estimates))
+
+    def add_opportunity_estimates(
+        self,
+        estimates: Sequence[OpportunityEstimate],
+    ) -> None:
+        self._write(lambda connection: self._insert_opportunities(connection, estimates))
+
+    def add_completeness_records(
+        self,
+        records: Sequence[CompletenessRecord],
+    ) -> None:
+        self._write(lambda connection: self._insert_completeness(connection, records))
+
     def get_release(self, release_id: str) -> ReleaseManifest | None:
         return self._get_one("SELECT * FROM source_release WHERE release_id = ?", (release_id,), self._release)
 
@@ -169,6 +204,45 @@ class SQLiteEvidenceRepository:
                 for row in connection.execute("SELECT * FROM snapshot ORDER BY snapshot_id")
             )
 
+    def list_generations(self) -> tuple[GenerationEntry, ...]:
+        return self._list(
+            "SELECT * FROM generation_entry ORDER BY generation_id",
+            self._generation,
+        )
+
+    def list_generation_assignments(self) -> tuple[GenerationAssignment, ...]:
+        with self._connect() as connection:
+            return tuple(
+                self._generation_assignment(connection, row)
+                for row in connection.execute(
+                    "SELECT * FROM generation_assignment ORDER BY assignment_id"
+                )
+            )
+
+    def list_cohort_estimates(self) -> tuple[CohortEstimate, ...]:
+        with self._connect() as connection:
+            return tuple(
+                self._cohort(connection, row)
+                for row in connection.execute(
+                    "SELECT * FROM cohort_estimate ORDER BY cohort_id"
+                )
+            )
+
+    def list_opportunity_estimates(self) -> tuple[OpportunityEstimate, ...]:
+        with self._connect() as connection:
+            return tuple(
+                self._opportunity(connection, row)
+                for row in connection.execute(
+                    "SELECT * FROM opportunity_estimate ORDER BY opportunity_id"
+                )
+            )
+
+    def list_completeness_records(self) -> tuple[CompletenessRecord, ...]:
+        return self._list(
+            "SELECT * FROM completeness_record ORDER BY completeness_id",
+            self._completeness,
+        )
+
     def _prepare_writable_schema(self) -> None:
         existing = self.path.exists() and self.path.stat().st_size > 0
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,6 +254,9 @@ class SQLiteEvidenceRepository:
                 version = self._validate_schema(connection)
                 if version == 2:
                     self._migrate_v2_to_v3(connection)
+                    version = 3
+                if version == 3:
+                    self._migrate_v3_to_v4(connection)
 
     def _migrate_v2_to_v3(self, connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
@@ -194,6 +271,23 @@ class SQLiteEvidenceRepository:
                 "CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 3))"
             )
             connection.execute("INSERT INTO schema_version (version) VALUES (3)")
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        self._validate_schema(connection)
+
+    def _migrate_v3_to_v4(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in self._v4_extension_statements():
+                connection.execute(statement)
+            connection.execute("DROP TABLE schema_version")
+            connection.execute(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 4))"
+            )
+            connection.execute("INSERT INTO schema_version (version) VALUES (4)")
         except BaseException:
             connection.rollback()
             raise
@@ -238,6 +332,15 @@ class SQLiteEvidenceRepository:
             connection.commit()
 
     def _migration_statements(self) -> tuple[str, ...]:
+        return self._schema_statements(
+            version=4,
+            model_year_sql="INTEGER",
+            observation_year_sql=(
+                ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
+            ),
+        ) + self._v4_extension_statements()
+
+    def _v3_migration_statements(self) -> tuple[str, ...]:
         return self._schema_statements(
             version=3,
             model_year_sql="INTEGER",
@@ -351,6 +454,105 @@ class SQLiteEvidenceRepository:
             if statement.strip()
         )
 
+    def _v4_extension_statements(self) -> tuple[str, ...]:
+        identity_kinds = self._enum_check(GenerationIdentityKind)
+        assignment_methods = self._enum_check(AssignmentMethod)
+        confidence_bands = self._enum_check(ConfidenceBand)
+        return tuple(
+            statement.strip()
+            for statement in f"""
+                CREATE TABLE generation_entry (
+                    generation_id TEXT PRIMARY KEY,
+                    canonical_vehicle_id TEXT NOT NULL REFERENCES canonical_vehicle(vehicle_id),
+                    display_name TEXT NOT NULL, market TEXT NOT NULL,
+                    start_month TEXT NOT NULL, end_month TEXT,
+                    identity_kind TEXT NOT NULL CHECK (identity_kind IN {identity_kinds}),
+                    body_style TEXT, facelift TEXT, platform TEXT,
+                    evidence_ids TEXT NOT NULL, dependency_groups TEXT NOT NULL,
+                    confidence_reasons TEXT NOT NULL, registry_version TEXT NOT NULL
+                );
+                CREATE TABLE generation_assignment (
+                    assignment_id TEXT PRIMARY KEY,
+                    observation_id TEXT NOT NULL REFERENCES observation(observation_id),
+                    selected_generation_id TEXT NOT NULL REFERENCES generation_entry(generation_id),
+                    method TEXT NOT NULL CHECK (method IN {assignment_methods}),
+                    evidence_ids TEXT NOT NULL,
+                    confidence TEXT NOT NULL CHECK (confidence IN {confidence_bands}),
+                    reason_codes TEXT NOT NULL, training_weight TEXT NOT NULL,
+                    resolver_version TEXT NOT NULL, registry_version TEXT NOT NULL,
+                    reviewed_at TEXT NOT NULL
+                );
+                CREATE TABLE generation_alternative (
+                    assignment_id TEXT NOT NULL REFERENCES generation_assignment(assignment_id),
+                    generation_id TEXT NOT NULL REFERENCES generation_entry(generation_id),
+                    alternative_rank INTEGER NOT NULL, loss_reason TEXT NOT NULL,
+                    PRIMARY KEY (assignment_id, generation_id),
+                    UNIQUE (assignment_id, alternative_rank)
+                );
+                CREATE TABLE cohort_estimate (
+                    cohort_id TEXT PRIMARY KEY,
+                    generation_id TEXT NOT NULL REFERENCES generation_entry(generation_id),
+                    canonical_vehicle_id TEXT NOT NULL REFERENCES canonical_vehicle(vehicle_id),
+                    geography TEXT NOT NULL, registration_cohort_year INTEGER NOT NULL,
+                    as_of_year INTEGER NOT NULL, registrations TEXT NOT NULL,
+                    active_fleet_p10 TEXT NOT NULL, active_fleet_p50 TEXT NOT NULL,
+                    active_fleet_p90 TEXT NOT NULL, survival_method TEXT NOT NULL,
+                    confidence TEXT NOT NULL CHECK (confidence IN {confidence_bands}),
+                    reason_codes TEXT NOT NULL
+                );
+                CREATE TABLE cohort_input (
+                    cohort_id TEXT NOT NULL REFERENCES cohort_estimate(cohort_id),
+                    observation_id TEXT NOT NULL REFERENCES observation(observation_id),
+                    input_position INTEGER NOT NULL,
+                    PRIMARY KEY (cohort_id, observation_id),
+                    UNIQUE (cohort_id, input_position)
+                );
+                CREATE TABLE opportunity_estimate (
+                    opportunity_id TEXT PRIMARY KEY,
+                    generation_id TEXT NOT NULL REFERENCES generation_entry(generation_id),
+                    canonical_vehicle_id TEXT NOT NULL REFERENCES canonical_vehicle(vehicle_id),
+                    geography TEXT NOT NULL, horizon_year INTEGER NOT NULL,
+                    p10 TEXT NOT NULL, p50 TEXT NOT NULL, p90 TEXT NOT NULL,
+                    active_fleet_p50 TEXT NOT NULL, hazard_method TEXT NOT NULL,
+                    forecast_method TEXT NOT NULL,
+                    confidence TEXT NOT NULL CHECK (confidence IN {confidence_bands}),
+                    assumption_ids TEXT NOT NULL, reason_codes TEXT NOT NULL
+                );
+                CREATE TABLE opportunity_input (
+                    opportunity_id TEXT NOT NULL REFERENCES opportunity_estimate(opportunity_id),
+                    cohort_id TEXT NOT NULL REFERENCES cohort_estimate(cohort_id),
+                    input_position INTEGER NOT NULL,
+                    PRIMARY KEY (opportunity_id, cohort_id),
+                    UNIQUE (opportunity_id, input_position)
+                );
+                CREATE TABLE completeness_record (
+                    completeness_id TEXT PRIMARY KEY, geography TEXT NOT NULL,
+                    year INTEGER NOT NULL, release_count INTEGER NOT NULL,
+                    observation_count INTEGER NOT NULL,
+                    usable_observation_count INTEGER NOT NULL,
+                    assigned_observation_count INTEGER NOT NULL,
+                    canonical_family_count INTEGER NOT NULL,
+                    sourced_generation_count INTEGER NOT NULL,
+                    estimated_generation_count INTEGER NOT NULL,
+                    forecastable_count INTEGER NOT NULL,
+                    evidence_only_count INTEGER NOT NULL,
+                    rejected_record_count INTEGER NOT NULL,
+                    reason_codes TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX generation_assignment_observation_idx
+                ON generation_assignment (observation_id);
+                CREATE INDEX generation_entry_vehicle_market_window_idx
+                ON generation_entry (canonical_vehicle_id, market, start_month, end_month);
+                CREATE INDEX cohort_generation_year_idx
+                ON cohort_estimate (generation_id, registration_cohort_year, as_of_year);
+                CREATE INDEX opportunity_geography_horizon_idx
+                ON opportunity_estimate (geography, horizon_year, generation_id);
+                CREATE UNIQUE INDEX completeness_geography_year_idx
+                ON completeness_record (geography, year);
+                """.split(";")
+            if statement.strip()
+        )
+
     @staticmethod
     def _enum_check(enum_type: type[Any]) -> str:
         return "(" + ", ".join(repr(member.value) for member in enum_type) + ")"
@@ -379,6 +581,8 @@ class SQLiteEvidenceRepository:
             statements = self._v1_migration_statements()
         elif version == 2:
             statements = self._v2_migration_statements()
+        elif version == 3:
+            statements = self._v3_migration_statements()
         else:
             statements = self._migration_statements()
         self._validate_structure(connection, statements)
@@ -626,6 +830,249 @@ class SQLiteEvidenceRepository:
                 (snapshot.snapshot_id, release_id, position),
             )
 
+    def _insert_generations(
+        self,
+        connection: sqlite3.Connection,
+        generations: Sequence[GenerationEntry],
+    ) -> None:
+        for generation in generations:
+            self._require_reference(
+                connection,
+                "canonical_vehicle",
+                "vehicle_id",
+                generation.canonical_vehicle_id,
+            )
+            connection.execute(
+                """INSERT INTO generation_entry VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    generation.generation_id,
+                    generation.canonical_vehicle_id,
+                    generation.display_name,
+                    generation.market,
+                    self._date(generation.start_month),
+                    self._date(generation.end_month) if generation.end_month else None,
+                    generation.identity_kind.value,
+                    generation.body_style,
+                    generation.facelift,
+                    generation.platform,
+                    self._json(generation.evidence_ids),
+                    self._json(generation.dependency_groups),
+                    self._json(generation.confidence_reasons),
+                    generation.registry_version,
+                ),
+            )
+
+    def _insert_generation_assignments(
+        self,
+        connection: sqlite3.Connection,
+        assignments: Sequence[GenerationAssignment],
+    ) -> None:
+        for assignment in assignments:
+            observation = connection.execute(
+                "SELECT canonical_vehicle_id FROM observation WHERE observation_id = ?",
+                (assignment.observation_id,),
+            ).fetchone()
+            if observation is None:
+                raise ImmutableEvidenceError(
+                    f"evidence reference does not exist: {assignment.observation_id}"
+                )
+            selected = connection.execute(
+                """SELECT canonical_vehicle_id FROM generation_entry
+                WHERE generation_id = ?""",
+                (assignment.selected_generation_id,),
+            ).fetchone()
+            if selected is None:
+                raise ImmutableEvidenceError(
+                    "evidence reference does not exist: "
+                    f"{assignment.selected_generation_id}"
+                )
+            if observation["canonical_vehicle_id"] != selected["canonical_vehicle_id"]:
+                raise ImmutableEvidenceError(
+                    "generation assignment vehicle is incompatible with observation"
+                )
+            connection.execute(
+                """INSERT INTO generation_assignment VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    assignment.assignment_id,
+                    assignment.observation_id,
+                    assignment.selected_generation_id,
+                    assignment.method.value,
+                    self._json(assignment.evidence_ids),
+                    assignment.confidence.value,
+                    self._json(assignment.reason_codes),
+                    str(assignment.training_weight),
+                    assignment.resolver_version,
+                    assignment.registry_version,
+                    self._datetime(assignment.reviewed_at),
+                ),
+            )
+            for alternative in assignment.alternatives:
+                candidate = connection.execute(
+                    """SELECT canonical_vehicle_id FROM generation_entry
+                    WHERE generation_id = ?""",
+                    (alternative.generation_id,),
+                ).fetchone()
+                if candidate is None:
+                    raise ImmutableEvidenceError(
+                        "evidence reference does not exist: "
+                        f"{alternative.generation_id}"
+                    )
+                if candidate["canonical_vehicle_id"] != selected["canonical_vehicle_id"]:
+                    raise ImmutableEvidenceError(
+                        "alternative generation vehicle is incompatible with selection"
+                    )
+                connection.execute(
+                    "INSERT INTO generation_alternative VALUES (?, ?, ?, ?)",
+                    (
+                        assignment.assignment_id,
+                        alternative.generation_id,
+                        alternative.rank,
+                        alternative.loss_reason,
+                    ),
+                )
+
+    def _insert_cohorts(
+        self,
+        connection: sqlite3.Connection,
+        estimates: Sequence[CohortEstimate],
+    ) -> None:
+        for estimate in estimates:
+            generation = connection.execute(
+                """SELECT canonical_vehicle_id FROM generation_entry
+                WHERE generation_id = ?""",
+                (estimate.generation_id,),
+            ).fetchone()
+            if generation is None:
+                raise ImmutableEvidenceError(
+                    f"evidence reference does not exist: {estimate.generation_id}"
+                )
+            if generation["canonical_vehicle_id"] != estimate.canonical_vehicle_id:
+                raise ImmutableEvidenceError("cohort generation vehicle is incompatible")
+            connection.execute(
+                """INSERT INTO cohort_estimate VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    estimate.cohort_id,
+                    estimate.generation_id,
+                    estimate.canonical_vehicle_id,
+                    estimate.geography,
+                    estimate.registration_cohort_year,
+                    estimate.as_of_year,
+                    str(estimate.registrations),
+                    str(estimate.active_fleet_p10),
+                    str(estimate.active_fleet_p50),
+                    str(estimate.active_fleet_p90),
+                    estimate.survival_method,
+                    estimate.confidence.value,
+                    self._json(estimate.reason_codes),
+                ),
+            )
+            for position, observation_id in enumerate(estimate.input_observation_ids):
+                assignment = connection.execute(
+                    """SELECT selected_generation_id FROM generation_assignment
+                    WHERE observation_id = ?""",
+                    (observation_id,),
+                ).fetchone()
+                if assignment is None:
+                    raise ImmutableEvidenceError(
+                        "cohort input requires one generation assignment"
+                    )
+                if assignment["selected_generation_id"] != estimate.generation_id:
+                    raise ImmutableEvidenceError(
+                        "cohort input generation is incompatible"
+                    )
+                connection.execute(
+                    "INSERT INTO cohort_input VALUES (?, ?, ?)",
+                    (estimate.cohort_id, observation_id, position),
+                )
+
+    def _insert_opportunities(
+        self,
+        connection: sqlite3.Connection,
+        estimates: Sequence[OpportunityEstimate],
+    ) -> None:
+        for estimate in estimates:
+            generation = connection.execute(
+                """SELECT canonical_vehicle_id FROM generation_entry
+                WHERE generation_id = ?""",
+                (estimate.generation_id,),
+            ).fetchone()
+            if generation is None:
+                raise ImmutableEvidenceError(
+                    f"evidence reference does not exist: {estimate.generation_id}"
+                )
+            if generation["canonical_vehicle_id"] != estimate.canonical_vehicle_id:
+                raise ImmutableEvidenceError("opportunity generation vehicle is incompatible")
+            connection.execute(
+                """INSERT INTO opportunity_estimate VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    estimate.opportunity_id,
+                    estimate.generation_id,
+                    estimate.canonical_vehicle_id,
+                    estimate.geography,
+                    estimate.horizon_year,
+                    str(estimate.p10),
+                    str(estimate.p50),
+                    str(estimate.p90),
+                    str(estimate.active_fleet_p50),
+                    estimate.hazard_method,
+                    estimate.forecast_method,
+                    estimate.confidence.value,
+                    self._json(estimate.assumption_ids),
+                    self._json(estimate.reason_codes),
+                ),
+            )
+            for position, cohort_id in enumerate(estimate.input_cohort_ids):
+                cohort = connection.execute(
+                    """SELECT generation_id, canonical_vehicle_id, geography
+                    FROM cohort_estimate WHERE cohort_id = ?""",
+                    (cohort_id,),
+                ).fetchone()
+                if cohort is None:
+                    raise ImmutableEvidenceError(
+                        f"evidence reference does not exist: {cohort_id}"
+                    )
+                if (
+                    cohort["generation_id"] != estimate.generation_id
+                    or cohort["canonical_vehicle_id"] != estimate.canonical_vehicle_id
+                    or cohort["geography"] != estimate.geography
+                ):
+                    raise ImmutableEvidenceError("opportunity cohort is incompatible")
+                connection.execute(
+                    "INSERT INTO opportunity_input VALUES (?, ?, ?)",
+                    (estimate.opportunity_id, cohort_id, position),
+                )
+
+    @staticmethod
+    def _insert_completeness(
+        connection: sqlite3.Connection,
+        records: Sequence[CompletenessRecord],
+    ) -> None:
+        for record in records:
+            connection.execute(
+                """INSERT INTO completeness_record VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    record.completeness_id,
+                    record.geography,
+                    record.year,
+                    record.release_count,
+                    record.observation_count,
+                    record.usable_observation_count,
+                    record.assigned_observation_count,
+                    record.canonical_family_count,
+                    record.sourced_generation_count,
+                    record.estimated_generation_count,
+                    record.forecastable_count,
+                    record.evidence_only_count,
+                    record.rejected_record_count,
+                    SQLiteEvidenceRepository._json(record.reason_codes),
+                ),
+            )
+
     @staticmethod
     def _require_reference(connection: sqlite3.Connection, table: str, column: str, value: str) -> None:
         if connection.execute(f"SELECT 1 FROM {table} WHERE {column} = ?", (value,)).fetchone() is None:
@@ -679,6 +1126,142 @@ class SQLiteEvidenceRepository:
             row["confidence_coverage"], row["confidence_identity"],
             row["confidence_independent_agreement"], tuple(json.loads(row["confidence_reasons"])),
             row["confidence_applied_cap"],
+        )
+
+    @staticmethod
+    def _generation(row: sqlite3.Row) -> GenerationEntry:
+        return GenerationEntry(
+            generation_id=row["generation_id"],
+            canonical_vehicle_id=row["canonical_vehicle_id"],
+            display_name=row["display_name"],
+            market=row["market"],
+            start_month=date.fromisoformat(row["start_month"]),
+            end_month=(
+                date.fromisoformat(row["end_month"])
+                if row["end_month"] is not None
+                else None
+            ),
+            identity_kind=GenerationIdentityKind(row["identity_kind"]),
+            body_style=row["body_style"],
+            facelift=row["facelift"],
+            platform=row["platform"],
+            evidence_ids=tuple(json.loads(row["evidence_ids"])),
+            dependency_groups=tuple(json.loads(row["dependency_groups"])),
+            confidence_reasons=tuple(json.loads(row["confidence_reasons"])),
+            registry_version=row["registry_version"],
+        )
+
+    @staticmethod
+    def _generation_assignment(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+    ) -> GenerationAssignment:
+        alternatives = tuple(
+            GenerationAlternative(
+                generation_id=item["generation_id"],
+                rank=item["alternative_rank"],
+                loss_reason=item["loss_reason"],
+            )
+            for item in connection.execute(
+                """SELECT generation_id, alternative_rank, loss_reason
+                FROM generation_alternative WHERE assignment_id = ?
+                ORDER BY alternative_rank""",
+                (row["assignment_id"],),
+            )
+        )
+        return GenerationAssignment(
+            assignment_id=row["assignment_id"],
+            observation_id=row["observation_id"],
+            selected_generation_id=row["selected_generation_id"],
+            alternatives=alternatives,
+            method=AssignmentMethod(row["method"]),
+            evidence_ids=tuple(json.loads(row["evidence_ids"])),
+            confidence=ConfidenceBand(row["confidence"]),
+            reason_codes=tuple(json.loads(row["reason_codes"])),
+            training_weight=Decimal(row["training_weight"]),
+            resolver_version=row["resolver_version"],
+            registry_version=row["registry_version"],
+            reviewed_at=datetime.fromisoformat(row["reviewed_at"]),
+        )
+
+    @staticmethod
+    def _cohort(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+    ) -> CohortEstimate:
+        inputs = tuple(
+            item["observation_id"]
+            for item in connection.execute(
+                """SELECT observation_id FROM cohort_input WHERE cohort_id = ?
+                ORDER BY input_position""",
+                (row["cohort_id"],),
+            )
+        )
+        return CohortEstimate(
+            cohort_id=row["cohort_id"],
+            generation_id=row["generation_id"],
+            canonical_vehicle_id=row["canonical_vehicle_id"],
+            geography=row["geography"],
+            registration_cohort_year=row["registration_cohort_year"],
+            as_of_year=row["as_of_year"],
+            registrations=Decimal(row["registrations"]),
+            active_fleet_p10=Decimal(row["active_fleet_p10"]),
+            active_fleet_p50=Decimal(row["active_fleet_p50"]),
+            active_fleet_p90=Decimal(row["active_fleet_p90"]),
+            input_observation_ids=inputs,
+            survival_method=row["survival_method"],
+            confidence=ConfidenceBand(row["confidence"]),
+            reason_codes=tuple(json.loads(row["reason_codes"])),
+        )
+
+    @staticmethod
+    def _opportunity(
+        connection: sqlite3.Connection,
+        row: sqlite3.Row,
+    ) -> OpportunityEstimate:
+        inputs = tuple(
+            item["cohort_id"]
+            for item in connection.execute(
+                """SELECT cohort_id FROM opportunity_input WHERE opportunity_id = ?
+                ORDER BY input_position""",
+                (row["opportunity_id"],),
+            )
+        )
+        return OpportunityEstimate(
+            opportunity_id=row["opportunity_id"],
+            generation_id=row["generation_id"],
+            canonical_vehicle_id=row["canonical_vehicle_id"],
+            geography=row["geography"],
+            horizon_year=row["horizon_year"],
+            p10=Decimal(row["p10"]),
+            p50=Decimal(row["p50"]),
+            p90=Decimal(row["p90"]),
+            active_fleet_p50=Decimal(row["active_fleet_p50"]),
+            input_cohort_ids=inputs,
+            hazard_method=row["hazard_method"],
+            forecast_method=row["forecast_method"],
+            confidence=ConfidenceBand(row["confidence"]),
+            assumption_ids=tuple(json.loads(row["assumption_ids"])),
+            reason_codes=tuple(json.loads(row["reason_codes"])),
+        )
+
+    @staticmethod
+    def _completeness(row: sqlite3.Row) -> CompletenessRecord:
+        return CompletenessRecord(
+            completeness_id=row["completeness_id"],
+            geography=row["geography"],
+            year=row["year"],
+            release_count=row["release_count"],
+            observation_count=row["observation_count"],
+            usable_observation_count=row["usable_observation_count"],
+            assigned_observation_count=row["assigned_observation_count"],
+            canonical_family_count=row["canonical_family_count"],
+            sourced_generation_count=row["sourced_generation_count"],
+            estimated_generation_count=row["estimated_generation_count"],
+            forecastable_count=row["forecastable_count"],
+            evidence_only_count=row["evidence_only_count"],
+            rejected_record_count=row["rejected_record_count"],
+            reason_codes=tuple(json.loads(row["reason_codes"])),
         )
 
     @staticmethod

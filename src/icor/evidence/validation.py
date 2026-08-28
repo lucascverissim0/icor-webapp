@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path
@@ -161,7 +162,7 @@ class SnapshotValidator:
                             "Snapshot published value count does not match.",
                         )
                     )
-                findings.extend(_database_findings(connection))
+                findings.extend(_database_findings(connection, manifest))
         except (OSError, sqlite3.Error):
             findings.append(
                 _error("snapshot.database_unreadable", "Snapshot database cannot be validated.")
@@ -169,7 +170,10 @@ class SnapshotValidator:
         return _report(findings)
 
 
-def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding]:
+def _database_findings(
+    connection: sqlite3.Connection,
+    manifest: SnapshotManifest,
+) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     for row in connection.execute(
         """SELECT published_value.value_id
@@ -295,6 +299,162 @@ def _database_findings(connection: sqlite3.Connection) -> list[ValidationFinding
                 "snapshot.unresolved_publication",
                 "Published value has an unresolved identity mapping.",
                 row["value_id"],
+            )
+        )
+    if not manifest.versions.generation_registry.endswith("-v0"):
+        findings.extend(_generation_planning_findings(connection, manifest))
+    return findings
+
+
+def _generation_planning_findings(
+    connection: sqlite3.Connection,
+    manifest: SnapshotManifest,
+) -> list[ValidationFinding]:
+    findings: list[ValidationFinding] = []
+    required_tables = {
+        "generation_entry",
+        "generation_assignment",
+        "generation_alternative",
+        "cohort_estimate",
+        "opportunity_estimate",
+        "completeness_record",
+    }
+    available = {
+        row["name"]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    if not required_tables <= available:
+        return [
+            _error(
+                "snapshot.generation_schema_missing",
+                "Generation planning schema is unavailable.",
+            )
+        ]
+
+    for row in connection.execute(
+        """SELECT observation.observation_id
+        FROM observation
+        LEFT JOIN generation_assignment
+        ON generation_assignment.observation_id = observation.observation_id
+        WHERE observation.canonical_vehicle_id IS NOT NULL
+        AND observation.mapping_status NOT IN ('ambiguous', 'rejected', 'unresolved')
+        AND generation_assignment.assignment_id IS NULL
+        ORDER BY observation.observation_id"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.generation_assignment_missing",
+                "Usable observation has no generation assignment.",
+                row["observation_id"],
+            )
+        )
+
+    for row in connection.execute(
+        """SELECT generation_assignment.assignment_id,
+        observation.canonical_vehicle_id AS observation_vehicle_id,
+        generation_entry.canonical_vehicle_id AS generation_vehicle_id,
+        generation_assignment.training_weight,
+        generation_assignment.registry_version,
+        generation_assignment.resolver_version
+        FROM generation_assignment
+        LEFT JOIN observation
+        ON observation.observation_id = generation_assignment.observation_id
+        LEFT JOIN generation_entry
+        ON generation_entry.generation_id = generation_assignment.selected_generation_id
+        ORDER BY generation_assignment.assignment_id"""
+    ):
+        assignment_id = row["assignment_id"]
+        if (
+            row["observation_vehicle_id"] is None
+            or row["generation_vehicle_id"] is None
+            or row["observation_vehicle_id"] != row["generation_vehicle_id"]
+        ):
+            findings.append(
+                _error(
+                    "snapshot.generation_assignment_orphan",
+                    "Generation assignment has incompatible lineage.",
+                    assignment_id,
+                )
+            )
+        weight = _decimal(row["training_weight"])
+        if weight is None or weight is _INVALID or not Decimal(0) <= weight <= Decimal(1):
+            findings.append(
+                _error(
+                    "snapshot.generation_weight_invalid",
+                    "Generation assignment training weight is invalid.",
+                    assignment_id,
+                )
+            )
+        if (
+            row["registry_version"] != manifest.versions.generation_registry
+            or row["resolver_version"] != manifest.versions.generation_resolver
+        ):
+            findings.append(
+                _error(
+                    "snapshot.generation_version_mismatch",
+                    "Generation assignment versions do not match the snapshot.",
+                    assignment_id,
+                )
+            )
+
+    for row in connection.execute(
+        """SELECT generation_id, start_month, end_month FROM generation_entry
+        ORDER BY generation_id"""
+    ):
+        try:
+            start = date.fromisoformat(row["start_month"])
+            end = date.fromisoformat(row["end_month"]) if row["end_month"] else None
+        except (TypeError, ValueError):
+            start = end = None
+        if start is None or start.day != 1 or (end is not None and end.day != 1):
+            findings.append(
+                _error(
+                    "snapshot.generation_window_invalid",
+                    "Generation window does not use valid month precision.",
+                    row["generation_id"],
+                )
+            )
+        elif end is not None and end < start:
+            findings.append(
+                _error(
+                    "snapshot.generation_window_reversed",
+                    "Generation window is not ordered.",
+                    row["generation_id"],
+                )
+            )
+
+    for table, identifier, names in (
+        (
+            "cohort_estimate",
+            "cohort_id",
+            ("active_fleet_p10", "active_fleet_p50", "active_fleet_p90"),
+        ),
+        ("opportunity_estimate", "opportunity_id", ("p10", "p50", "p90")),
+    ):
+        for row in connection.execute(
+            f"SELECT {identifier}, {', '.join(names)} FROM {table} ORDER BY {identifier}"
+        ):
+            intervals = tuple(_decimal(row[name]) for name in names)
+            if (
+                any(item is None or item is _INVALID for item in intervals)
+                or any(item < 0 for item in intervals)
+                or not intervals[0] <= intervals[1] <= intervals[2]
+            ):
+                findings.append(
+                    _error(
+                        "snapshot.generation_interval_invalid",
+                        "Generation planning interval is invalid.",
+                        row[identifier],
+                    )
+                )
+
+    if _count(connection, "completeness_record") == 0:
+        findings.append(
+            _error(
+                "snapshot.completeness_missing",
+                "Generation planning completeness records are unavailable.",
             )
         )
     return findings

@@ -12,6 +12,7 @@ from icor.domain.generations import (
     GenerationAlternative,
     GenerationAssignment,
     GenerationEntry,
+    GenerationIdentityKind,
 )
 from icor.evidence.normalization import stable_evidence_id
 from icor.generations.registry import GenerationRegistry
@@ -74,6 +75,19 @@ class GenerationResolver:
                 ConfidenceBand.MEDIUM,
                 Decimal("0.70"),
                 "descriptor-supported-overlap",
+            )
+        if (
+            len(candidates) == 1
+            and candidates[0].identity_kind is GenerationIdentityKind.ESTIMATED
+        ):
+            return self._assignment(
+                request,
+                candidates[0],
+                candidates,
+                AssignmentMethod.ESTIMATED_GENERATION,
+                ConfidenceBand.LOW,
+                Decimal("0.35"),
+                "estimated-generation-window",
             )
         if len(candidates) == 1:
             return self._assignment(

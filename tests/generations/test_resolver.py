@@ -1,4 +1,6 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
 from icor.domain.generations import AssignmentMethod, GenerationIdentityKind
 from icor.generations.registry import GenerationRegistry
@@ -95,3 +97,24 @@ def test_equal_transition_coverage_uses_newer_launched_generation() -> None:
 
     assert result.selected_generation_id == "generation-golf-8"
     assert result.method is AssignmentMethod.NEWER_LAUNCH_TIEBREAK
+
+
+def test_estimated_generation_is_explicitly_low_weighted() -> None:
+    estimated = entry("generation-golf-estimated", "2014-01", "2024-12")
+    resolver = GenerationResolver(
+        GenerationRegistry(
+            (
+                replace(
+                    estimated,
+                    display_name="estimated-generation-1 (2014-2024)",
+                    identity_kind=GenerationIdentityKind.ESTIMATED,
+                ),
+            )
+        )
+    )
+
+    result = resolver.resolve(request(registration_cohort_year=2020))
+
+    assert result.method is AssignmentMethod.ESTIMATED_GENERATION
+    assert result.confidence.value == "low"
+    assert result.training_weight == Decimal("0.35")

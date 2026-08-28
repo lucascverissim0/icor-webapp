@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from icor.application.generation_mapping import GenerationMappingService
 from icor.application.snapshot_build import (
     SnapshotBuilder,
     SnapshotBuildError,
@@ -413,6 +414,30 @@ def test_canonical_replay_batches_identity_mappings(
     SnapshotBuilder._replay_canonically(source, target)
 
     assert target.list_mappings() == source.list_mappings()
+
+
+def test_post_load_finalizer_materializes_and_replays_generation_assignments(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    def finalize(repository: SQLiteEvidenceRepository, reviewed_at: datetime) -> None:
+        result = GenerationMappingService().apply(
+            repository,
+            reviewed_at=reviewed_at,
+        )
+        assert result.usable_count == result.assigned_count == 2
+
+    result = SnapshotBuilder(
+        tmp_path / "generation-finalizer",
+        release_store,
+        TwoObservationLoader(reverse=True),
+        repository_finalizer=finalize,
+    ).build(build_request)
+
+    repository = SQLiteEvidenceRepository(result.database_path)
+    assert len(repository.list_generations()) == 1
+    assert len(repository.list_generation_assignments()) == 2
 
 
 def test_build_rejects_symlinked_candidates_directory(

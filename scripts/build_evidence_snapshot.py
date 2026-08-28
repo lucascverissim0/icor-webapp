@@ -13,6 +13,7 @@ from pathlib import Path
 
 from icor.application.snapshot_build import (
     EvidenceLoader,
+    RepositoryFinalizer,
     RepositoryTransformer,
     SnapshotBuilder,
     SnapshotBuildError,
@@ -24,6 +25,7 @@ from icor.evidence.serialization import canonical_json_bytes
 from icor.evidence.source_registry import (
     OFFICIAL_SOURCE_VERSIONS,
     official_loader_registry,
+    official_repository_finalizer,
     official_repository_transformer,
 )
 from icor.infrastructure.release_store import (
@@ -183,6 +185,7 @@ def _build_snapshot(
     versions: SnapshotVersions,
     filesystem: SnapshotFilesystem,
     repository_transformer: RepositoryTransformer | None,
+    repository_finalizer: RepositoryFinalizer | None,
 ) -> tuple[int, dict[str, object]]:
     release_ids = tuple(sorted(args.release))
     if len(set(release_ids)) != len(release_ids):
@@ -207,6 +210,7 @@ def _build_snapshot(
         RegistryEvidenceLoader(loader_registry),
         filesystem=filesystem,
         repository_transformer=repository_transformer,
+        repository_finalizer=repository_finalizer,
     ).build(request)
     if not result.validation_report.can_promote:
         return 3, {
@@ -263,10 +267,12 @@ def main(
             registry = official_loader_registry()
             versions = OFFICIAL_SOURCE_VERSIONS
             repository_transformer = official_repository_transformer
+            repository_finalizer = official_repository_finalizer
         else:
             registry = loader_registry
             versions = FOUNDATION_VERSIONS
             repository_transformer = None
+            repository_finalizer = None
         create_root = args.command in {"stage-release", "build", "promote"}
         if not create_root and not os.path.lexists(root):
             raise SnapshotUnavailableError("no active snapshot is available")
@@ -282,6 +288,7 @@ def main(
                     versions,
                     filesystem,
                     repository_transformer,
+                    repository_finalizer,
                 )
             elif args.command == "promote":
                 code, payload = _promote(args, pinned_root, filesystem)

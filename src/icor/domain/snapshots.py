@@ -38,6 +38,8 @@ class SnapshotVersions:
     survival_method: str
     hazard_method: str
     forecast_method: str
+    generation_registry: str = "generation-registry-v0"
+    generation_resolver: str = "generation-resolver-v0"
 
     def __post_init__(self) -> None:
         for value in (
@@ -49,6 +51,8 @@ class SnapshotVersions:
             self.survival_method,
             self.hazard_method,
             self.forecast_method,
+            self.generation_registry,
+            self.generation_resolver,
         ):
             _require_text(value, "snapshot")
 

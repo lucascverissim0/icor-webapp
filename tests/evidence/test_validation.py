@@ -573,3 +573,25 @@ def test_snapshot_clean_report_can_promote(
 
     assert report.findings == ()
     assert report.can_promote is True
+
+
+def test_generation_enabled_snapshot_requires_one_assignment_per_usable_observation(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    manifest = _snapshot(repository)
+    manifest = replace(
+        manifest,
+        versions=replace(
+            manifest.versions,
+            generation_registry="generation-registry-v1",
+            generation_resolver="generation-resolver-v1",
+        ),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    codes = {finding.code for finding in report.findings}
+    assert "snapshot.generation_assignment_missing" in codes
+    assert "snapshot.completeness_missing" in codes
