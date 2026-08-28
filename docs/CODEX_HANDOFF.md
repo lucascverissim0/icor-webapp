@@ -1642,4 +1642,27 @@ Resume with Task 3 of
 signed sessions, Argon2id credential checks, bounded login throttling, authentication
 middleware, and security headers, continuing strict RED-GREEN cycles.
 
+## 2026-08-28 Codespaces checkpoint: sessions and authentication middleware
+
+Task 3 is complete test-first. `src/icor/preview/auth.py` issues canonical compact
+HMAC-SHA256 sessions with a 128-bit nonce and strict issue/expiry bounds, rejects
+malformed, tampered, expired, and key-rotated tokens, verifies passwords with Argon2id,
+and uses a dummy verifier for unknown accounts. Its login throttle retains only keyed
+digests of normalized account/address pairs, enforces five failures per 15 minutes,
+resets after success, expires stale attempts, and caps retained buckets.
+
+`src/icor/preview/security.py` allows anonymous access only to `/healthz` and
+`/auth/login`, protects application/assets/API/docs/export paths, attaches the verified
+username to request state, and adds CSP, nosniff, no-referrer, and deny-framing headers.
+Authentication failures and auth routes are non-cacheable. Fresh verification is 17
+passed in 1.92 seconds with Ruff fully clean. The only initial integration failures were
+the repository's intentional socket guard blocking TestClient's Windows loopback
+socketpair; adding the same explicit loopback-only marker used by existing API tests
+made the middleware tests exercise production code without broadening network access.
+
+No GitHub, Codespace, port, secret, evidence, production, `main`, active-snapshot, or
+paused-release state changed. `AGENTS.md` remains the only unrelated unstaged user
+change. Resume with Task 4: the login/logout routes, fail-closed preview factory, and
+safe same-origin SPA/static resolver.
+
 Context safety: SAFE TO CLEAR — durable handoff is current.
