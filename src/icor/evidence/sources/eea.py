@@ -140,69 +140,119 @@ class EEAAnnualAggregateLoader:
         ):
             raise ValueError("EEA annual aggregate parser counts do not match manifest")
 
-        batch: list[Observation] = []
-        for group_number, source_rows, registrations, key in self._validated_rows(
-            release.artifact_path, year, version
-        ):
-            if any(normalize_vehicle_label(value) is None for value in key[:3]):
-                continue
-            country, make, model, type_approval, vehicle_type, variant, item_version, fuel = key
-            original_type = "|".join(
-                (type_approval, vehicle_type, variant, item_version, fuel)
+        with tempfile.TemporaryDirectory(prefix="eea-annual-model-") as temporary:
+            aggregate_path = Path(temporary) / "aggregate.sqlite3"
+            self._aggregate_models(release.artifact_path, year, version, aggregate_path)
+            self._write_annual_observations(release, year, aggregate_path, repository)
+
+    def _aggregate_models(
+        self, artifact_path: Path, year: int, version: str, database_path: Path
+    ) -> None:
+        with closing(sqlite3.connect(database_path)) as connection:
+            connection.execute(
+                """CREATE TABLE aggregate (
+                country TEXT NOT NULL, make TEXT NOT NULL, model TEXT NOT NULL,
+                first_group INTEGER NOT NULL, last_group INTEGER NOT NULL,
+                technical_groups INTEGER NOT NULL, source_rows INTEGER NOT NULL,
+                registrations INTEGER NOT NULL,
+                PRIMARY KEY (country, make, model)
+                ) WITHOUT ROWID"""
             )
-            batch.append(
-                Observation(
-                    observation_id=stable_evidence_id(
-                        "obs-eea-annual", release.release_id, *key
-                    ),
-                    release_id=release.release_id,
-                    original_row_locator=(
-                        f"official-sql-group-{group_number}:source-rows-{source_rows}"
-                    ),
-                    geography=country,
-                    geography_version=manifest.geography_version,
-                    period_start=date(year, 1, 1),
-                    period_end=date(year, 12, 31),
-                    period_precision=PeriodPrecision.YEAR,
-                    measure=Measure.NEW_REGISTRATIONS,
-                    value=Decimal(registrations),
-                    unit="vehicles",
-                    publication_status=PublicationStatus.FINAL,
-                    original_make=make,
-                    original_model=model,
-                    original_model_year=None,
-                    original_type=original_type,
-                    source_make_identifier=make,
-                    source_model_identifier=stable_evidence_id(
-                        "eea-model",
+            statement = """INSERT INTO aggregate VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT DO UPDATE SET last_group = excluded.last_group,
+            technical_groups = technical_groups + 1,
+            source_rows = source_rows + excluded.source_rows,
+            registrations = registrations + excluded.registrations"""
+            batch: list[tuple[object, ...]] = []
+            for group_number, source_rows, registrations, key in self._validated_rows(
+                artifact_path, year, version
+            ):
+                if any(normalize_vehicle_label(value) is None for value in key[:3]):
+                    continue
+                country, make, model = key[:3]
+                batch.append(
+                    (
+                        country,
                         make,
                         model,
-                        type_approval,
-                        vehicle_type,
-                        variant,
-                        item_version,
-                    ),
-                    normalized_make=normalize_vehicle_label(make),
-                    normalized_model=normalize_vehicle_label(model),
-                    normalized_model_year=None,
-                    canonical_vehicle_id=None,
-                    mapping_status=MappingStatus.UNRESOLVED,
-                    transformation_notes=(
-                        "Canonical aggregate exported from the official EEA Discodata SQL API.",
-                        f"Contributing source rows: {source_rows}.",
-                        "Grouped on Year, Status, Version_file, MS, Mk, Cn, "
-                        "TAN, T, Va, Ve, and Ft.",
-                    ),
-                    validation_flags=(),
-                    evidence_confidence=_unresolved_confidence(),
-                    registration_cohort_year=year,
-                    manufacture_year=None,
-                    model_year=None,
+                        group_number,
+                        group_number,
+                        source_rows,
+                        registrations,
+                    )
                 )
+                if len(batch) >= _INSERT_BATCH_SIZE:
+                    connection.executemany(statement, batch)
+                    batch.clear()
+            if batch:
+                connection.executemany(statement, batch)
+            connection.commit()
+
+    def _write_annual_observations(
+        self,
+        release: StoredRelease,
+        year: int,
+        database_path: Path,
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        batch: list[Observation] = []
+        with closing(sqlite3.connect(database_path)) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM aggregate ORDER BY country, make, model"
             )
-            if len(batch) >= _OBSERVATION_BATCH_SIZE:
-                repository.add_observations(batch)
-                batch.clear()
+            for row in rows:
+                country, make, model = row["country"], row["make"], row["model"]
+                batch.append(
+                    Observation(
+                        observation_id=stable_evidence_id(
+                            "obs-eea-annual", release.release_id, country, make, model
+                        ),
+                        release_id=release.release_id,
+                        original_row_locator=(
+                            f"official-sql-groups-{row['first_group']}-{row['last_group']}:"
+                            f"technical-groups-{row['technical_groups']}:"
+                            f"source-rows-{row['source_rows']}"
+                        ),
+                        geography=country,
+                        geography_version=release.manifest.geography_version,
+                        period_start=date(year, 1, 1),
+                        period_end=date(year, 12, 31),
+                        period_precision=PeriodPrecision.YEAR,
+                        measure=Measure.NEW_REGISTRATIONS,
+                        value=Decimal(row["registrations"]),
+                        unit="vehicles",
+                        publication_status=PublicationStatus.FINAL,
+                        original_make=make,
+                        original_model=model,
+                        original_model_year=None,
+                        original_type=None,
+                        source_make_identifier=make,
+                        source_model_identifier=stable_evidence_id(
+                            "eea-model", make, model
+                        ),
+                        normalized_make=normalize_vehicle_label(make),
+                        normalized_model=normalize_vehicle_label(model),
+                        normalized_model_year=None,
+                        canonical_vehicle_id=None,
+                        mapping_status=MappingStatus.UNRESOLVED,
+                        transformation_notes=(
+                            "Canonical aggregate exported from the official EEA Discodata SQL API.",
+                            f"Contributing source rows: {row['source_rows']}.",
+                            f"Contributing technical-key groups: {row['technical_groups']}.",
+                            "Snapshot observation aggregated on Year, MS, Mk, and Cn; "
+                            "the immutable artifact retains TAN, T, Va, Ve, and Ft detail.",
+                        ),
+                        validation_flags=(),
+                        evidence_confidence=_unresolved_confidence(),
+                        registration_cohort_year=year,
+                        manufacture_year=None,
+                        model_year=None,
+                    )
+                )
+                if len(batch) >= _OBSERVATION_BATCH_SIZE:
+                    repository.add_observations(batch)
+                    batch.clear()
         if batch:
             repository.add_observations(batch)
 

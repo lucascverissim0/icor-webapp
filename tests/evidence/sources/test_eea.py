@@ -279,6 +279,21 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
                     "Status": "F",
                     "Version_file": "v2",
                     "MS": "DE",
+                    "Mk": "VOLKSWAGEN",
+                    "Cn": "GOLF",
+                    "TAN": "E1*2007/46*0001",
+                    "T": "1K",
+                    "Va": "B",
+                    "Ve": "2",
+                    "Ft": "diesel",
+                    "Registrations": "4",
+                    "SourceRows": "2",
+                },
+                {
+                    "Year": "2010",
+                    "Status": "F",
+                    "Version_file": "v2",
+                    "MS": "DE",
                     "Mk": "",
                     "Cn": "UNKNOWN",
                     "TAN": "",
@@ -314,8 +329,8 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
         parser_name="eea_co2_cars_annual_aggregate_csv_v1",
         parser_version="v1",
         expected_schema="EEA 2010 final v2 canonical aggregate export",
-        raw_record_count=4,
-        accepted_record_count=3,
+        raw_record_count=6,
+        accepted_record_count=5,
         rejected_record_count=1,
         quarantined_record_count=0,
     )
@@ -332,8 +347,10 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
     EEAAnnualAggregateLoader().load((release,), repository)
 
     observations = repository.list_observations()
-    assert [(row.geography, row.original_model, row.value) for row in observations] == [
-        ("DE", "GOLF", Decimal("2")),
+    assert sorted(
+        (row.geography, row.original_model, row.value) for row in observations
+    ) == [
+        ("DE", "GOLF", Decimal("6")),
         ("FR", "CLIO", Decimal("3")),
     ]
     assert {row.registration_cohort_year for row in observations} == {2010}
