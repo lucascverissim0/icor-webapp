@@ -868,32 +868,49 @@ class SQLiteEvidenceRepository:
         connection: sqlite3.Connection,
         assignments: Sequence[GenerationAssignment],
     ) -> None:
+        observation_vehicles = self._lookup_rows(
+            connection,
+            "observation",
+            "observation_id",
+            "canonical_vehicle_id",
+            tuple(item.observation_id for item in assignments),
+        )
+        generation_ids = tuple(
+            {
+                generation_id
+                for item in assignments
+                for generation_id in (
+                    item.selected_generation_id,
+                    *(alternative.generation_id for alternative in item.alternatives),
+                )
+            }
+        )
+        generation_vehicles = self._lookup_rows(
+            connection,
+            "generation_entry",
+            "generation_id",
+            "canonical_vehicle_id",
+            generation_ids,
+        )
+        assignment_rows = []
+        alternative_rows = []
         for assignment in assignments:
-            observation = connection.execute(
-                "SELECT canonical_vehicle_id FROM observation WHERE observation_id = ?",
-                (assignment.observation_id,),
-            ).fetchone()
+            observation = observation_vehicles.get(assignment.observation_id)
             if observation is None:
                 raise ImmutableEvidenceError(
                     f"evidence reference does not exist: {assignment.observation_id}"
                 )
-            selected = connection.execute(
-                """SELECT canonical_vehicle_id FROM generation_entry
-                WHERE generation_id = ?""",
-                (assignment.selected_generation_id,),
-            ).fetchone()
+            selected = generation_vehicles.get(assignment.selected_generation_id)
             if selected is None:
                 raise ImmutableEvidenceError(
                     "evidence reference does not exist: "
                     f"{assignment.selected_generation_id}"
                 )
-            if observation["canonical_vehicle_id"] != selected["canonical_vehicle_id"]:
+            if observation != selected:
                 raise ImmutableEvidenceError(
                     "generation assignment vehicle is incompatible with observation"
                 )
-            connection.execute(
-                """INSERT INTO generation_assignment VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            assignment_rows.append(
                 (
                     assignment.assignment_id,
                     assignment.observation_id,
@@ -906,53 +923,72 @@ class SQLiteEvidenceRepository:
                     assignment.resolver_version,
                     assignment.registry_version,
                     self._datetime(assignment.reviewed_at),
-                ),
+                )
             )
             for alternative in assignment.alternatives:
-                candidate = connection.execute(
-                    """SELECT canonical_vehicle_id FROM generation_entry
-                    WHERE generation_id = ?""",
-                    (alternative.generation_id,),
-                ).fetchone()
+                candidate = generation_vehicles.get(alternative.generation_id)
                 if candidate is None:
                     raise ImmutableEvidenceError(
                         "evidence reference does not exist: "
                         f"{alternative.generation_id}"
                     )
-                if candidate["canonical_vehicle_id"] != selected["canonical_vehicle_id"]:
+                if candidate != selected:
                     raise ImmutableEvidenceError(
                         "alternative generation vehicle is incompatible with selection"
                     )
-                connection.execute(
-                    "INSERT INTO generation_alternative VALUES (?, ?, ?, ?)",
+                alternative_rows.append(
                     (
                         assignment.assignment_id,
                         alternative.generation_id,
                         alternative.rank,
                         alternative.loss_reason,
-                    ),
+                    )
                 )
+        connection.executemany(
+            """INSERT INTO generation_assignment VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            assignment_rows,
+        )
+        if alternative_rows:
+            connection.executemany(
+                "INSERT INTO generation_alternative VALUES (?, ?, ?, ?)",
+                alternative_rows,
+            )
 
     def _insert_cohorts(
         self,
         connection: sqlite3.Connection,
         estimates: Sequence[CohortEstimate],
     ) -> None:
+        generation_vehicles = self._lookup_rows(
+            connection,
+            "generation_entry",
+            "generation_id",
+            "canonical_vehicle_id",
+            tuple(item.generation_id for item in estimates),
+        )
+        input_assignments = self._lookup_rows(
+            connection,
+            "generation_assignment",
+            "observation_id",
+            "selected_generation_id",
+            tuple(
+                observation_id
+                for item in estimates
+                for observation_id in item.input_observation_ids
+            ),
+        )
+        cohort_rows = []
+        input_rows = []
         for estimate in estimates:
-            generation = connection.execute(
-                """SELECT canonical_vehicle_id FROM generation_entry
-                WHERE generation_id = ?""",
-                (estimate.generation_id,),
-            ).fetchone()
+            generation = generation_vehicles.get(estimate.generation_id)
             if generation is None:
                 raise ImmutableEvidenceError(
                     f"evidence reference does not exist: {estimate.generation_id}"
                 )
-            if generation["canonical_vehicle_id"] != estimate.canonical_vehicle_id:
+            if generation != estimate.canonical_vehicle_id:
                 raise ImmutableEvidenceError("cohort generation vehicle is incompatible")
-            connection.execute(
-                """INSERT INTO cohort_estimate VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            cohort_rows.append(
                 (
                     estimate.cohort_id,
                     estimate.generation_id,
@@ -967,47 +1003,63 @@ class SQLiteEvidenceRepository:
                     estimate.survival_method,
                     estimate.confidence.value,
                     self._json(estimate.reason_codes),
-                ),
+                )
             )
             for position, observation_id in enumerate(estimate.input_observation_ids):
-                assignment = connection.execute(
-                    """SELECT selected_generation_id FROM generation_assignment
-                    WHERE observation_id = ?""",
-                    (observation_id,),
-                ).fetchone()
+                assignment = input_assignments.get(observation_id)
                 if assignment is None:
                     raise ImmutableEvidenceError(
                         "cohort input requires one generation assignment"
                     )
-                if assignment["selected_generation_id"] != estimate.generation_id:
+                if assignment != estimate.generation_id:
                     raise ImmutableEvidenceError(
                         "cohort input generation is incompatible"
                     )
-                connection.execute(
-                    "INSERT INTO cohort_input VALUES (?, ?, ?)",
+                input_rows.append(
                     (estimate.cohort_id, observation_id, position),
                 )
+        connection.executemany(
+            """INSERT INTO cohort_estimate VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            cohort_rows,
+        )
+        connection.executemany(
+            "INSERT INTO cohort_input VALUES (?, ?, ?)",
+            input_rows,
+        )
 
     def _insert_opportunities(
         self,
         connection: sqlite3.Connection,
         estimates: Sequence[OpportunityEstimate],
     ) -> None:
+        generation_vehicles = self._lookup_rows(
+            connection,
+            "generation_entry",
+            "generation_id",
+            "canonical_vehicle_id",
+            tuple(item.generation_id for item in estimates),
+        )
+        cohort_lineage = self._lookup_rows(
+            connection,
+            "cohort_estimate",
+            "cohort_id",
+            "generation_id, canonical_vehicle_id, geography",
+            tuple(
+                cohort_id for item in estimates for cohort_id in item.input_cohort_ids
+            ),
+        )
+        opportunity_rows = []
+        input_rows = []
         for estimate in estimates:
-            generation = connection.execute(
-                """SELECT canonical_vehicle_id FROM generation_entry
-                WHERE generation_id = ?""",
-                (estimate.generation_id,),
-            ).fetchone()
+            generation = generation_vehicles.get(estimate.generation_id)
             if generation is None:
                 raise ImmutableEvidenceError(
                     f"evidence reference does not exist: {estimate.generation_id}"
                 )
-            if generation["canonical_vehicle_id"] != estimate.canonical_vehicle_id:
+            if generation != estimate.canonical_vehicle_id:
                 raise ImmutableEvidenceError("opportunity generation vehicle is incompatible")
-            connection.execute(
-                """INSERT INTO opportunity_estimate VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            opportunity_rows.append(
                 (
                     estimate.opportunity_id,
                     estimate.generation_id,
@@ -1023,28 +1075,32 @@ class SQLiteEvidenceRepository:
                     estimate.confidence.value,
                     self._json(estimate.assumption_ids),
                     self._json(estimate.reason_codes),
-                ),
+                )
             )
             for position, cohort_id in enumerate(estimate.input_cohort_ids):
-                cohort = connection.execute(
-                    """SELECT generation_id, canonical_vehicle_id, geography
-                    FROM cohort_estimate WHERE cohort_id = ?""",
-                    (cohort_id,),
-                ).fetchone()
+                cohort = cohort_lineage.get(cohort_id)
                 if cohort is None:
                     raise ImmutableEvidenceError(
                         f"evidence reference does not exist: {cohort_id}"
                     )
                 if (
-                    cohort["generation_id"] != estimate.generation_id
-                    or cohort["canonical_vehicle_id"] != estimate.canonical_vehicle_id
-                    or cohort["geography"] != estimate.geography
+                    cohort[0] != estimate.generation_id
+                    or cohort[1] != estimate.canonical_vehicle_id
+                    or cohort[2] != estimate.geography
                 ):
                     raise ImmutableEvidenceError("opportunity cohort is incompatible")
-                connection.execute(
-                    "INSERT INTO opportunity_input VALUES (?, ?, ?)",
+                input_rows.append(
                     (estimate.opportunity_id, cohort_id, position),
                 )
+        connection.executemany(
+            """INSERT INTO opportunity_estimate VALUES
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            opportunity_rows,
+        )
+        connection.executemany(
+            "INSERT INTO opportunity_input VALUES (?, ?, ?)",
+            input_rows,
+        )
 
     @staticmethod
     def _insert_completeness(
@@ -1072,6 +1128,30 @@ class SQLiteEvidenceRepository:
                     SQLiteEvidenceRepository._json(record.reason_codes),
                 ),
             )
+
+    @staticmethod
+    def _lookup_rows(
+        connection: sqlite3.Connection,
+        table: str,
+        identifier_column: str,
+        value_columns: str,
+        identifiers: tuple[str, ...],
+    ) -> dict[str, object]:
+        values: dict[str, object] = {}
+        unique = tuple(sorted(set(identifiers)))
+        columns = tuple(item.strip() for item in value_columns.split(","))
+        for start in range(0, len(unique), 500):
+            chunk = unique[start : start + 500]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = connection.execute(
+                f"SELECT {identifier_column}, {value_columns} FROM {table} "
+                f"WHERE {identifier_column} IN ({placeholders})",
+                chunk,
+            )
+            for row in rows:
+                selected = tuple(row[column] for column in columns)
+                values[row[identifier_column]] = selected[0] if len(selected) == 1 else selected
+        return values
 
     @staticmethod
     def _require_reference(connection: sqlite3.Connection, table: str, column: str, value: str) -> None:

@@ -41,6 +41,7 @@ class GenerationPlanningResult:
     opportunity_count: int
     reconciled_input_count: int
     excluded_correlated_input_count: int
+    evidence_only_series_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,11 +155,15 @@ class GenerationPlanningService:
 
         cohorts: list[CohortEstimate] = []
         opportunities: list[OpportunityEstimate] = []
+        evidence_only_series_count = 0
         for series_key in sorted(series):
             generation_id, vehicle_id, geography = series_key
             generation = generations.get(generation_id)
             if generation is None or generation.canonical_vehicle_id != vehicle_id:
                 raise ValueError("planning generation vehicle is unavailable")
+            if len(series[series_key]) < 3:
+                evidence_only_series_count += 1
+                continue
             values = _fill_internal_gaps(series[series_key])
             all_input_ids = tuple(
                 sorted(
@@ -277,6 +282,7 @@ class GenerationPlanningService:
             len(opportunities),
             selected_count,
             excluded_count,
+            evidence_only_series_count,
         )
 
     def _forecast(

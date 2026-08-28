@@ -38,6 +38,11 @@ class CompletenessService:
         generations = {
             item.generation_id: item for item in repository.list_generations()
         }
+        forecastable_observation_ids = {
+            observation_id
+            for cohort in repository.list_cohort_estimates()
+            for observation_id in cohort.input_observation_ids
+        }
         counts: dict[tuple[str, int], _Counts] = defaultdict(_Counts)
         for observation in repository.list_observations():
             year = observation.registration_cohort_year or observation.period_end.year
@@ -64,7 +69,10 @@ class CompletenessService:
                 target.estimated_generation_ids.add(generation.generation_id)
             else:
                 target.sourced_generation_ids.add(generation.generation_id)
-            if observation.measure is Measure.NEW_REGISTRATIONS:
+            if (
+                observation.measure is Measure.NEW_REGISTRATIONS
+                and observation.observation_id in forecastable_observation_ids
+            ):
                 target.forecastable_count += 1
             else:
                 target.evidence_only_count += 1

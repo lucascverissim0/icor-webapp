@@ -83,13 +83,31 @@ def test_generation_planning_materializes_forecast_cohorts_and_interval() -> Non
 
 def test_internal_registration_gap_is_explicitly_estimated() -> None:
     repository = Repository()
-    repository.observations = (repository.observations[0], repository.observations[2])
-    repository.assignments = (repository.assignments[0], repository.assignments[2])
+    repository.observations[1].registration_cohort_year = 2022
+    repository.observations[1].period_start = date(2022, 1, 1)
+    repository.observations[1].period_end = date(2022, 12, 31)
+    repository.observations[2].registration_cohort_year = 2023
+    repository.observations[2].period_start = date(2023, 1, 1)
+    repository.observations[2].period_end = date(2023, 12, 31)
 
     GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
 
     estimated = next(
         item for item in repository.cohorts if item.registration_cohort_year == 2021
     )
-    assert estimated.registrations == Decimal("110")
+    assert estimated.registrations == Decimal("105")
     assert "estimated-registration-cohort" in estimated.reason_codes
+
+
+def test_sparse_series_without_backtest_history_remains_evidence_only() -> None:
+    repository = Repository()
+    repository.observations = repository.observations[:2]
+    repository.assignments = repository.assignments[:2]
+
+    result = GenerationPlanningService().apply(
+        repository, horizons=(2028,), seed=20260827
+    )
+
+    assert result.cohort_count == 0
+    assert result.opportunity_count == 0
+    assert result.evidence_only_series_count == 1

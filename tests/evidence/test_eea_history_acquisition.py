@@ -97,8 +97,8 @@ def test_release_inventory_covers_every_final_year_before_raw_2024() -> None:
     assert ANNUAL_RELEASES[2019].version == "v20"
     assert ANNUAL_RELEASES[2020].table.endswith("co2cars_2020Fv22]")
     assert ANNUAL_RELEASES[2023].table.endswith("co2cars_2023Fv28]")
-    assert ANNUAL_RELEASES[2020].expected_registrations == 11_709_622
-    assert ANNUAL_RELEASES[2023].expected_registrations == 10_734_228
+    assert ANNUAL_RELEASES[2020].expected_registrations == 11_709_621
+    assert ANNUAL_RELEASES[2023].expected_registrations == 10_734_222
 
 
 def test_acquisition_registration_total_excludes_rejected_identity_groups(
@@ -110,6 +110,7 @@ def test_acquisition_registration_total_excludes_rejected_identity_groups(
         Status="F",
         Version_file="v2",
         MS="DE",
+        Mk="-",
         Cn="UNKNOWN",
         Registrations=9,
         SourceRows=2,

@@ -58,6 +58,13 @@ class Repository:
     def list_generations(self):
         return (self.generation,)
 
+    def list_cohort_estimates(self):
+        return (
+            SimpleNamespace(
+                input_observation_ids=("observation-registration",),
+            ),
+        )
+
     def add_completeness_records(self, records):
         self.records += tuple(records)
 

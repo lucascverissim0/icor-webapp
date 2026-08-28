@@ -14,6 +14,7 @@ from tempfile import NamedTemporaryFile
 from typing import Protocol
 from urllib.parse import urlencode, urlsplit
 
+from icor.evidence.normalization import normalize_vehicle_label
 from icor.evidence.sources.eea import ANNUAL_AGGREGATE_SCHEMA
 
 API_URL = "https://discodata.eea.europa.eu/sql"
@@ -56,19 +57,19 @@ class _Response(Protocol):
 
 _COUNTS = {
     2010: (285_764, 282_966, 2_798, 12_939_010),
-    2011: (331_580, 324_215, 7_365, 12_424_653),
-    2012: (364_385, 345_402, 18_983, 11_404_763),
-    2013: (442_475, 421_639, 20_836, 11_823_538),
-    2014: (417_939, 396_163, 21_776, 12_527_273),
-    2015: (440_645, 432_296, 8_349, 13_758_903),
+    2011: (331_580, 324_212, 7_368, 12_424_649),
+    2012: (364_385, 345_397, 18_988, 11_404_754),
+    2013: (442_475, 421_561, 20_914, 11_823_456),
+    2014: (417_939, 396_162, 21_777, 12_527_272),
+    2015: (440_645, 432_295, 8_350, 13_758_902),
     2016: (494_123, 491_778, 2_345, 14_715_814),
     2017: (4_955_599, 4_948_947, 6_652, 15_116_551),
     2018: (15_272_915, 15_233_794, 39_121, 15_234_152),
-    2019: (15_499_728, 15_493_649, 6_079, 15_493_706),
-    2020: (11_742_439, 11_709_622, 32_817, 11_709_622),
+    2019: (15_499_728, 15_493_648, 6_080, 15_493_705),
+    2020: (11_742_439, 11_709_621, 32_818, 11_709_621),
     2021: (9_920_521, 9_907_308, 13_213, 9_907_308),
-    2022: (9_479_544, 9_396_410, 83_134, 9_396_410),
-    2023: (10_734_898, 10_734_228, 670, 10_734_228),
+    2022: (9_479_544, 9_396_409, 83_135, 9_396_409),
+    2023: (10_734_898, 10_734_222, 676, 10_734_222),
 }
 
 
@@ -126,7 +127,10 @@ def acquire_year(
                     group_count += 1
                     row_count = int(canonical["SourceRows"])
                     source_rows += row_count
-                    if all(canonical[field].strip() for field in ("MS", "Mk", "Cn")):
+                    if all(
+                        normalize_vehicle_label(canonical[field]) is not None
+                        for field in ("MS", "Mk", "Cn")
+                    ):
                         accepted_rows += row_count
                         registrations += int(canonical["Registrations"])
                     else:
