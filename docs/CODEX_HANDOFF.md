@@ -1723,4 +1723,50 @@ changed. `AGENTS.md` remains the only unrelated unstaged user change. Next run T
 complete local backend/frontend/security gates, authenticated fixture smoke tests,
 protected-state proof, final handoff checkpoint, and development-branch push review.
 
+## 2026-08-28 Codespaces checkpoint: complete local verification
+
+Task 8 is complete. Integrity checks found no tracked secret, local evidence/database,
+compiled frontend, private key, or unrelated staged file. The protected production
+checkout remains clean at `1ba1d7c41a5fa8354134685b5c85509a0b8f6137`, exactly
+matching `origin/main`; `AGENTS.md` remains the only unrelated unstaged user change.
+
+Fresh backend gates passed: lockfile check, Ruff, 544 tests, and `pip-audit`. Pytest
+reported 11 documented Windows-symlink or unconfigured-real-snapshot skips and four
+documented characterization XFAILs. No known third-party vulnerability was found;
+only the unpublished local package was unauditable. Focused preview/security/toolchain
+verification additionally passed 77 tests with one Windows symlink skip.
+
+Fresh frontend gates passed: OpenAPI drift, 62 Vitest tests, TypeScript, ESLint, Vite
+production build, and all 20 Chromium scenarios. The bundle contains no secret value or
+verifier, absolute local path, demo-repository reference, or hard-coded local API origin;
+the literal `ICOR_EXPORT_TOKEN` UI instruction is intentionally not a credential.
+Playwright used sealed ignored official evidence candidate
+`snapshot-2f13ba3f0cd083c7eea8` and generation candidate
+`snapshot-a48d61af9e4307b42b7b`. The first browser run overlapped a queued fixture update
+and loaded stale assertions; the stable full rerun passed. Commit `cd38cbe` records the
+fixture composition and coverage UI integration.
+
+The live authenticated loopback smoke passed with two disposable named users:
+anonymous health, denial for six protected route classes, same-origin app/API/official
+data access, logout, tampered and expired cookie rejection, and safe shutdown. No
+disposable credential or session key was stored.
+
+The local active pointer is still `snapshot-2f13ba3f0cd083c7eea8`, pointer SHA-256
+`A02B9BCEB32B7C88BDD47F571636921BFA5531B0CE9B64A10BE2EC5F43E5AA05`.
+The paused-release marker remains present and `.local/evidence/releases` remains absent.
+No active evidence, GitHub, Codespace, public port, production checkout, or `main` state
+changed.
+
+A disposable local browser composition is running at `http://127.0.0.1:5173/` in
+managed terminal session `81488` with API port 8000. It combines official sealed
+registration/evidence data with computed browser fixtures; it is not the final remote
+20-release build. Clearing conversation context does not stop it; closing the terminal
+or computer does.
+
+Next is Task 9: inspect and, only with explicit authorization, push the development
+branch. The user must create the private Codespace from that branch, add the three
+documented secrets outside Git/logs/conversation, run the private 20-release bootstrap
+and full gates, and only then temporarily make port 8000 public for review. Do not push
+or merge `main`, publish a port, or start the remote acquisition without those actions.
+
 Context safety: SAFE TO CLEAR — durable handoff is current.
