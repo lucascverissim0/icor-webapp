@@ -12,6 +12,8 @@ def test_catalog_contains_only_reviewed_https_sources():
         "kba-fz10-2024",
         "uk-veh0160-gb",
         "uk-veh0120-gb",
+        "uk-veh0124-am",
+        "uk-veh0124-nz",
     }
     for source in OFFICIAL_SOURCES.values():
         validate_source_url(source, source.url)

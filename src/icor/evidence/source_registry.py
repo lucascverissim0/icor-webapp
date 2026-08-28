@@ -13,7 +13,11 @@ from icor.evidence.identity import (
 )
 from icor.evidence.sources.eea import EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
-from icor.evidence.sources.uk_dft import UKActiveFleetLoader, UKFirstRegistrationLoader
+from icor.evidence.sources.uk_dft import (
+    UKActiveFleetLoader,
+    UKFirstRegistrationLoader,
+    UKVehicleAgeLoader,
+)
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
@@ -36,6 +40,7 @@ def official_loader_registry() -> Mapping[str, EvidenceLoader]:
         "kba_fz10_xlsx_v1": KBAFZ10Loader(),
         "uk_dft_veh0120_csv_v1": UKActiveFleetLoader(),
         "uk_dft_veh0160_csv_v1": UKFirstRegistrationLoader(),
+        "uk_dft_veh0124_csv_v1": UKVehicleAgeLoader(),
     }
 
 

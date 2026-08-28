@@ -26,6 +26,7 @@ from icor.infrastructure.release_store import StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 _QUARTER = re.compile(r"((?:19|20)\d{2}) Q([1-4])\Z")
+_YEAR = re.compile(r"((?:19|20)\d{2})\Z")
 _FINAL_YEAR = 2025
 _INSERT_BATCH_SIZE = 5_000
 _OBSERVATION_BATCH_SIZE = 2_000
@@ -72,6 +73,196 @@ class UKActiveFleetLoader:
         repository: SQLiteEvidenceRepository,
     ) -> None:
         _UKWideCSVLoader(_ACTIVE_FLEET).load(releases, repository)
+
+
+class UKVehicleAgeLoader:
+    """Load annual licensed stock by first-use and manufacture year."""
+
+    def load(
+        self,
+        releases: tuple[StoredRelease, ...],
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        for release in releases:
+            self._load_release(release, repository)
+
+    def _load_release(
+        self, release: StoredRelease, repository: SQLiteEvidenceRepository
+    ) -> None:
+        if release.manifest.parser_name != "uk_dft_veh0124_csv_v1":
+            raise ValueError("UK DfT vehicle-age parser name is unsupported")
+        if release.manifest.publication_status is not PublicationStatus.FINAL:
+            raise ValueError("UK DfT vehicle-age release must be final")
+        if release.manifest.coverage_end != date(_FINAL_YEAR, 12, 31):
+            raise ValueError("UK DfT vehicle-age release must end at finalized 2025")
+        with tempfile.TemporaryDirectory(prefix="uk-dft-age-") as temporary:
+            database = Path(temporary) / "aggregate.sqlite3"
+            counts = self._aggregate(release.artifact_path, database)
+            if (*counts, 0) != (
+                release.manifest.raw_record_count,
+                release.manifest.accepted_record_count,
+                release.manifest.rejected_record_count,
+                release.manifest.quarantined_record_count,
+            ):
+                raise ValueError("UK DfT vehicle-age parser counts do not match manifest")
+            self._write_observations(release, database, repository)
+
+    @staticmethod
+    def _aggregate(artifact: Path, database: Path) -> tuple[int, int, int]:
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute(
+                """CREATE TABLE aggregate (
+                make TEXT NOT NULL, generic_model TEXT NOT NULL,
+                first_use_year INTEGER NOT NULL, manufacture_year INTEGER NOT NULL,
+                stock_year INTEGER NOT NULL, vehicles INTEGER NOT NULL,
+                blocked INTEGER NOT NULL, first_row INTEGER NOT NULL,
+                last_row INTEGER NOT NULL, member_rows INTEGER NOT NULL,
+                PRIMARY KEY (make, generic_model, first_use_year, manufacture_year, stock_year)
+                ) WITHOUT ROWID"""
+            )
+            statement = """INSERT INTO aggregate VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT DO UPDATE SET vehicles = vehicles + excluded.vehicles,
+            blocked = MAX(blocked, excluded.blocked), last_row = excluded.last_row,
+            member_rows = member_rows + 1"""
+            raw_count = accepted_count = rejected_count = 0
+            batch: list[tuple[object, ...]] = []
+            with artifact.open("r", encoding="cp1252", newline="") as stream:
+                reader = csv.DictReader(stream)
+                fieldnames = tuple(reader.fieldnames or ())
+                base = (
+                    "BodyType",
+                    "Make",
+                    "GenModel",
+                    "Model",
+                    "YearFirstUsed",
+                    "YearManufacture",
+                    "LicenceStatus",
+                )
+                if fieldnames[: len(base)] != base:
+                    raise ValueError("UK DfT vehicle-age CSV schema is unsupported")
+                years = tuple(
+                    int(field)
+                    for field in fieldnames[len(base) :]
+                    if _YEAR.fullmatch(field) and 2014 <= int(field) <= _FINAL_YEAR
+                )
+                if not years or _FINAL_YEAR not in years:
+                    raise ValueError("UK DfT finalized annual coverage is missing")
+                for row_number, row in enumerate(reader, start=2):
+                    raw_count += 1
+                    if row.get("BodyType") != "Cars" or row.get("LicenceStatus") != "Licensed":
+                        rejected_count += 1
+                        continue
+                    accepted_count += 1
+                    make = _required_label(row.get("Make"), "make")
+                    model = _required_label(row.get("GenModel"), "generic model")
+                    first_use = _year_value(row.get("YearFirstUsed"), "first-use year")
+                    manufacture = _year_value(row.get("YearManufacture"), "manufacture year")
+                    for stock_year in years:
+                        vehicles, blocked = _cell_value(row.get(str(stock_year)))
+                        batch.append(
+                            (
+                                make,
+                                model,
+                                first_use or 0,
+                                manufacture or 0,
+                                stock_year,
+                                vehicles,
+                                blocked,
+                                row_number,
+                                row_number,
+                            )
+                        )
+                        if len(batch) >= _INSERT_BATCH_SIZE:
+                            connection.executemany(statement, batch)
+                            batch.clear()
+                if batch:
+                    connection.executemany(statement, batch)
+            connection.commit()
+            return raw_count, accepted_count, rejected_count
+
+    @staticmethod
+    def _write_observations(
+        release: StoredRelease,
+        database: Path,
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        batch: list[Observation] = []
+        with closing(sqlite3.connect(database)) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """SELECT * FROM aggregate ORDER BY make, generic_model,
+                first_use_year, manufacture_year, stock_year"""
+            )
+            for row in rows:
+                if row["blocked"] or row["vehicles"] == 0:
+                    continue
+                make = str(row["make"])
+                model = str(row["generic_model"])
+                first_use = int(row["first_use_year"]) or None
+                manufacture = int(row["manufacture_year"]) or None
+                key = (
+                    make,
+                    model,
+                    str(first_use or "unknown"),
+                    str(manufacture or "unknown"),
+                    str(row["stock_year"]),
+                )
+                group_id = stable_evidence_id("uk-dft-age-group", *key)
+                stock_date = date(int(row["stock_year"]), 12, 31)
+                batch.append(
+                    Observation(
+                        observation_id=stable_evidence_id(
+                            "obs-uk-age", release.release_id, *key
+                        ),
+                        release_id=release.release_id,
+                        original_row_locator=(
+                            f"{group_id}:rows-{row['first_row']}-{row['last_row']}:"
+                            f"members-{row['member_rows']}"
+                        ),
+                        geography="UK",
+                        geography_version=release.manifest.geography_version,
+                        period_start=stock_date,
+                        period_end=stock_date,
+                        period_precision=PeriodPrecision.YEAR,
+                        measure=Measure.ACTIVE_FLEET,
+                        value=Decimal(int(row["vehicles"])),
+                        unit="vehicles",
+                        publication_status=PublicationStatus.FINAL,
+                        original_make=make,
+                        original_model=model,
+                        original_model_year=None,
+                        original_type=(
+                            "DfT generic model; detailed models aggregated; "
+                            "LicenceStatus=Licensed"
+                        ),
+                        source_make_identifier=make,
+                        source_model_identifier=stable_evidence_id(
+                            "uk-model", make, model
+                        ),
+                        normalized_make=normalize_vehicle_label(make),
+                        normalized_model=normalize_vehicle_label(model),
+                        normalized_model_year=None,
+                        canonical_vehicle_id=None,
+                        mapping_status=MappingStatus.UNRESOLVED,
+                        transformation_notes=(
+                            "Preserved YearFirstUsed and YearManufacture as separate fields.",
+                            "Aggregated detailed models to Make, GenModel, cohort, and year.",
+                        ),
+                        validation_flags=_age_year_validation_flags(
+                            first_use,
+                            manufacture,
+                        ),
+                        evidence_confidence=_confidence(),
+                        registration_cohort_year=first_use,
+                        manufacture_year=manufacture,
+                        model_year=None,
+                    )
+                )
+                if len(batch) >= _OBSERVATION_BATCH_SIZE:
+                    repository.add_observations(batch)
+                    batch.clear()
+        if batch:
+            repository.add_observations(batch)
 
 
 class _UKWideCSVLoader:
@@ -267,6 +458,27 @@ def _cell_value(value: str | None) -> tuple[int, int]:
     if parsed < 0:
         raise ValueError("UK DfT vehicle count is invalid")
     return parsed, 0
+
+
+def _year_value(value: str | None, label: str) -> int | None:
+    if value in {"[x]", "[z]", "", None}:
+        return None
+    if _YEAR.fullmatch(value) is None:
+        raise ValueError(f"UK DfT {label} is invalid")
+    return int(value)
+
+
+def _age_year_validation_flags(
+    first_use: int | None,
+    manufacture: int | None,
+) -> tuple[str, ...]:
+    if first_use is None and manufacture is None:
+        return ("year_semantics_missing",)
+    if first_use is None:
+        return ("registration_cohort_year_missing",)
+    if manufacture is None:
+        return ("manufacture_year_missing",)
+    return ()
 
 
 def _quarter_dates(period: str) -> tuple[date, date]:

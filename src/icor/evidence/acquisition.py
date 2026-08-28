@@ -141,6 +141,60 @@ OFFICIAL_SOURCES = {
         accepted_count=77_299,
         rejected_count=167_744,
     ),
+    "uk-veh0124-am": OfficialSource(
+        key="uk-veh0124-am",
+        release_id="uk-dft-veh0124-am-2025-final-20260429",
+        source_id="uk-dft-veh0124-am",
+        publisher="UK Department for Transport / DVLA",
+        url="https://assets.publishing.service.gov.uk/media/69ef3c3a20a498c16734afd1/df_VEH0124_AM.csv",
+        published_at=datetime(2026, 4, 29, tzinfo=UTC),
+        coverage_start=date(2014, 1, 1),
+        coverage_end=date(2025, 12, 31),
+        geography="UK",
+        geography_version="United Kingdom licensing geography 2014-2025",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="uk-dvla-vehicle-register",
+        terms_url=_UK_TERMS,
+        permitted_local_use="Reuse permitted with Crown copyright attribution under OGL v3.0.",
+        parser_name="uk_dft_veh0124_csv_v1",
+        expected_schema=(
+            "DfT VEH0124 A-M annual licensed stock with separate first-use "
+            "and manufacture years"
+        ),
+        suffix=".csv",
+        artifact_bytes=54_874_318,
+        sha256="86fe32407fde0a92cb1fd4724e2b586917100d975b4d64dd8c972644418ecc3a",
+        raw_count=566_977,
+        accepted_count=173_252,
+        rejected_count=393_725,
+    ),
+    "uk-veh0124-nz": OfficialSource(
+        key="uk-veh0124-nz",
+        release_id="uk-dft-veh0124-nz-2025-final-20260429",
+        source_id="uk-dft-veh0124-nz",
+        publisher="UK Department for Transport / DVLA",
+        url="https://assets.publishing.service.gov.uk/media/69ef3c8520a498c16734afd2/df_VEH0124_NZ.csv",
+        published_at=datetime(2026, 4, 29, tzinfo=UTC),
+        coverage_start=date(2014, 1, 1),
+        coverage_end=date(2025, 12, 31),
+        geography="UK",
+        geography_version="United Kingdom licensing geography 2014-2025",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="uk-dvla-vehicle-register",
+        terms_url=_UK_TERMS,
+        permitted_local_use="Reuse permitted with Crown copyright attribution under OGL v3.0.",
+        parser_name="uk_dft_veh0124_csv_v1",
+        expected_schema=(
+            "DfT VEH0124 N-Z annual licensed stock with separate first-use "
+            "and manufacture years"
+        ),
+        suffix=".csv",
+        artifact_bytes=39_295_208,
+        sha256="6a04aebfe77953a4686a633e6081351c1853119488e6738958df738756115984",
+        raw_count=399_612,
+        accepted_count=138_302,
+        rejected_count=261_310,
+    ),
 }
 
 
