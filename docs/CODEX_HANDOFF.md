@@ -1757,11 +1757,10 @@ The paused-release marker remains present and `.local/evidence/releases` remains
 No active evidence, GitHub, Codespace, public port, production checkout, or `main` state
 changed.
 
-A disposable local browser composition is running at `http://127.0.0.1:5173/` in
-managed terminal session `81488` with API port 8000. It combines official sealed
-registration/evidence data with computed browser fixtures; it is not the final remote
-20-release build. Clearing conversation context does not stop it; closing the terminal
-or computer does.
+A disposable local browser composition used official sealed registration/evidence
+data with explicit test-only planner fixtures; it was stopped after the final smoke
+test. Ports 5173 and 8000 have no remaining listener. It was not the final remote
+20-release build.
 
 Next is Task 9: inspect and, only with explicit authorization, push the development
 branch. The user must create the private Codespace from that branch, add the three
