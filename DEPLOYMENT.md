@@ -66,3 +66,13 @@ une version, télécharger le classeur (bouton « Download workbook ») et le re
 - URL publique mais protégée par le login.
 - Pour un usage commercial privé/persistant sans veille → migrer vers un conteneur
   Docker sur Render/Azure (évolution future).
+
+## Temporary Codespaces preview (development branch only)
+
+The generation-aware React/FastAPI preview is separate from the legacy Streamlit
+deployment above. It is not production hosting and must never be created from or
+merged into `main`. Use only `development/windshield-demand-platform`, keep port 8000
+private through bootstrap and owner smoke testing, and follow
+`docs/DEVELOPMENT.md#github-codespaces-preview`. The application authentication gate
+must be verified before temporarily selecting **Port visibility -> Public**, and the
+port must be returned to **Private** when review ends or any check fails.

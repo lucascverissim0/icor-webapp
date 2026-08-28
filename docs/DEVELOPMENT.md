@@ -260,3 +260,73 @@ production statistical or machine-learning choice. Later model work must define
 the forecast target and canonical windshield identity, then benchmark deterministic
 baselines and candidate statistical/ML models with backtests, calibrated uncertainty,
 and traceable model/data versions.
+
+## GitHub Codespaces preview
+
+This temporary preview is built from the private repository's
+`development/windshield-demand-platform` branch. In GitHub, create a Codespace from
+that exact branch. Do not select `main`. The devcontainer installs locked Python and
+frontend dependencies, labels port 8000, and never starts the service or makes the
+port public automatically.
+
+Generate values interactively on a trusted terminal; the password is hidden, entered
+twice, never accepted as a command argument, and never written to a file:
+
+```text
+uv run python scripts/generate_preview_credentials.py hash-user --username Lucas
+uv run python scripts/generate_preview_credentials.py hash-user --username manager
+uv run python scripts/generate_preview_credentials.py session-secret
+```
+
+In GitHub **Settings -> Codespaces -> Secrets**, create:
+
+- `ICOR_PREVIEW_USERS`: one JSON object such as
+  `{"Lucas":"<first Argon2id verifier>","manager":"<second Argon2id verifier>"}`.
+- `ICOR_PREVIEW_SESSION_SECRET`: the independently generated base64url value.
+- `ICOR_EXPORT_TOKEN`: an independently generated random value of at least 32
+  characters.
+
+Never paste passwords, verifiers, signing keys, export tokens, cookies, or the full
+environment into Git, issues, logs, screenshots, or chat. Give the manager their
+password through a separate approved channel.
+
+Inside the Codespace, keep port 8000 private and run:
+
+```text
+uv run python scripts/bootstrap_codespaces_preview.py --check
+uv run python scripts/bootstrap_codespaces_preview.py --prepare
+uv run python scripts/run_codespaces_preview.py --check
+uv run python scripts/run_codespaces_preview.py
+```
+
+The idempotent prepare command acquires the exact 20 pinned official releases into
+`/workspaces/.icor/evidence/releases`, builds with timestamp
+`2026-08-27T12:00:00+00:00` and seed `20260827`, runs completeness before atomic
+promotion, and compiles `web/dist`. A restart verifies and reuses valid releases and
+the matching active snapshot. Failed validation never changes `active.json`.
+
+Before sharing, use the owner-only forwarded URL to verify anonymous `/healthz`,
+anonymous denial for `/`, assets, `/api`, `/docs`, `/openapi.json`, and exports; then
+verify Lucas login, same-origin planner/opportunity/evidence/completeness flows,
+authorized export, logout, and denial after logout. Verify the manager account in a
+separate private browser. Only then may the owner temporarily change port 8000 to
+**Public**. Repeat the logged-out denial test at the public URL. Return the port to
+**Private** immediately after review or on any failure.
+
+Record reproducibility identity without copying evidence into Git:
+
+```text
+uv run python scripts/build_evidence_snapshot.py status --root /workspaces/.icor/evidence --allow-external-root
+uv run python scripts/build_evidence_snapshot.py verify --root /workspaces/.icor/evidence --allow-external-root
+uv run python scripts/report_snapshot_completeness.py --root /workspaces/.icor/evidence
+uv run python scripts/bootstrap_codespaces_preview.py --prepare
+```
+
+Capture the snapshot ID, database SHA-256, sorted release IDs, counts, versions, and
+zero-error completeness result in `docs/CODEX_HANDOFF.md`; the second prepare must
+report reuse of the same identity. Stop the server with `Ctrl+C`, set port 8000 to
+**Private**, and stop the Codespace when unused. A stopped Codespace retains
+`/workspaces` state until GitHub's retention policy deletes it. Deleting the Codespace
+irreversibly removes its remote evidence; recovery is to create a new Codespace from
+the same development commit, restore Codespaces secrets, and reacquire directly from
+the pinned official publishers. Never upload the paused local release store.

@@ -1689,3 +1689,38 @@ passed in 12.12 seconds with one documented Windows symlink-privilege skip. Ruff
 Resume with Task 5, the idempotent 20-release Codespaces bootstrap.
 
 Context safety: SAFE TO CLEAR — durable handoff is current.
+
+## 2026-08-28 Codespaces checkpoint: bootstrap, runner, and operator runbook
+
+Tasks 5-7 are complete test-first. The bootstrap owns an exact 20-release plan,
+validates Codespaces/Python 3.12/Node/npm/uv 0.11.3/lockfile/disk prerequisites,
+verifies and reuses staged releases, and invokes only repository public CLIs with
+argument arrays. It builds with `2026-08-27T12:00:00+00:00` and seed `20260827`,
+requires the exact completeness identity before promotion, preserves the active
+pointer on failure, and compiles the locked React client. Focused bootstrap plus
+official-source verification is 19 passed with Ruff clean.
+
+The explicit runner rejects non-Codespaces execution, invalid preview configuration,
+missing active state, missing `web/dist`, missing coverage state, and weak/missing
+export authorization before binding the authenticated preview factory. The local
+runner remains loopback-only. The devcontainer no longer auto-starts Streamlit or any
+server; port 8000 is only silently forwarded, carries no public-visibility directive,
+and is labeled `ICOR authenticated preview`. Runner/toolchain/repository-security
+verification is 14 passed with Ruff clean.
+
+The interactive credential helper has no plaintext password argument, performs hidden
+double entry, emits Argon2id verifiers, and generates independent 32-byte base64url
+session keys. Its focused suite is 4 passed with Ruff clean. README, development, and
+deployment documentation now cover browser-created Codespaces, the three secret
+names, private bootstrap and smoke tests, temporary public sharing, shutdown,
+identity capture, retention, rebuild, and deletion recovery. The one secret-helper
+smoke value printed during local verification was disposable, was not stored, and is
+not configured anywhere.
+
+No Codespace, GitHub secret, forwarded/public port, evidence acquisition, candidate,
+promotion, production checkout, `main`, active snapshot, or paused local release store
+changed. `AGENTS.md` remains the only unrelated unstaged user change. Next run Task 8:
+complete local backend/frontend/security gates, authenticated fixture smoke tests,
+protected-state proof, final handoff checkpoint, and development-branch push review.
+
+Context safety: SAFE TO CLEAR — durable handoff is current.

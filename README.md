@@ -53,3 +53,13 @@ licences, and limitations. The active local snapshot uses an exact-normalized
 make/model-family registry, retains ambiguous labels as rejected, assigns every
 usable year-bearing observation to a sourced or explicitly estimated generation,
 and excludes sparse series from forecasts rather than inventing precision.
+
+## Authenticated Codespaces preview
+
+The reviewed development branch includes a temporary, same-origin React/FastAPI
+preview for GitHub Codespaces. It builds the checksum-pinned evidence directly in
+remote `/workspaces` storage, requires separately named Argon2id credentials, and
+never commits evidence or secrets. The forwarded port remains private until the
+owner completes the authenticated smoke test, and it is never made public
+automatically. See [the Codespaces preview runbook](docs/DEVELOPMENT.md#github-codespaces-preview)
+for secret generation, bootstrap, sharing, shutdown, recovery, and deletion steps.
