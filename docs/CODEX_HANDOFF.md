@@ -1665,4 +1665,27 @@ paused-release state changed. `AGENTS.md` remains the only unrelated unstaged us
 change. Resume with Task 4: the login/logout routes, fail-closed preview factory, and
 safe same-origin SPA/static resolver.
 
+## 2026-08-28 Codespaces checkpoint: authenticated same-origin preview
+
+Task 4 is complete test-first. `icor.preview.app:create_preview_app` is a separate
+preview composition over the existing FastAPI product routes. Startup fails closed
+when preview security configuration, the active generation snapshot, or
+`web/dist/index.html` is unavailable. `/healthz` is the sole data-free lifecycle
+response; login uses a size-limited form, generic Argon2id rejection, and the bounded
+throttle. Success issues a short-lived `Secure`, `HttpOnly`, `SameSite=Strict` cookie,
+and POST logout clears the browser session.
+
+`icor.preview.static.resolve_asset` rejects dot traversal, backslashes, percent-encoded
+ambiguity, NULs, missing files, and resolved symlink escape. Existing API routes win
+before the SPA catch-all; unknown `/api/*` paths remain JSON 404s. Compiled hashed
+assets receive their proper content types, while extensionless application navigation
+falls back to the compiled index on the same origin.
+
+The module-absence RED run produced 14 expected failures and one already-passing
+environment-isolation assertion. Fresh combined preview/local-API verification is 46
+passed in 12.12 seconds with one documented Windows symlink-privilege skip. Ruff and
+`git diff --check` pass. No remote, Codespace, port, secret, evidence, production,
+`main`, active-snapshot, or paused-release state changed; `AGENTS.md` remains excluded.
+Resume with Task 5, the idempotent 20-release Codespaces bootstrap.
+
 Context safety: SAFE TO CLEAR — durable handoff is current.
