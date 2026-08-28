@@ -37,6 +37,7 @@ def _unavailable(request: Request) -> JSONResponse:
 @router.get(
     "/summary",
     response_model=RegistrationSummaryResponse,
+    response_model_exclude_none=True,
     responses={503: {"model": ProblemResponse}},
 )
 def summary(request: Request) -> RegistrationSummaryResponse | JSONResponse:

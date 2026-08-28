@@ -9,7 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from icor.application.evidence_review import EvidenceReviewService
-from icor.domain.snapshots import SnapshotManifest
+from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
 from icor.infrastructure.snapshot_store import SnapshotStore
 
 _EEA_SOURCE_ID = "eea-co2-monitoring"
@@ -87,6 +87,7 @@ class RegistrationSummary:
     model_count: int
     model_year_available: bool
     release_ids: tuple[str, ...]
+    versions: SnapshotVersions | None = None
 
 
 class RegistrationService:
@@ -121,14 +122,16 @@ class RegistrationService:
             ) from error
 
     def summary(self) -> RegistrationSummary:
-        years, geographies = self._available_scope()
-        if not years:
-            raise RegistrationUnavailableError(
-                "canonical registration data is unavailable"
-            )
-        latest_year = max(years)
-        total, total_registrations = self._totals("EU27", latest_year, search=None)
         with self._connect() as connection:
+            years, geographies = self._scope(connection)
+            if not years:
+                raise RegistrationUnavailableError(
+                    "canonical registration data is unavailable"
+                )
+            latest_year = max(years)
+            total, total_registrations = self._totals(
+                connection, "EU27", latest_year, search=None
+            )
             release_ids = tuple(
                 row["release_id"]
                 for row in connection.execute(
@@ -154,21 +157,24 @@ class RegistrationService:
             model_count=total,
             model_year_available=False,
             release_ids=release_ids,
+            versions=self.manifest.versions,
         )
 
     def ranking(self, query: RegistrationQuery) -> RegistrationPage:
         query.validate()
-        years, geographies = self._available_scope()
-        if query.year not in years or (
-            query.geography != "EU27" and query.geography not in geographies
-        ):
-            raise RegistrationUnavailableError("requested registration scope is unavailable")
         search = query.search.strip() if query.search and query.search.strip() else None
         grouped_sql, parameters = self._grouped_query(
             query.geography, query.year, search
         )
         offset = (query.page - 1) * query.page_size
         with self._connect() as connection:
+            years, geographies = self._scope(connection)
+            if query.year not in years or (
+                query.geography != "EU27" and query.geography not in geographies
+            ):
+                raise RegistrationUnavailableError(
+                    "requested registration scope is unavailable"
+                )
             rows = connection.execute(
                 f"""WITH grouped AS ({grouped_sql}), ranked AS (
                     SELECT ROW_NUMBER() OVER (
@@ -181,15 +187,15 @@ class RegistrationService:
                 SELECT * FROM ranked ORDER BY rank LIMIT ? OFFSET ?""",
                 (*parameters, query.page_size, offset),
             ).fetchall()
-        if rows:
-            total = int(rows[0]["total_count"])
-            total_registrations = Decimal(
-                str(rows[0]["complete_total_registrations"])
-            )
-        else:
-            total, total_registrations = self._totals(
-                query.geography, query.year, search
-            )
+            if rows:
+                total = int(rows[0]["total_count"])
+                total_registrations = Decimal(
+                    str(rows[0]["complete_total_registrations"])
+                )
+            else:
+                total, total_registrations = self._totals(
+                    connection, query.geography, query.year, search
+                )
         items = tuple(_registration_row(row) for row in rows)
         pages = (total + query.page_size - 1) // query.page_size if total else 0
         return RegistrationPage(
@@ -203,16 +209,19 @@ class RegistrationService:
         )
 
     def _totals(
-        self, geography: str, year: int, search: str | None
+        self,
+        connection: sqlite3.Connection,
+        geography: str,
+        year: int,
+        search: str | None,
     ) -> tuple[int, Decimal]:
         grouped_sql, parameters = self._grouped_query(geography, year, search)
-        with self._connect() as connection:
-            row = connection.execute(
-                f"""WITH grouped AS ({grouped_sql})
-                SELECT COUNT(*) AS model_count,
-                COALESCE(SUM(registrations), 0) AS total_registrations FROM grouped""",
-                parameters,
-            ).fetchone()
+        row = connection.execute(
+            f"""WITH grouped AS ({grouped_sql})
+            SELECT COUNT(*) AS model_count,
+            COALESCE(SUM(registrations), 0) AS total_registrations FROM grouped""",
+            parameters,
+        ).fetchone()
         return int(row["model_count"]), Decimal(str(row["total_registrations"]))
 
     def _grouped_query(
@@ -274,28 +283,29 @@ class RegistrationService:
             tuple(parameters),
         )
 
-    def _available_scope(self) -> tuple[tuple[int, ...], tuple[str, ...]]:
-        with self._connect() as connection:
-            years = tuple(
-                int(row["year"])
-                for row in connection.execute(
-                    """SELECT DISTINCT CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER) AS year
-                    FROM observation o JOIN source_release r ON r.release_id = o.release_id
-                    WHERE r.source_id = ? AND r.publication_status = 'final'
-                    AND o.measure = 'new_registrations' ORDER BY year""",
-                    (_EEA_SOURCE_ID,),
-                )
+    def _scope(
+        self, connection: sqlite3.Connection
+    ) -> tuple[tuple[int, ...], tuple[str, ...]]:
+        years = tuple(
+            int(row["year"])
+            for row in connection.execute(
+                """SELECT DISTINCT CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER) AS year
+                FROM observation o JOIN source_release r ON r.release_id = o.release_id
+                WHERE r.source_id = ? AND r.publication_status = 'final'
+                AND o.measure = 'new_registrations' ORDER BY year""",
+                (_EEA_SOURCE_ID,),
             )
-            geographies = tuple(
-                row["geography"]
-                for row in connection.execute(
-                    """SELECT DISTINCT o.geography FROM observation o
-                    JOIN source_release r ON r.release_id = o.release_id
-                    WHERE r.source_id = ? AND r.publication_status = 'final'
-                    AND o.measure = 'new_registrations' ORDER BY o.geography""",
-                    (_EEA_SOURCE_ID,),
-                )
+        )
+        geographies = tuple(
+            row["geography"]
+            for row in connection.execute(
+                """SELECT DISTINCT o.geography FROM observation o
+                JOIN source_release r ON r.release_id = o.release_id
+                WHERE r.source_id = ? AND r.publication_status = 'final'
+                AND o.measure = 'new_registrations' ORDER BY o.geography""",
+                (_EEA_SOURCE_ID,),
             )
+        )
         return years, geographies
 
     def _connect(self) -> sqlite3.Connection:

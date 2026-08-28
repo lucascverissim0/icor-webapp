@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
 ## Project objective
 
@@ -991,3 +991,634 @@ Coordinator rulings retained from the completed subagent-driven implementation:
 - The fictional-sample safety regression exercises the repository's real credential
   scanner boundary rather than matching source-text keywords. Reverting this ruling
   would affect only the security test, not production behavior.
+
+## 2026-08-27 main integration and local review attempt
+
+Lucas explicitly authorized pushing the current ICOR development version to `main` and
+opening it locally for review. The development branch was refreshed against the public
+remote and confirmed to be a strict fast-forward: `origin/main` remained
+`1ba1d7c41a5fa8354134685b5c85509a0b8f6137`, and it was an ancestor of the development
+HEAD with no commits on the remote-only side. The branch was 81 commits ahead after the
+test-only stabilization commit `945db54` (`test: stabilize Streamlit startup gate`).
+
+The full Python suite initially exposed a timing-only failure in
+`tests/test_app_startup.py`: the real Streamlit AppTest took 8.40 seconds in isolation
+but exceeded its fixed 10-second timeout after the rest of the suite. The application
+render passed in isolation with unchanged login assertions. The test harness timeout was
+raised to 30 seconds; no application behavior changed. Fresh full verification then
+reported `332 passed, 8 skipped, 4 xfailed in 172.69s`. The eight skips were the
+documented Windows symlink-privilege cases, and the strict XFAILs remained `ICOR-001`,
+`ICOR-006`, `ICOR-009`, and `ICOR-030`. `uv lock --check`, maintained Ruff, and
+`uv run pip-audit` passed, with pip-audit skipping only the unpublished local package.
+
+Frontend verification reported 47/47 Vitest tests passing; OpenAPI generation had no
+drift; TypeScript, ESLint, and the production Vite build passed. A four-worker Playwright
+run encountered load-related 30-second timeouts, after which a failed exact-coverage test
+left shared test-database state that caused the next fallback test's duplicate locator.
+The complete unchanged browser suite was rerun with one worker and reported 13/13
+Chromium tests passing, including accessibility, keyboard, responsive, planner recovery,
+deep-link, and exact/fallback coverage mutation flows.
+
+The non-force command `git push origin HEAD:main` was attempted with
+`GCM_INTERACTIVE=never` and failed before changing the remote because Git Credential
+Manager had no usable non-interactive credential. GitHub CLI is not installed. Do not
+claim that `main` was updated; the remote remained at `1ba1d7c`. Lucas must re-establish
+GitHub authentication before retrying the same fast-forward push. Do not open an account
+selector or expose credential material. The pre-existing unrelated working-tree edit to
+`AGENTS.md` remains unstaged and was not included in `945db54`.
+
+The verified local planner was started with launcher PID 30512 on
+`http://127.0.0.1:5300/opportunities`; its API is at `http://127.0.0.1:8140`.
+Both endpoints returned HTTP 200, and `/api/health` returned `status: ok`,
+`fixture_ready: true`, and `data_version: demo-planner-v1`. Port 8000 was already owned
+by an unrelated existing listener, so the reviewed launcher uses 8140 instead. The
+browser open command completed for the opportunity page. Logs are ignored local files
+`.local/planner-20260827-094023.stdout.log` and
+`.local/planner-20260827-094023.stderr.log`. Clearing Codex context does not stop this
+server; stopping PID 30512 or rebooting does.
+
+## 2026-08-27 real-data source validation checkpoint
+
+Lucas requested beginning the replacement of demonstration data with trustworthy free
+real data. This is the next approved product milestone after the evidence-snapshot
+foundation; no application code, source release, or runtime data was changed during
+this initial source-validation checkpoint.
+
+Current official EEA evidence was rechecked on 2026-08-27. The passenger-car CO2
+monitoring family now covers 2010-2025. The newest release is 2025 provisional,
+published 2026-06-25; the latest finalized release is 2024. EEA metadata says the
+dataset contains country-reported newly registered passenger-car records, including
+make, commercial name, type approval/type/variant/version, fuel and technical fields.
+It is public under CC BY 4.0 with DG CLIMA attribution. EEA also states that provisional
+data can still contain inconsistencies and manufacturer corrections, while final data
+is published after that review. The initial recommendation is therefore to ingest the
+2024 final release as the first source-level snapshot and add 2025 provisional only as
+a separately labelled later release. Lucas was asked to confirm whether to follow that
+recommendation or include provisional 2025 immediately.
+
+The existing local planner remains active at `http://127.0.0.1:5300/opportunities`
+with API port 8140 and still serves `demo-planner-v1`; this investigation did not
+restart or stop it. The tracked pre-existing `AGENTS.md` and `docs/CODEX_HANDOFF.md`
+working-tree edits remain uncommitted and must be preserved.
+
+## 2026-08-27 official-source ingestion implementation
+
+Lucas authorized completing all recommended free official sources without further
+questions. The approved design and implementation plan are in
+`docs/superpowers/specs/2026-08-26-real-data-evidence-forecasting-design.md` and
+`docs/superpowers/plans/2026-08-27-official-source-ingestion-implementation.md`.
+Implementation commits are `b044050` (shared parsing contracts), `8efaccd` (EEA/KBA),
+`29a08cf` (UK/production registry), and `26408b8` (pinned acquisition and live fixes).
+
+Four official files were acquired, checksum-verified, and staged below ignored
+`.local/evidence`: EEA `co2cars_2024Fv30` final (138,252,239 bytes,
+SHA-256 `122dab33e931ea04d3ddb4bb2691dae85dc0da14428fc17873d3fb1f648b7b67`),
+KBA FZ10 December 2024 v3 (177,108 bytes,
+`856b9afe515d51aa52bcb34d645dce2c5cdeaf47ef398b4e0a754c1bd5813dbf`),
+DfT VEH0160 GB (28,355,274 bytes,
+`312d09ecabc0f0bcd85d5d2b10ddebf222ba39bb1f833ad60b725708f4f4f06c`),
+and DfT VEH0120 GB (65,878,628 bytes,
+`3bf96499b09fbb5a9710e1257a2dbc2a8a538190cf823430e2dee23709bb73d3`).
+Terms are respectively CC BY 4.0 with EEA/DG CLIMA attribution, DL-DE/BY-2.0 with
+KBA attribution, and OGL v3.0 with Crown copyright/DfT attribution.
+
+Live parsing found and fixed two contract gaps with regressions: 628 EEA records lack
+an identifiable country/make/commercial-name tuple and are now explicitly rejected
+(10,781,686 accepted of 10,782,314), and VEH0120 legitimately contains 1994-1999
+quarter columns. Parser scratch databases now use the OS temporary directory because
+candidate release copies are intentionally read-only. KBA accepted 417 of 479 physical
+rows and reconciled its model-series detail to the published 2,817,331 registration
+total. VEH0160 accepted 60,406 Cars rows of 106,148; VEH0120 accepted 77,299
+Cars+Licensed rows of 245,043. SORN and non-car rows are excluded, and provisional
+columns after 2025 Q4 are not used.
+
+The deterministic build at `2026-08-27T12:00:00Z`, seed `20260827`, produced candidate
+`snapshot-a92867b966f81d7966fe`: database SHA-256
+`442aa0226156f8c8f62e6e2964bbb590a3395e63ab460a7725ef9f31fd5a4a07`,
+542,455 observations, zero warnings, and zero published values. It was not promoted;
+no active pointer changed. This is intentional because make/model/model-year identity,
+cross-source reconciliation, windshield fitment, estimation, and forecasting remain
+future reviewed work. The planner/API still serve `demo-planner-v1`; fresh HTTP checks
+returned 200 for ports 5300 and 8140 even though the original launcher PID is no longer
+the owning process.
+
+Files added or materially updated include `src/icor/evidence/{normalization.py,
+source_records.py,source_registry.py,acquisition.py}`, source adapters under
+`src/icor/evidence/sources/`, `scripts/{acquire_official_evidence.py,
+build_evidence_snapshot.py}`, their evidence tests, this handoff, README, and the
+development guide. Focused verification passed: source adapters 13/13, acquisition 3/3,
+and registry/clean-room 12 passed with one Windows symlink-privilege skip. Fresh final
+verification reported `360 passed, 8 skipped, 4 xfailed in 89.70s`; all eight skips are
+the documented Windows symlink-privilege cases and the four strict XFAILs remain
+ICOR-001/006/009/030. `uv lock --check` resolved 105 packages, maintained Ruff passed,
+`uv run pip-audit` found no known vulnerabilities while skipping only the unpublished
+local package, and `git diff --check` exited zero with line-ending warnings only.
+
+A final read-only ledger reconciliation reported 295,130 EEA observations totalling
+10,781,686 registrations; 417 KBA observations totalling 2,817,331; 73,930 VEH0160
+observations totalling 55,507,758 historical quarterly registrations; and 172,978
+VEH0120 observations totalling 2,491,116,917 historical quarter-end licensed vehicles.
+There are 542,404 unresolved and 51 rejected-mapping observations, zero published
+values, and no `.local/evidence/active.json`. The database checksum was independently
+recomputed and matched the candidate manifest. Exact ignored artifacts created only for
+diagnosis, the incomplete EEA download, the stale pre-reconciliation EEA release, and
+the failed build directory were removed; the four current staged releases and validated
+candidate remain. Preserve the unrelated pre-existing `AGENTS.md` edit. Do not push,
+merge, deploy, promote the candidate, or change the protected `main` checkout without
+explicit authorization. The long-lived development branch/worktree is intentionally
+kept as-is.
+
+## 2026-08-27 source-evidence review workspace
+
+Lucas authorized continuing through all data sources and opening the finished local
+app for review. The local/internal review slice is implemented on
+`development/windshield-demand-platform` in commits `dc4c15f` (plan), `3536a4a`
+(strict read-only candidate service), `f71494e` (typed evidence API), `621063d`
+(React workspace), `0128f9a` (operator documentation), and `3dfb8a7` (URL state,
+browser journey, and responsive/accessibility fixes). Nothing was pushed, merged,
+deployed, promoted, or written to the protected `main` checkout.
+
+The new `/evidence` workspace reviews the exact validated candidate configured by
+`ICOR_EVIDENCE_CANDIDATE`. It shows candidate/snapshot provenance, four official
+release ledgers and terms links, record counts, raw publisher labels, mapping status,
+confidence, row locators, bounded filters, URL-backed search state, and 25-row
+pagination. It prominently states that reported labels are not canonical vehicle
+identities, the candidate is not active, published values are zero, and the data does
+not feed forecasts. The existing planner/opportunity health contract remains
+`demo-planner-v1`; canonical identity, reconciliation, estimation, forecasting, and
+windshield fitment remain later reviewed milestones.
+
+Candidate validation is fail-closed. The service requires the exact candidate
+directory, rejects symlinks/incomplete or non-candidate manifests, verifies directory
+identity, database SHA-256, schema, observation/published counts, and release identity,
+then opens SQLite with `mode=ro` and `PRAGMA query_only`. Search is bound, treats SQL
+wildcards literally, is limited to 100 characters, and page size is capped at 100.
+Missing/invalid configuration returns typed `503 evidence_unavailable` without fixture
+fallback, filesystem paths, tracebacks, or raw exceptions.
+
+Fresh final verification on the completed tree:
+
+- `uv lock --check` resolved 105 packages; maintained Ruff reported all checks passed.
+- Full Python: `371 passed, 8 skipped, 4 xfailed in 54.93s`; the skips are documented
+  Windows symlink-privilege cases and the strict XFAILs remain ICOR-001/006/009/030.
+- Evidence API regression: 5/5 passed after the import-only Ruff correction.
+- Frontend: 53/53 Vitest tests passed; TypeScript, ESLint, production Vite build, and
+  regenerated OpenAPI drift check all exited zero.
+- Real-candidate Chromium journey: 4/4 passed in 1.3 minutes, covering four releases,
+  URL-backed `ALFA ROMEO` search, 390px/1440px reflow, keyboard reachability, and zero
+  serious/critical axe findings. Reviewed screenshots are ignored local files
+  `.local/review/evidence-mobile.png` and `.local/review/evidence-desktop.png`.
+- `git diff --check` exited zero apart from informational Windows line-ending warnings.
+
+A fresh persistent review launcher is running with launcher PID 16408. Its web process
+owns `127.0.0.1:5320` as PID 55528 and API process owns `127.0.0.1:8160` as PID 49356.
+Live checks returned HTTP 200 for health and `/evidence`; the API reported candidate
+`snapshot-a92867b966f81d7966fe`, status `candidate`, 542,455 observations, four
+releases, and zero published values. A live `ALFA ROMEO` query returned 4,797 rows with
+`ALFA ROMEO` first. Logs are ignored files `.local/evidence-review-20260827.stdout.log`
+and `.local/evidence-review-20260827.stderr.log`; stderr contains normal Uvicorn startup
+only. Clearing Codex context does not stop the server; stopping launcher PID 16408 (and
+its children if necessary) or rebooting does. The older demo instance on ports
+5300/8140 was not stopped or changed.
+
+Preserve the pre-existing unrelated modifications to `AGENTS.md` and this handoff.
+The long-lived development branch/worktree remains intentionally available for the
+next real-data milestone. Do not push, merge, deploy, promote the candidate, or change
+the protected checkout without explicit authorization.
+
+Context safety: SAFE TO CLEAR — durable handoff is current.
+
+## 2026-08-28 restart checkpoint: implementation in progress
+
+Lucas asked for a lossless checkpoint before restarting the computer. Work remains
+strictly isolated in `C:\Users\LucasCravoVERISSIMO\icor-webapp-development` on branch
+`development/windshield-demand-platform`; the protected checkout, production,
+deployment, remote, and unrelated Video app processes were not changed. A reboot will
+stop the previously documented local ICOR launcher and servers.
+
+The approved implementation plan is committed as `02df582` at
+`docs/superpowers/plans/2026-08-27-multiyear-generation-planner-implementation.md`.
+The following tested implementation slices are committed:
+
+- `f979eba feat: add official source inventory contracts`
+- `6cf83f2 feat: separate vehicle year semantics`
+- `424e4dd feat: ingest UK vehicle age evidence`
+- `7b7460d feat: define deterministic generation resolution`
+
+The evidence schema is version 3 and now stores registration cohort, manufacture,
+and model year independently while reading and migrating older databases. The new
+generation domain includes validated registry entries, one selected assignment,
+ranked alternatives, method, confidence, training weight, resolver/registry versions,
+and stable estimated-generation identities. Resolution precedence is exact identity,
+descriptor overlap, unique window, active-month coverage, and the approved newer-
+launch tie-break.
+
+Two official finalized DfT/DVLA VEH0124 licensed-stock files are staged immutably:
+
+- `uk-dft-veh0124-am-2025-final-20260429`: 54,874,318 bytes, SHA-256
+  `86fe32407fde0a92cb1fd4724e2b586917100d975b4d64dd8c972644418ecc3a`,
+  566,977 raw / 173,252 accepted / 393,725 rejected rows.
+- `uk-dft-veh0124-nz-2025-final-20260429`: 39,295,208 bytes, SHA-256
+  `6a04aebfe77953a4686a633e6081351c1853119488e6738958df738756115984`,
+  399,612 raw / 138,302 accepted / 261,310 rejected rows.
+
+The loader preserves `YearFirstUsed` and `YearManufacture` separately. Official
+`[x]`, `[z]`, blank, and null year markers become null fields with
+`registration_cohort_year_missing`, `manufacture_year_missing`, or
+`year_semantics_missing` validation flags; it never invents a year. Both complete raw
+files were parsed directly after the fix and returned exactly the manifest counts
+above. Focused verification immediately before checkpoint was:
+
+- `python -m pytest tests/evidence/sources/test_uk_dft_age.py tests/domain/test_generations.py tests/generations -q` — 13 passed.
+- UK acquisition/registry/parser focused suite — 11 passed.
+- generation domain/resolver/estimator focused suite — 11 passed.
+- Ruff over all new parser and generation files — all checks passed.
+- The last full baseline before these slices was 416 passed, 8 skipped, 4 xfailed;
+  the eight skips are Windows symlink privilege cases and the four expected failures
+  are ICOR-001/006/009/030. A new full-suite run is still required before completion.
+
+A deterministic six-release snapshot build was started with build time
+`2026-08-28T08:00:00+00:00` and seed `20260828`, then cleanly interrupted with Ctrl-C
+at Lucas's restart request. The incomplete candidate directory is
+`.local/evidence/candidates/.build-de2cb5abc8d543bf8c1ce7b10afd0dbb`; its database
+was actively growing (approximately 2.39 GB at the last check). It is not promoted.
+The active snapshot remains unchanged and verified by `status` as
+`snapshot-2f13ba3f0cd083c7eea8`, SHA-256
+`05677e564f10794ae296799fb609ffadbb5b93cfff8b8bd79ae1e327e28df968`,
+542,455 observations, using only the four earlier releases. No snapshot build process
+is active at checkpoint.
+
+Resume by reading this file and `AGENTS.md`, checking Git status, and confirming the
+active snapshot. Preserve the existing unrelated modifications to `AGENTS.md` and
+this accumulated handoff. Then rerun the deterministic six-release build using the
+four active release IDs plus the two VEH0124 IDs above. The builder creates a new
+candidate; do not promote until `verify` passes. After that, continue the plan at EEA
+2010 onward acquisition, generation persistence and assignment transformation,
+cohort/survival/opportunity computation, snapshot-backed APIs/UI/export, and full
+clean-room verification. The current high-level plan has source/year semantics and
+the generation contracts substantially implemented; generation persistence,
+historical EEA acquisition, cohorts, opportunities, APIs/UI/export, final snapshot
+promotion, and full verification remain incomplete.
+
+Context safety: SAFE TO CLEAR — durable handoff is current.
+
+## 2026-08-27 canonical official-registration product
+
+Lucas authorized moving beyond demo-only behavior and asked for the web app to be
+built through a finalized real-data slice. The default React/FastAPI route now opens
+`/registrations` and serves finalized 2024 EU-27 passenger-car registrations from the
+verified EEA release. It ranks exact-normalized make/model families, supports bounded
+URL-backed search and pagination, and explicitly states that registration year is not
+model year. Windshield fitment, model year, replacement demand, and forecasts are not
+inferred. The existing `/planner` and `/opportunities` workflows remain secondary,
+clearly labelled prototypes using demonstration forecast data.
+
+Implementation on `development/windshield-demand-platform` is committed through
+`5de6c24`. The task commits are `9b4fe7d` (plan), `7d6a544` (nullable canonical model
+year), `a03e544` (exact-normalized identity), `d2dd56b` (registration query service),
+`a85d175` (typed API), `7161708` (official-data landing page), `1b53f57` (active
+snapshot composition), `ecee2e9` (atomic batch replay performance), `a9403ea`
+(efficient pre-join aggregation), `74b7ea1` (activation/browser/docs), and `5de6c24`
+(review formatting). Nothing was pushed, merged, or deployed, and the protected main
+checkout was not changed.
+
+The deterministic official build used the four staged release IDs documented above,
+build time `2026-08-27T12:00:00Z`, and seed `20260827`. It produced and locally
+promoted `snapshot-2f13ba3f0cd083c7eea8`, database SHA-256
+`05677e564f10794ae296799fb609ffadbb5b93cfff8b8bd79ae1e327e28df968`,
+542,455 observations, zero warnings, and zero published forecast values. A repeated
+build invocation returned the identical snapshot ID and digest. Active status and a
+separate full repository verification both reported 542,455 observations.
+
+Independent read-only SQL audit found 10,401 canonical model families, 542,404
+exact-normalized mappings, 51 rejected ambiguous observations, zero orphaned mappings,
+and source counts of 295,130 EEA, 417 KBA, 172,978 VEH0120, and 73,930 VEH0160.
+The product query reports 10,506,946 EU-27 registrations across 6,929 ranked model
+families. The first three are DACIA SANDERO (257,883), RENAULT CLIO (211,260), and
+PEUGEOT 208 (178,064). The service uses only finalized EEA member-state rows for this
+ranking, so overlapping KBA and non-EU EEA rows are excluded.
+
+Fresh final verification on the finished tree:
+
+- Full Python: `406 passed, 8 skipped, 4 xfailed in 65.70s`. The skips are the
+  documented Windows symlink-privilege cases; strict legacy XFAILs remain
+  ICOR-001/006/009/030.
+- Frontend: OpenAPI generation had no drift; all 62 Vitest tests passed; TypeScript,
+  ESLint, and the Vite production build exited zero.
+- Combined real-data Chromium: 7/7 passed in 3.3 minutes, covering the official
+  landing/search journey, evidence search, 390px and 1440px layouts for both pages,
+  keyboard reachability, and no serious/critical accessibility findings.
+- `uv lock --check` resolved 105 packages, Ruff reported all checks passed, and
+  `pip-audit` found no known vulnerabilities (only the unpublished local package was
+  skipped). The complete committed-range `git diff --check` review found one extra
+  EOF blank line; it was removed in `5de6c24`, and the focused identity suite passed
+  8/8 afterward.
+
+A persistent local-only review launcher is running as PID 3316 with web port 5340 and
+API port 8180. Fresh HTTP checks returned 200/`ok`; the live API reported the active
+snapshot, 10,506,946 registrations, 6,929 families, and DACIA SANDERO at 257,883.
+Open `http://127.0.0.1:5340/` for the official product and `/evidence` for provenance.
+Ignored logs are `.local/official-review-20260827.stdout.log` and
+`.local/official-review-20260827.stderr.log`. Clearing Codex context does not stop the
+server; stopping launcher PID 3316 and its children, or rebooting, does. Older review
+and demo instances on ports 5320/8160 and 5300/8140 were not changed.
+
+Preserve the pre-existing unrelated `AGENTS.md` modification. This handoff remains
+intentionally uncommitted because it already contained pre-existing user/session
+changes that were not safe to absorb into a feature commit. Keep the development
+branch and worktree in place. Do not push, merge, deploy, or modify the protected main
+checkout without explicit authorization.
+
+## 2026-08-27 local official-product restart
+
+Lucas reported that the ICOR page had become unreachable while he was navigating and
+asked for the app to be started again. The previously documented listeners on ports
+5340 and 8180 were no longer active. The existing official-data application was
+restarted without source, data, Git, production, or deployment changes. The launcher
+is PID 30064, the Vite web process is PID 19296 on `127.0.0.1:5340`, and the FastAPI
+process is PID 35500 on `127.0.0.1:8180`. The launcher uses the active evidence root
+and exact candidate `snapshot-2f13ba3f0cd083c7eea8`.
+
+Fresh live verification returned HTTP 200 for `/`, `/evidence`, `/planner`, and
+`/opportunities`, and `/api/health` returned `status: ok`. The official registration
+summary returned the expected snapshot, 10,506,946 registrations, 6,929 model
+families, EU-27 geography, and finalized 2024 release identity. Ignored process logs
+are `.local/official-review-restart-20260827.stdout.log` and
+`.local/official-review-restart-20260827.stderr.log`. Clearing Codex context does not
+stop the app; stopping launcher PID 30064 and its children, or rebooting, does.
+
+Preserve the existing unrelated `AGENTS.md` modification and the accumulated handoff
+edits. Do not push, merge, deploy, or modify the protected main checkout without
+explicit authorization.
+
+## 2026-08-27 multi-year generation-aware product request
+
+Lucas confirmed that the demonstration data remaining in `/planner` and
+`/opportunities` is unacceptable for the intended product. He requested ingestion of
+all trustworthy historical years that can be obtained, separation by vehicle year,
+mapping model records into generation classes, and replacement of both demonstration
+workflows only after the historical and generation data is complete enough for review.
+This is an architectural milestone spanning evidence acquisition, year semantics,
+canonical identity/generation mapping, forecasts, APIs, and both web workflows.
+
+Initial design investigation reconfirmed that only finalized EEA 2024 feeds the
+official registration page and that the planner/opportunity repository remains
+`demo-planner-v1`. Public-source semantics require an explicit decision before design:
+first-registration year cannot truthfully be renamed model year. UK DfT publishes
+`YearFirstUsed` and `YearManufacture` as separate fields, while EU registrations can
+retain type-approval/type/variant/version identifiers that are stronger generation
+signals than calendar year. Volkswagen's official history identifies Golf VII as
+2012-2019 with a transition into Golf VIII, disproving the example 2020-2026 Mk7 range
+and illustrating boundary overlap. The recommended rule awaiting Lucas's approval is
+to retain first-registration year as a cohort year, use true manufacture/model-year
+values only where sourced, map generations through authoritative identifiers and
+reviewed evidence with confidence, and leave ambiguous records explicitly unmapped.
+No application implementation or source acquisition was started while this semantic
+decision remains open. The local app continues to run under the restart recorded
+above.
+
+Lucas approved using first-registration year as credible proxy evidence for assigning
+as many vehicles as possible to a generation, prioritizing broad machine-learning
+coverage. The implementation must preserve the publisher's first-registration year,
+record that the generation assignment is inferred rather than manufacturer-confirmed,
+and attach provenance and confidence so inferred labels do not silently become ground
+truth. The remaining source-policy decision is whether generation mappings may use
+reputable licensed non-government sources when official records and manufacturer
+archives are incomplete.
+
+Lucas approved the recommended hybrid source hierarchy: government registration and
+type-approval evidence first, manufacturer generation archives second, and reputable
+licensed open vehicle registries when corroborated. Forums, dealer listings, and
+unsupported AI-generated mappings are not accepted as truth. The generation design
+must now specify how transition-year observations are represented without forcing
+known ambiguity into incorrect hard training labels.
+
+Lucas clarified that the ML dataset requires one concrete generation approximation
+per usable vehicle rather than unresolved probabilistic candidate labels. The revised
+recommended rule is deterministic: exact type/variant/version or manufacturer evidence
+wins; otherwise first-registration year is the primary generation signal. A unique
+generation active in that year is high-confidence. Transition years use additional
+model/body/type evidence where available, then a documented deterministic market-date
+tie-break, with lower confidence if ambiguity remains. The chosen generation, method,
+candidate alternatives, evidence, and confidence remain stored so the hard label is
+usable for ML without erasing approximation risk.
+
+Lucas approved the historical-data foundation: ingest every validated finalized EEA
+annual release available from 2010 onward; retain separately labelled provisional
+years; use the already acquired UK 2001-2025 first-registration and 1994-2025 active-
+fleet histories; add available KBA years and further licensed European national
+sources through isolated adapters; preserve immutable artifacts, checksums, licences,
+source semantics, and row provenance; store registration/manufacture/model year as
+separate fields; introduce a versioned market-aware generation registry; and promote
+only complete validated multi-year snapshots. “All data” means every legally reusable
+release that passes validation, not untraceable scraped values.
+
+Lucas approved deterministic generation resolution. Raw publisher labels remain;
+exact type-approval/type/variant/version/body/manufacturer identifiers take precedence;
+first-registration date is matched to market-specific generation/facelift windows;
+overlaps use detailed descriptors, active-month coverage, and then the approved newer-
+generation tie-break. Where no sourced window exists, the pipeline creates a stable
+chronological estimated generation from registration continuity and structural changes
+without inventing an official Mk name. Every usable registration receives one hard
+generation ID plus alternatives, evidence, resolver version, confidence, and ML
+training weight. Overlapping publications are reconciled to avoid duplicate counts.
+
+Lucas approved replacing `demo-planner-v1` at runtime with one promoted real-data
+snapshot and no demo fallback. The planner will expose historical registrations,
+cohort-based active-fleet reconstruction, generation evidence, confidence, assumptions,
+and horizons. Opportunities will rank real generation-level P10/P50/P90 windshield
+replacement opportunity while keeping production readiness separate. Until proprietary
+fitment truth is integrated, claims stop at generation/body/facelift level and disclose
+that multiple windshield configurations can remain within a generation. The official
+registration, evidence, planner, opportunity, and versioned ML-export workflows all use
+the same snapshot; every value retains provenance and no LLM-generated value enters
+calculation or training data.
+
+Lucas approved the final validation/completion design and the complete architectural
+design. The durable specification is committed as `d01c74b` at
+`docs/superpowers/specs/2026-08-27-multiyear-generation-planner-design.md`. It defines
+the EU-first multi-year source foundation, separate year semantics, deterministic
+generation resolution for every usable canonical observation, estimated-generation
+fallbacks, confidence/training weights, reconciliation, cohort/fleet reconstruction,
+assumption-led generation-level replacement opportunity, snapshot-backed UI/ML export,
+failure behavior, verification, exact completion criteria, and delivery sequence. Its
+self-review found no placeholders or missing required sections, and `git diff --check`
+for the specification exited zero. The Superpowers design workflow now requires Lucas
+to review and approve the written specification before an implementation plan is
+created. No application behavior, source data, active snapshot, server process, or
+production state changed during specification work.
+
+## 2026-08-28 latest-checkpoint pointer
+
+The restart checkpoint headed `2026-08-28 restart checkpoint: implementation in
+progress` earlier in this file is the authoritative latest state and supersedes the
+older design-stage next-action text immediately above. The specification and plan are
+approved, five implementation commits through `7b7460d` are present, the interrupted
+six-release candidate is not promoted, and the active snapshot is still
+`snapshot-2f13ba3f0cd083c7eea8`. Resume from that checkpoint after reboot. No snapshot
+build process is active; reboot will stop any remaining local web/API processes.
+
+## 2026-08-28 second restart checkpoint: generation persistence complete
+
+Lucas requested another restart-safe checkpoint after work resumed. The verified
+generation-planning schema and mapping slice is committed as
+`c9729f7 feat: extend snapshot for generation planning`. The branch head is now
+`c9729f7`; only the pre-existing unrelated `AGENTS.md` change and this accumulated
+handoff remain uncommitted.
+
+The evidence ledger is now schema version 4 with a forward-only v3-to-v4 migration.
+It immutably persists generation registry entries, exactly one selected assignment
+per usable observation, ranked alternatives, cohort estimates and observation
+lineage, generation-level opportunity intervals and cohort lineage, and annual
+completeness records. Snapshot reproducibility versions now include the generation
+registry and resolver. Canonical snapshot replay retains every new derived table.
+
+Promotion validation is fail-closed for generation-enabled candidates: it reports
+missing usable-observation assignments, missing generation schema or completeness,
+orphan/incompatible lineage, invalid training weights, method-version mismatch,
+invalid/reversed generation windows, and invalid cohort/opportunity intervals. The
+official build composition now runs a deterministic post-load generation finalizer.
+Registration observations use their registration period as the cohort signal; age
+evidence uses `YearFirstUsed`, then separately disclosed manufacture year only when
+first-use is absent; aggregate stock with no cohort/manufacture semantics remains
+evidence-only. Sparse histories receive one broad, explicitly named estimated
+generation rather than an invented manufacturer designation, with low confidence and
+training weight 0.35. The batch result requires assigned count to equal usable count.
+
+Fresh checkpoint verification:
+
+- Focused domain, resolver, mapping, snapshot-build, schema-migration, source-registry,
+  and promotion-validation suite: 132 passed, 1 skipped in 11.49 seconds. The one skip
+  is the documented Windows symlink privilege case.
+- Ruff over every changed implementation and test file: all checks passed.
+- `git diff --check` exited zero before commit.
+
+The active local evidence pointer was not changed and remains
+`snapshot-2f13ba3f0cd083c7eea8` with the four earlier official releases, 542,455
+observations, and digest
+`05677e564f10794ae296799fb609ffadbb5b93cfff8b8bd79ae1e327e28df968`.
+No new candidate was built or promoted during this resumed slice and no ICOR build
+process is active. Reboot will stop any remaining local web/API processes.
+
+Resume by reading `AGENTS.md` and this file, verifying branch/status/active snapshot,
+and continuing with finalized EEA 2010-onward acquisition and annual parser
+generalization. Do not rerun the large six-release build yet: the generation-enabled
+validator intentionally requires completeness materialization, which is not implemented
+until the cohort/opportunity slice. After historical EEA acquisition, implement
+reconciliation, cohort survival, seeded P10/P50/P90 opportunity and completeness;
+then replace the demo runtime/API/UI/export, run the deterministic build twice, verify,
+and only then promote locally. Production, remote, protected checkout, push, merge,
+and deployment remain untouched and unauthorized.
+
+Checkpoint correction: adding generation version fields initially made the legacy
+eight-field active manifest fail strict decoding and identity recomputation. This was
+diagnosed before handoff, fixed test-first, and committed as
+`f27399b fix: preserve legacy snapshot compatibility`. Legacy manifests decode with
+explicit generation-v0 defaults and may verify against their original identity;
+generation-enabled manifests retain the stricter new identity. The focused manifest,
+identity, and snapshot-store suite passed 54 tests with 3 Windows symlink-privilege
+skips, Ruff passed, and the CLI again confirmed active snapshot
+`snapshot-2f13ba3f0cd083c7eea8` with its original digest and 542,455 observations.
+The checkpoint branch head is `f27399b`.
+
+## 2026-08-28 latest checkpoint: remote Codespaces pivot approved
+
+Lucas stopped the local full-snapshot path because the working computer should not
+retain or construct the remaining multi-gigabyte evidence database. The new approved
+direction is an authenticated GitHub Codespaces preview using Lucas's personal GitHub
+account, with no new software installed on the working computer. Initial access is for
+Lucas and the ICOR manager; later employee access will migrate to a separately designed
+OIDC/SSO boundary.
+
+The complete architecture, components/data flow, security, failure/recovery, and
+verification design was approved in conversation. The written specification is
+committed at
+`docs/superpowers/specs/2026-08-28-codespaces-preview-storage-design.md` in commits
+`996427f` and formatting correction `dc3053a`. Branch HEAD is `dc3053a` on
+`development/windshield-demand-platform`. The specification requires a private
+development branch, direct remote acquisition of the 20 checksum-pinned official
+releases, a persistent `/workspaces` evidence root, atomic validation/promotion, a
+same-origin compiled React/FastAPI service, individually named preview credentials held
+only in Codespaces secrets, no demo fallback, and unchanged production/main state.
+Per the design workflow, Lucas must review and approve the written specification before
+the implementation plan is created. No deployment implementation, remote branch push,
+Codespace, GitHub secret, or public port has been created yet.
+
+No GitHub CLI or other software will be installed locally. Existing Git 2.54.0 and Git
+Credential Manager successfully performed authenticated read-only access to the private
+remote `https://github.com/lucascverissim0/icor-webapp.git`. Remote `main` remains
+`1ba1d7c41a5fa8354134685b5c85509a0b8f6137`; the development branch does not yet exist
+remotely. Codespace creation will use GitHub's website after the reviewed implementation
+is committed and pushed.
+
+Multiple orphaned continuations of the earlier local 20-release command repeatedly
+restarted after Lucas requested remote storage. Every process chain was stopped, and
+only its exact validated `.build-*` candidate directory was removed. Across the four
+cleanups, 6,701,900,080 bytes of incomplete staging data were reclaimed. The final
+authoritative process/staging check reported zero snapshot-build processes and zero
+`.build-*` directories.
+
+To prevent that orphaned command from consuming more disk, the complete immutable local
+release store was preserved by an atomic, reversible rename from
+`.local/evidence/releases` to `.local/evidence/releases.local-build-paused`. Do not
+delete the paused directory. A deliberately approved future local build would first
+verify that `.local/evidence/releases` is absent and then rename the paused directory
+back to exactly `.local/evidence/releases`. Remote Codespaces acquisition will download
+official sources directly and does not depend on this local directory.
+
+After the pause, the active snapshot CLI verified state `active`, snapshot
+`snapshot-2f13ba3f0cd083c7eea8`, database SHA-256
+`05677e564f10794ae296799fb609ffadbb5b93cfff8b8bd79ae1e327e28df968`, 542,455
+observations, the four earlier official releases, and zero warnings. The active pointer,
+promoted snapshot, production checkout, remote `main`, and unrelated `AGENTS.md` change
+were not modified.
+
+The implementation work after `a965bc7` remains uncommitted exactly as shown by Git
+status: API/application/domain/repository performance and snapshot-runtime changes,
+frontend opportunity/schema changes, completeness reporting and integration tests,
+README/development documentation, this handoff, plus the pre-existing unrelated
+`AGENTS.md`. Preserve these changes. Do not stage `AGENTS.md`.
+
+Resume by reading `AGENTS.md`, this latest checkpoint, and the committed Codespaces
+design. Verify branch HEAD, active snapshot, zero local build processes/staging, and the
+paused release-store path. Then obtain Lucas's written-spec approval, invoke the
+`writing-plans` workflow, and implement the preview test-first. Before any GitHub push,
+commit and re-run the full application gates; push only
+`development/windshield-demand-platform`. Never merge, push `main`, modify the protected
+production checkout, expose an unauthenticated port, or put evidence/secrets in Git.
+
+## 2026-08-28 Codespaces implementation start: product baseline recovered
+
+Lucas approved beginning the authenticated Codespaces preview build. The committed
+implementation plan is `2faa6d0` at
+`docs/superpowers/plans/2026-08-28-codespaces-preview-storage-implementation.md`.
+Before preview-specific implementation, the accumulated generation-aware runtime slice
+was recovered and verified on branch `development/windshield-demand-platform`, whose
+pre-baseline-commit HEAD was `2faa6d0`.
+
+A performance regression in `GenerationRegistry.candidates()` was reproduced
+test-first: the registry rescanned every unrelated generation for every observation.
+The focused failing test observed 1,000 unrelated reads. Indexing entries by canonical
+vehicle and market reduced a controlled 50,000-entry lookup benchmark from about
+2.47 ms to about 0.0023 ms per lookup while preserving resolver behavior. The focused
+registry/resolver/mapping suite passed 7 tests and Ruff passed afterward.
+
+Fresh recovered-product verification:
+
+- Focused product suite: 33 passed in 22.83 seconds. The initial sandbox run failed
+  before application code because Windows denied pytest's default temp directory; the
+  same exact suite passed outside that restriction.
+- Frontend: 14 files / 62 Vitest tests passed; TypeScript and ESLint exited zero.
+- Ruff over every changed Python implementation and test file: all checks passed.
+- `git diff --check` exited zero.
+- `.local/evidence/releases.local-build-paused` exists,
+  `.local/evidence/releases` does not, and the candidate staging count is zero.
+
+Several local diagnostic launch attempts were stopped after the authoritative
+Codespaces checkpoint was found at the end of this handoff. Their exact scheduler
+entry, temporary helper files, logs, and build root were removed; no candidate was
+published or promoted. The paused immutable release directory, active snapshot,
+protected production checkout, remote, and deployment were not changed. Codespaces
+implementation now proceeds exclusively from the approved remote-storage plan.
+
+Context safety: SAFE TO CLEAR — durable handoff is current.

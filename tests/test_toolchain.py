@@ -51,7 +51,7 @@ def test_planner_local_operation_is_documented() -> None:
         "scripts/run_planner_dev.py",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:8000/docs",
-        "demonstration data",
+        "no runtime demonstration-data fallback",
         "no production secrets",
         "no customer data",
     )

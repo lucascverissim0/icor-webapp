@@ -14,6 +14,7 @@ from icor.domain.planner import (
     PlanningConfiguration,
     filter_sort_paginate,
 )
+from icor.domain.snapshots import SnapshotVersions
 
 
 class PlannerRepository(Protocol):
@@ -31,6 +32,7 @@ class ScenarioMetadata:
     evidence_status: EvidenceStatus
     data_version: str
     updated_at: datetime
+    versions: SnapshotVersions | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,7 @@ class PlannerService:
                 evidence_status=evidence_statuses[0],
                 data_version=data_versions.pop(),
                 updated_at=max(record.updated_at for record in records),
+                versions=getattr(self._repository, "versions", None),
             ),
         )
 

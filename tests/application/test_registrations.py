@@ -227,7 +227,7 @@ def test_ranking_aggregates_observations_before_vehicle_lookup(
 ) -> None:
     service = RegistrationService.from_candidate(mapped_candidate)
 
-    sql, _ = service._grouped_query(None)
+    sql, _ = service._grouped_query("EU27", 2024, None)
 
     assert "JOIN identity_mapping" not in sql
     assert sql.index("GROUP BY o.canonical_vehicle_id") < sql.index(
@@ -259,7 +259,7 @@ def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> 
 
     assert summary.snapshot_id == mapped_candidate.name
     assert summary.status == "candidate"
-    assert summary.geographies == ("EU27",)
+    assert summary.geographies == ("EU27", "DE", "FR", "NO")
     assert summary.years == (2024,)
     assert summary.total_registrations == Decimal("20")
     assert summary.model_count == 2
@@ -270,8 +270,8 @@ def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> 
 @pytest.mark.parametrize(
     "query",
     (
-        RegistrationQuery(geography="WORLD"),
-        RegistrationQuery(year=2025),
+        RegistrationQuery(geography=""),
+        RegistrationQuery(year=1899),
         RegistrationQuery(page=0),
         RegistrationQuery(page_size=101),
         RegistrationQuery(search="x" * 101),
@@ -280,6 +280,19 @@ def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> 
 def test_query_rejects_unsupported_or_unbounded_inputs(query: RegistrationQuery) -> None:
     with pytest.raises(ValueError):
         query.validate()
+
+
+@pytest.mark.parametrize(
+    "query",
+    (RegistrationQuery(geography="WORLD"), RegistrationQuery(year=2025)),
+)
+def test_ranking_rejects_scope_absent_from_snapshot(
+    mapped_candidate: Path, query: RegistrationQuery
+) -> None:
+    service = RegistrationService.from_candidate(mapped_candidate)
+
+    with pytest.raises(RegistrationUnavailableError, match="scope is unavailable"):
+        service.ranking(query)
 
 
 def test_candidate_checksum_tampering_is_typed_unavailable(mapped_candidate: Path) -> None:

@@ -25,13 +25,13 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         yield test_client
 
 
-def test_health_reports_fixture_readiness(client: TestClient) -> None:
+def test_health_reports_snapshot_readiness(client: TestClient) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "fixture_ready": True,
+        "snapshot_ready": True,
         "data_version": "demo-planner-v1",
     }
     assert response.headers["x-correlation-id"]

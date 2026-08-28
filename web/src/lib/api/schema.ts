@@ -502,8 +502,8 @@ export interface components {
         HealthResponse: {
             /** Data Version */
             data_version: string;
-            /** Fixture Ready */
-            fixture_ready: boolean;
+            /** Snapshot Ready */
+            snapshot_ready: boolean;
             /** Status */
             status: string;
         };
@@ -549,11 +549,14 @@ export interface components {
             integrity_warnings: string[];
             /** Items */
             items: components["schemas"]["OpportunityRowResponse"][];
+            /** Snapshot Id */
+            snapshot_id?: string | null;
             /** Strategy Name */
             strategy_name: string;
             /** Strategy Version */
             strategy_version: string;
             summary: components["schemas"]["OpportunitySummaryResponse"];
+            versions?: components["schemas"]["SnapshotVersionsResponse"] | null;
         };
         /** OpportunityRowResponse */
         OpportunityRowResponse: {
@@ -682,6 +685,7 @@ export interface components {
             identity_confidence: components["schemas"]["ConfidenceResponse"];
             /** Market */
             market: string;
+            method_versions?: components["schemas"]["SnapshotVersionsResponse"] | null;
             /** Model */
             model: string;
             /** Model Year End */
@@ -828,6 +832,7 @@ export interface components {
             status: string;
             /** Total Registrations */
             total_registrations: string;
+            versions?: components["schemas"]["SnapshotVersionsResponse"] | null;
             /** Years */
             years: number[];
         };
@@ -845,6 +850,7 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            versions?: components["schemas"]["SnapshotVersionsResponse"] | null;
         };
         /** SnapshotVersionsResponse */
         SnapshotVersionsResponse: {
@@ -1007,6 +1013,15 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
     observations_api_v1_evidence_observations_get: {
@@ -1124,6 +1139,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
     opportunity_configurations_api_v1_opportunities__group_id__configurations_get: {
@@ -1186,6 +1210,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
     configurations_api_v1_planner_configurations_get: {
@@ -1227,6 +1260,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1283,6 +1325,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
     planner_options_api_v1_planner_options_get: {
@@ -1321,6 +1372,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
     production_coverage_api_v1_production_coverage_get: {
@@ -1343,6 +1403,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1403,6 +1472,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1472,6 +1550,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
         };
     };
     delete_production_coverage_api_v1_production_coverage__coverage_id__delete: {
@@ -1523,6 +1610,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

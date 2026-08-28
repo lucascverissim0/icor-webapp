@@ -104,13 +104,15 @@ the separate `promote` command.
 
 ### Official evidence acquisition
 
-The acquisition command accepts only four exact HTTPS resources and verifies an exact
-byte size and SHA-256 before immutable staging. `--artifact` can stage a previously
-downloaded copy of the same pinned file; omit it to download from the allowlisted URL.
+The acquisition commands accept only pinned official resources and verify exact byte
+sizes and SHA-256 digests before immutable staging. EEA 2010–2023 uses the official
+canonical aggregate export contract; EEA 2024 retains its finalized row-level archive.
+`--artifact` can stage a previously downloaded pinned copy.
 
 ```powershell
 $evidenceRoot = '.local/evidence'
 uv run python scripts/acquire_official_evidence.py --source eea-2024-final --root $evidenceRoot
+uv run python scripts/acquire_eea_history.py --root $evidenceRoot
 uv run python scripts/acquire_official_evidence.py --source kba-fz10-2024 --root $evidenceRoot
 uv run python scripts/acquire_official_evidence.py --source uk-veh0160-gb --root $evidenceRoot
 uv run python scripts/acquire_official_evidence.py --source uk-veh0120-gb --root $evidenceRoot
@@ -130,13 +132,16 @@ their overlap is not treated as independent confirmation. The UK active-fleet pa
 uses only `Cars` with `LicenceStatus=Licensed`; SORN remains in the raw artifact and is
 not added to active fleet. Columns after 2025 Q4 are excluded as provisional.
 
-The current promoted local snapshot is `snapshot-2f13ba3f0cd083c7eea8` with 542,455
-observations, 10,401 exact-normalized canonical model families, zero warnings, and zero
-published forecast values. Its SHA-256 is
-`05677e564f10794ae296799fb609ffadbb5b93cfff8b8bd79ae1e327e28df968`.
-It supports the official 2024 EU-27 registration ranking only. Model year,
-windshield fitment, replacement demand, reconciliation, estimation, and forecasting
-remain unresolved and are not inferred.
+After building, inspect a candidate without exposing local paths:
+
+```powershell
+uv run python scripts/report_snapshot_completeness.py --candidate ".local/evidence/candidates/$candidateSnapshotId"
+```
+
+The report includes exact releases, years, geographies, observed and rejected counts,
+generation confidence, forecastable/evidence-only separation, cohort and opportunity
+counts, method versions, and limitations. Promote only a zero-error candidate whose
+reported inventory matches the approved source set.
 
 All source-release directories and promoted snapshot directories are immutable. A failed
 build or promotion leaves the current active snapshot unchanged, and promotion never
@@ -178,11 +183,9 @@ server with `Ctrl+C` in its terminal.
 
 ## Start the planner web app
 
-Configure the promoted evidence root for the official registration landing page and
-the exact candidate path for the provenance workspace. The planner and opportunity
-routes still use deterministic fixture records from `data/demo/planner-v1.json` and
-remain clearly labelled prototypes, not production forecasts.
-Those prototype routes use demonstration data.
+Configure the promoted evidence root. Every product route resolves the same verified
+active pointer; an absent, legacy, corrupt, stale, or incomplete generation snapshot
+fails closed, with no runtime demonstration-data fallback.
 Local operation requires no production secrets and no customer data.
 
 From the development worktree, validate or start both local-only processes:
@@ -190,14 +193,15 @@ From the development worktree, validate or start both local-only processes:
 ```powershell
 uv run python scripts/run_planner_dev.py --check
 $env:ICOR_EVIDENCE_ACTIVE_ROOT = "$PWD\.local\evidence"
-$env:ICOR_EVIDENCE_CANDIDATE = "$PWD\.local\evidence\candidates\snapshot-2f13ba3f0cd083c7eea8"
+$env:ICOR_EXPORT_TOKEN = '<locally-generated-32-plus-character-capability-token>'
 uv run python scripts/run_planner_dev.py
 ```
 
-Open `http://127.0.0.1:5173/` for official registrations,
-`http://127.0.0.1:5173/evidence` for source provenance, and
-`http://127.0.0.1:8000/docs` for the FastAPI contract. The prototype routes are
-`/planner` and `/opportunities`. Stop both processes with `Ctrl+C`. If separate
+Open `http://127.0.0.1:5173/` for registrations, `/planner` for generation
+opportunities, `/opportunities` for ranking, `/evidence` for provenance,
+`/completeness` for audit counts, `/exports` for protected cutoff-safe export, and
+`http://127.0.0.1:8000/docs` for the FastAPI contract. Stop both processes with
+`Ctrl+C`. If separate
 terminals are preferable, run the API from the repository root:
 
 ```powershell
@@ -210,22 +214,13 @@ Then run the web client from `web`:
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-### Review a validated evidence candidate
+### Protected ML export
 
-Set `ICOR_EVIDENCE_CANDIDATE` to one exact candidate directory before starting the
-planner launcher, then open `/evidence`. The API revalidates the candidate manifest,
-database hash, schema, counts, and releases before serving it read-only. An absent or
-invalid candidate returns a typed unavailable response; it never falls back to fixtures.
-
-```powershell
-$env:ICOR_EVIDENCE_CANDIDATE = 'C:\Users\LucasCravoVERISSIMO\icor-webapp-development\.local\evidence\candidates\snapshot-a92867b966f81d7966fe'
-uv run python scripts/run_planner_dev.py
-```
-
-Open `http://127.0.0.1:5173/evidence`. This workspace displays raw publisher labels,
-exact-normalized model-family mappings, rejected ambiguous labels, and provenance for
-review. It does not infer model year or windshield fitment, reconcile overlapping
-releases, estimate missing values, or calculate a forecast.
+The CSV export is bound to local clients, sends `Cache-Control: no-store`, requires a
+32+ character capability token, and excludes releases published after the requested
+cutoff as well as observations whose period ends after it. Do not put the token in a
+URL, Git, shell history, or screenshots. The export omits raw publisher row text and
+must still be handled as local analytical data.
 
 ### Local production-coverage state
 
@@ -248,10 +243,10 @@ If a disposable local database must be reset, stop the API first and move the ex
 configured SQLite file to a backup location. Do not recursively delete `.local/` or
 remove an unresolved environment-variable path.
 
-Forecast and fitment values remain synthetic demonstration evidence. Connecting the
-company catalog and tracked replacement history requires a separately approved,
-validated ingestion contract; SQLite coverage records alone do not make the forecast
-production-valid.
+Generation opportunities remain an assumption-led planning baseline, not exact fitment
+or calibrated production demand. Connecting the company catalog and tracked
+replacement history requires a separately approved, validated ingestion contract;
+SQLite coverage records alone do not make the baseline production-valid.
 
 The planner and the legacy Streamlit app can coexist on their separate ports. No
 production deployment, proprietary fitment integration, or customer-data migration

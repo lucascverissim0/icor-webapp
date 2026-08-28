@@ -671,8 +671,8 @@
             "title": "Data Version",
             "type": "string"
           },
-          "fixture_ready": {
-            "title": "Fixture Ready",
+          "snapshot_ready": {
+            "title": "Snapshot Ready",
             "type": "boolean"
           },
           "status": {
@@ -682,7 +682,7 @@
         },
         "required": [
           "status",
-          "fixture_ready",
+          "snapshot_ready",
           "data_version"
         ],
         "title": "HealthResponse",
@@ -801,6 +801,17 @@
             "title": "Items",
             "type": "array"
           },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
           "strategy_name": {
             "title": "Strategy Name",
             "type": "string"
@@ -811,6 +822,16 @@
           },
           "summary": {
             "$ref": "#/components/schemas/OpportunitySummaryResponse"
+          },
+          "versions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotVersionsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1211,6 +1232,16 @@
           "market": {
             "title": "Market",
             "type": "string"
+          },
+          "method_versions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotVersionsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "model": {
             "title": "Model",
@@ -1660,6 +1691,16 @@
             "title": "Total Registrations",
             "type": "string"
           },
+          "versions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotVersionsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "years": {
             "items": {
               "type": "integer"
@@ -1706,6 +1747,16 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "versions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SnapshotVersionsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1988,6 +2039,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Health"
@@ -2255,6 +2316,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Opportunities"
@@ -2375,6 +2446,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Opportunity Configurations"
@@ -2551,6 +2632,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Configurations"
@@ -2610,6 +2701,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Configuration Detail"
@@ -2648,6 +2749,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Planner Options"
@@ -2680,6 +2791,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Production Coverage"
@@ -2746,6 +2867,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Create Production Coverage"
@@ -2815,6 +2946,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Delete Production Coverage"
@@ -2892,6 +3033,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Update Production Coverage"

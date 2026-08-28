@@ -23,6 +23,7 @@ from icor.domain.planner import (
 router = APIRouter()
 PROBLEM_RESPONSES = {
     422: {"model": ProblemResponse},
+    503: {"model": ProblemResponse},
     500: {"model": ProblemResponse},
 }
 
@@ -35,7 +36,11 @@ def _correlation_id(request: Request) -> str:
     return request.state.correlation_id
 
 
-@router.get("/api/health", response_model=HealthResponse)
+@router.get(
+    "/api/health",
+    response_model=HealthResponse,
+    responses={503: {"model": ProblemResponse}},
+)
 def health(request: Request) -> HealthResponse | JSONResponse:
     service = _service(request)
     if service is None:
@@ -43,7 +48,7 @@ def health(request: Request) -> HealthResponse | JSONResponse:
     options = service.options()
     return HealthResponse(
         status="ok",
-        fixture_ready=True,
+        snapshot_ready=True,
         data_version=options.scenario.data_version,
     )
 
@@ -100,6 +105,7 @@ def configurations(
     responses={
         404: {"model": ProblemResponse},
         422: {"model": ProblemResponse},
+        503: {"model": ProblemResponse},
         500: {"model": ProblemResponse},
     },
 )

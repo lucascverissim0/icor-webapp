@@ -27,8 +27,21 @@ class ProblemResponse(ApiModel):
 
 class HealthResponse(ApiModel):
     status: str
-    fixture_ready: bool
+    snapshot_ready: bool
     data_version: str
+
+
+class SnapshotVersionsResponse(ApiModel):
+    source_registry: str
+    identity_registry: str
+    reconciliation_method: str
+    confidence_method: str
+    estimation_method: str
+    survival_method: str
+    hazard_method: str
+    forecast_method: str
+    generation_registry: str
+    generation_resolver: str
 
 
 class ScenarioResponse(ApiModel):
@@ -37,6 +50,7 @@ class ScenarioResponse(ApiModel):
     evidence_status: EvidenceStatus
     data_version: str
     updated_at: datetime
+    versions: SnapshotVersionsResponse | None = None
 
 
 class PlannerOptionsResponse(ApiModel):
@@ -102,6 +116,7 @@ class PlanningConfigurationResponse(ApiModel):
     assumption_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
     evidence_ids: tuple[str, ...]
+    method_versions: SnapshotVersionsResponse | None = None
 
 
 class PlannerSummaryResponse(ApiModel):
@@ -196,6 +211,8 @@ class OpportunityPageResponse(ApiModel):
     strategy_name: str
     strategy_version: str
     integrity_warnings: tuple[str, ...]
+    snapshot_id: str | None = None
+    versions: SnapshotVersionsResponse | None = None
 
 
 class OpportunityDrillDownResponse(ApiModel):
@@ -207,19 +224,6 @@ class OpportunityDrillDownResponse(ApiModel):
 class DeleteCoverageResponse(ApiModel):
     coverage_id: str
     deleted: bool
-
-
-class SnapshotVersionsResponse(ApiModel):
-    source_registry: str
-    identity_registry: str
-    reconciliation_method: str
-    confidence_method: str
-    estimation_method: str
-    survival_method: str
-    hazard_method: str
-    forecast_method: str
-    generation_registry: str
-    generation_resolver: str
 
 
 class CompletenessRecordResponse(ApiModel):
@@ -324,6 +328,7 @@ class RegistrationSummaryResponse(ApiModel):
     model_count: int
     model_year_available: bool
     release_ids: tuple[str, ...]
+    versions: SnapshotVersionsResponse | None = None
 
 
 class RegistrationRowResponse(ApiModel):

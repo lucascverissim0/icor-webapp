@@ -23,6 +23,7 @@ from icor.domain.planner import (
     ModelYearDemand,
     PlanningConfiguration,
 )
+from icor.domain.snapshots import SnapshotVersions
 
 
 class OpportunityGroupBy(StrEnum):
@@ -70,6 +71,8 @@ class OpportunityPage:
     strategy_name: str
     strategy_version: str
     integrity_warnings: tuple[str, ...]
+    snapshot_id: str | None = None
+    versions: SnapshotVersions | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +148,8 @@ class OpportunityService:
             strategy_name=self._ranking_strategy.name,
             strategy_version=self._ranking_strategy.version,
             integrity_warnings=warnings,
+            snapshot_id=getattr(self._planner_repository, "snapshot_id", None),
+            versions=getattr(self._planner_repository, "versions", None),
         )
 
     def drill_down(

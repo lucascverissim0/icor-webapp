@@ -33,6 +33,7 @@ PROBLEM_RESPONSES = {
     404: {"model": ProblemResponse},
     409: {"model": ProblemResponse},
     422: {"model": ProblemResponse},
+    503: {"model": ProblemResponse},
     500: {"model": ProblemResponse},
 }
 
@@ -71,7 +72,11 @@ def _problem(
 @router.get(
     "/api/v1/opportunities",
     response_model=OpportunityPageResponse,
-    responses={422: {"model": ProblemResponse}, 500: {"model": ProblemResponse}},
+    responses={
+        422: {"model": ProblemResponse},
+        500: {"model": ProblemResponse},
+        503: {"model": ProblemResponse},
+    },
 )
 def opportunities(
     request: Request,
@@ -117,7 +122,7 @@ def opportunity_configurations(
 @router.get(
     "/api/v1/production-coverage",
     response_model=list[ProductionCoverageResponse],
-    responses={500: {"model": ProblemResponse}},
+    responses={500: {"model": ProblemResponse}, 503: {"model": ProblemResponse}},
 )
 def production_coverage(
     request: Request,

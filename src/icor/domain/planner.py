@@ -8,6 +8,8 @@ from datetime import datetime
 from enum import StrEnum
 from math import ceil, isfinite
 
+from icor.domain.snapshots import SnapshotVersions
+
 
 class EvidenceStatus(StrEnum):
     DEMONSTRATION = "demonstration"
@@ -143,6 +145,7 @@ class PlanningConfiguration:
     assumption_ids: tuple[str, ...] = ()
     reason_codes: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
+    method_versions: SnapshotVersions | None = None
 
     def __post_init__(self) -> None:
         required_text = (
