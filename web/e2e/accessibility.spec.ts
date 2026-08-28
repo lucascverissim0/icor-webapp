@@ -26,11 +26,11 @@ test('primary planner routes have no serious accessibility violations', async ({
   expect(await seriousViolations(page)).toEqual([])
 
   await page.getByRole('button', { name: /View details/ }).first().click()
-  await expect(page.getByText('Configuration detail')).toBeVisible()
+  await expect(page.getByText('Generation opportunity detail')).toBeVisible()
   expect(await seriousViolations(page)).toEqual([])
 
   await page.goto('/planner/configurations/not-a-configuration')
-  await expect(page.getByRole('heading', { name: 'Configuration not found' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Opportunity not found' })).toBeVisible()
   expect(await seriousViolations(page)).toEqual([])
 })
 

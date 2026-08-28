@@ -13,14 +13,14 @@ test('filters, selects, deep-links, and restores planner state', async ({ page }
 
   await page.getByRole('button', { name: /View details/ }).first().focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByText('Configuration detail')).toBeVisible()
+  await expect(page.getByText('Generation opportunity detail')).toBeVisible()
   expect(decodeURIComponent(page.url())).toContain('market=["FR"]')
 
   await page.goBack()
   await expect(page.getByRole('checkbox', { name: 'France' })).toBeChecked()
 
   await page.goForward()
-  await expect(page.getByText('Configuration detail')).toBeVisible()
+  await expect(page.getByText('Generation opportunity detail')).toBeVisible()
 })
 
 test('retries a recoverable configurations failure without losing controls', async ({ page }) => {
@@ -56,7 +56,7 @@ test('retries a recoverable configurations failure without losing controls', asy
 test('a missing deep link has a safe planner return', async ({ page }) => {
   await page.goto('/planner/configurations/not-a-configuration?market=FR')
 
-  await expect(page.getByRole('heading', { name: 'Configuration not found' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Opportunity not found' })).toBeVisible()
   await page.getByRole('link', { name: 'Return to planner' }).click()
   await expect(page.getByRole('checkbox', { name: 'France' })).toBeChecked()
 })

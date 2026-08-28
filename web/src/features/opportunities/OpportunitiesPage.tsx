@@ -6,6 +6,7 @@ import { opportunitiesRoute } from '../../app/router'
 import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
 import { serializeOpportunitySearch, type OpportunitySearch } from '../../lib/opportunity-search'
+import { CoverageManager } from './CoverageManager'
 import { OpportunityDrillDown } from './OpportunityDrillDown'
 import { OpportunityRanking } from './OpportunityRanking'
 
@@ -122,6 +123,8 @@ export function OpportunitiesWorkbench({
           rows={drillDown.data ?? []}
         />
       )}
+
+      <CoverageManager apiClient={apiClient} opportunityQuery={opportunityQuery} />
 
     </div>
   )

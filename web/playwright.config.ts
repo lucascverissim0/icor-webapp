@@ -23,13 +23,19 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    command: `uv run --project .. python ../scripts/run_planner_dev.py --api-port ${apiPort} --web-port ${webPort}`,
+    command: `uv run --project .. python ../scripts/run_e2e_dev.py --api-port ${apiPort} --web-port ${webPort}`,
     cwd: '.',
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
       ICOR_COVERAGE_DB: coverageDatabase,
+      ...(process.env.ICOR_E2E_EVIDENCE_CANDIDATE
+        ? { ICOR_E2E_EVIDENCE_CANDIDATE: process.env.ICOR_E2E_EVIDENCE_CANDIDATE }
+        : {}),
+      ...(process.env.ICOR_E2E_GENERATION_CANDIDATE
+        ? { ICOR_E2E_GENERATION_CANDIDATE: process.env.ICOR_E2E_GENERATION_CANDIDATE }
+        : {}),
       ...(process.env.ICOR_EVIDENCE_ACTIVE_ROOT
         ? { ICOR_EVIDENCE_ACTIVE_ROOT: process.env.ICOR_EVIDENCE_ACTIVE_ROOT }
         : {}),

@@ -16,7 +16,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
     }
 
     await page.getByRole('button', { name: /View details/ }).first().click()
-    await expect(page.getByText('Configuration detail')).toBeVisible()
+    await expect(page.getByText('Generation opportunity detail')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     if (process.env.ICOR_CAPTURE_REVIEW === '1') {
       await page.screenshot({
