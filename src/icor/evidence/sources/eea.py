@@ -6,10 +6,12 @@ import csv
 import io
 import sqlite3
 import tempfile
+from collections.abc import Iterator
 from contextlib import closing
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from re import fullmatch
 from zipfile import BadZipFile, ZipFile
 
 from icor.domain.evidence import (
@@ -25,6 +27,22 @@ from icor.infrastructure.release_store import StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 PARSER_NAME = "eea_co2_cars_zip_v1"
+ANNUAL_AGGREGATE_PARSER_NAME = "eea_co2_cars_annual_aggregate_csv_v1"
+ANNUAL_AGGREGATE_SCHEMA = (
+    "Year",
+    "Status",
+    "Version_file",
+    "MS",
+    "Mk",
+    "Cn",
+    "TAN",
+    "T",
+    "Va",
+    "Ve",
+    "Ft",
+    "Registrations",
+    "SourceRows",
+)
 EXPECTED_MEMBER = "co2cars_2024fv30.csv"
 EXPECTED_SCHEMA = (
     "ID",
@@ -74,6 +92,154 @@ EXPECTED_SCHEMA = (
 _GROUP_COLUMNS = ("MS", "Mk", "Cn", "TAN", "T", "Va", "Ve", "Ft")
 _INSERT_BATCH_SIZE = 5_000
 _OBSERVATION_BATCH_SIZE = 2_000
+
+
+class EEAAnnualAggregateLoader:
+    """Load deterministic official SQL aggregates for one finalized EEA year."""
+
+    def load(
+        self,
+        releases: tuple[StoredRelease, ...],
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        for release in releases:
+            self._load_release(release, repository)
+
+    def _load_release(
+        self,
+        release: StoredRelease,
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        manifest = release.manifest
+        match = fullmatch(r"eea-co2cars-(20\d{2})-final-(v\d+)", manifest.release_id)
+        if match is None:
+            raise ValueError("EEA annual aggregate release ID is unsupported")
+        year, version = int(match.group(1)), match.group(2)
+        if manifest.parser_name != ANNUAL_AGGREGATE_PARSER_NAME:
+            raise ValueError("EEA annual aggregate parser name is unsupported")
+        if manifest.publication_status is not PublicationStatus.FINAL:
+            raise ValueError("EEA annual aggregate release must have final status")
+        if manifest.coverage_start != date(year, 1, 1) or manifest.coverage_end != date(
+            year, 12, 31
+        ):
+            raise ValueError("EEA annual aggregate must cover its release calendar year")
+
+        raw_count = accepted_count = rejected_count = 0
+        for _, source_rows, _, key in self._validated_rows(release.artifact_path, year, version):
+            raw_count += source_rows
+            if any(normalize_vehicle_label(value) is None for value in key[:3]):
+                rejected_count += source_rows
+            else:
+                accepted_count += source_rows
+
+        if (raw_count, accepted_count, rejected_count, 0) != (
+            manifest.raw_record_count,
+            manifest.accepted_record_count,
+            manifest.rejected_record_count,
+            manifest.quarantined_record_count,
+        ):
+            raise ValueError("EEA annual aggregate parser counts do not match manifest")
+
+        batch: list[Observation] = []
+        for group_number, source_rows, registrations, key in self._validated_rows(
+            release.artifact_path, year, version
+        ):
+            if any(normalize_vehicle_label(value) is None for value in key[:3]):
+                continue
+            country, make, model, type_approval, vehicle_type, variant, item_version, fuel = key
+            original_type = "|".join(
+                (type_approval, vehicle_type, variant, item_version, fuel)
+            )
+            batch.append(
+                Observation(
+                    observation_id=stable_evidence_id(
+                        "obs-eea-annual", release.release_id, *key
+                    ),
+                    release_id=release.release_id,
+                    original_row_locator=(
+                        f"official-sql-group-{group_number}:source-rows-{source_rows}"
+                    ),
+                    geography=country,
+                    geography_version=manifest.geography_version,
+                    period_start=date(year, 1, 1),
+                    period_end=date(year, 12, 31),
+                    period_precision=PeriodPrecision.YEAR,
+                    measure=Measure.NEW_REGISTRATIONS,
+                    value=Decimal(registrations),
+                    unit="vehicles",
+                    publication_status=PublicationStatus.FINAL,
+                    original_make=make,
+                    original_model=model,
+                    original_model_year=None,
+                    original_type=original_type,
+                    source_make_identifier=make,
+                    source_model_identifier=stable_evidence_id(
+                        "eea-model",
+                        make,
+                        model,
+                        type_approval,
+                        vehicle_type,
+                        variant,
+                        item_version,
+                    ),
+                    normalized_make=normalize_vehicle_label(make),
+                    normalized_model=normalize_vehicle_label(model),
+                    normalized_model_year=None,
+                    canonical_vehicle_id=None,
+                    mapping_status=MappingStatus.UNRESOLVED,
+                    transformation_notes=(
+                        "Canonical aggregate exported from the official EEA Discodata SQL API.",
+                        f"Contributing source rows: {source_rows}.",
+                        "Grouped on Year, Status, Version_file, MS, Mk, Cn, "
+                        "TAN, T, Va, Ve, and Ft.",
+                    ),
+                    validation_flags=(),
+                    evidence_confidence=_unresolved_confidence(),
+                    registration_cohort_year=year,
+                    manufacture_year=None,
+                    model_year=None,
+                )
+            )
+            if len(batch) >= _OBSERVATION_BATCH_SIZE:
+                repository.add_observations(batch)
+                batch.clear()
+        if batch:
+            repository.add_observations(batch)
+
+    def _validated_rows(
+        self, artifact_path: Path, year: int, version: str
+    ) -> Iterator[tuple[int, int, int, tuple[str, ...]]]:
+        with artifact_path.open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream, delimiter=";")
+            if tuple(reader.fieldnames or ()) != ANNUAL_AGGREGATE_SCHEMA:
+                raise ValueError("EEA annual aggregate CSV schema is unsupported")
+            for group_number, row in enumerate(reader, start=1):
+                self._validate_annual_row(row, year=year, version=version)
+                source_rows = _parse_nonnegative_integer(row["SourceRows"], "source rows")
+                if source_rows == 0:
+                    raise ValueError("EEA annual aggregate source rows must be positive")
+                registrations = _parse_nonnegative_integer(
+                    row["Registrations"], "registration weight"
+                )
+                key = tuple((row[column] or "").strip() for column in _GROUP_COLUMNS)
+                yield group_number, source_rows, registrations, key
+
+    @staticmethod
+    def _validate_annual_row(
+        row: dict[str, str | None], *, year: int, version: str
+    ) -> None:
+        if row.get("Status") != "F":
+            raise ValueError("EEA annual aggregate row does not have final status")
+        if row.get("Year") != str(year):
+            raise ValueError("EEA annual aggregate row is outside its release year")
+        if row.get("Version_file") != version:
+            raise ValueError("EEA annual aggregate row version is unexpected")
+
+
+def _parse_nonnegative_integer(value: str | None, label: str) -> int:
+    if value is None or fullmatch(r"0|[1-9]\d*", value) is None:
+        raise ValueError(f"EEA annual aggregate {label} must be a non-negative integer")
+    return int(value)
 
 
 class EEAPassengerCarLoader:
@@ -243,6 +409,9 @@ class EEAPassengerCarLoader:
                         ),
                         validation_flags=(),
                         evidence_confidence=_unresolved_confidence(),
+                        registration_cohort_year=2024,
+                        manufacture_year=None,
+                        model_year=None,
                     )
                 )
                 if len(batch) >= _OBSERVATION_BATCH_SIZE:

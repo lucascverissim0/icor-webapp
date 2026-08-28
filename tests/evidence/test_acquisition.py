@@ -7,7 +7,7 @@ from icor.evidence.acquisition import OFFICIAL_SOURCES, build_manifest, validate
 
 
 def test_catalog_contains_only_reviewed_https_sources():
-    assert set(OFFICIAL_SOURCES) == {
+    expected = {
         "eea-2024-final",
         "kba-fz10-2024",
         "uk-veh0160-gb",
@@ -15,6 +15,8 @@ def test_catalog_contains_only_reviewed_https_sources():
         "uk-veh0124-am",
         "uk-veh0124-nz",
     }
+    expected.update(f"eea-{year}-final" for year in range(2010, 2024))
+    assert set(OFFICIAL_SOURCES) == expected
     for source in OFFICIAL_SOURCES.values():
         validate_source_url(source, source.url)
 

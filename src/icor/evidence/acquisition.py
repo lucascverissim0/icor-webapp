@@ -13,6 +13,7 @@ from tempfile import NamedTemporaryFile
 from urllib.parse import urlsplit
 
 from icor.domain.evidence import Measure, PublicationStatus, ReleaseManifest
+from icor.evidence.eea_history_acquisition import ANNUAL_RELEASES, API_URL
 from icor.infrastructure.release_store import ReleaseStore, StoredRelease
 
 
@@ -41,6 +42,7 @@ class OfficialSource:
     accepted_count: int
     rejected_count: int
     quarantined_count: int = 0
+    direct_download: bool = True
 
 
 _UK_TERMS = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/"
@@ -197,6 +199,93 @@ OFFICIAL_SOURCES = {
     ),
 }
 
+_EEA_HISTORY_ARTIFACTS = {
+    2010: (
+        10_582_165,
+        "a01a28f4eb8ff2318970870c53d931535c179293ee3212f6f765fff527bb86ea",
+    ),
+    2011: (
+        17_207_785,
+        "2725e16f9e0f76fb38f6a07f1b6fe21d21bd80d0403688723a6cfd2ff915eb55",
+    ),
+    2012: (
+        22_507_939,
+        "2630dd33d793357546c676719a45151759d3a92ef0f98ae7349b9754aadc7c8f",
+    ),
+    2013: (
+        24_756_965,
+        "0bff6f5f82a5ce6a1580160c49cfca4a0b40023aa88c943d408285dc03710b68",
+    ),
+    2014: (
+        27_121_572,
+        "343a03d43cf85652fc1f3f1612287c8188980604ad140ef72d6cbcc1ce5ec698",
+    ),
+    2015: (
+        28_983_867,
+        "8d13bac32ea7213535ffcc73ccb5bc9a3304a1707d8fc60a423e977cd038c82b",
+    ),
+    2016: (
+        30_234_374,
+        "173f64ee3eb5217fcd0c087b74f2bd6e2b81a623b373bd820f4d05bf6683f9e3",
+    ),
+    2017: (
+        32_648_871,
+        "f18aa6c2550bad36bb9b77bad04c9b592ef721753d4d37c8c0e56f209794f616",
+    ),
+    2018: (
+        31_809_504,
+        "dfc4ebfe820593d83b2ef31a37bd569970db73b89a5fbbf4f7b4c6ced2a3af94",
+    ),
+    2019: (
+        35_428_516,
+        "6d8b5674beec5183b4dabfd7f872bf23566954a41e6a02abdc31ddb214d0b31a",
+    ),
+    2020: (
+        35_381_313,
+        "65eab3dbb250e4619e1b4e77ca4e4b3bb742e5fc5f44a9e71dfe73bc306da349",
+    ),
+    2021: (
+        34_088_459,
+        "004de558b475559008d8e455c59e701006f59bd37901a9935856f41d654a8e10",
+    ),
+    2022: (
+        31_865_846,
+        "ca5736c6ff35d7242c0aef87ef1b186361fe7417e431bd4c4ed8b4d50474cb7d",
+    ),
+    2023: (
+        27_973_567,
+        "65ae15b00d2804214b50e88bb8f32df1cc409ca7cde26cc54a69104ce664b3ad",
+    ),
+}
+
+for _year, _annual in ANNUAL_RELEASES.items():
+    _bytes, _sha256 = _EEA_HISTORY_ARTIFACTS[_year]
+    OFFICIAL_SOURCES[f"eea-{_year}-final"] = OfficialSource(
+        key=f"eea-{_year}-final",
+        release_id=f"eea-co2cars-{_year}-final-{_annual.version}",
+        source_id="eea-co2-monitoring",
+        publisher="European Environment Agency / European Commission DG CLIMA",
+        url=API_URL,
+        published_at=datetime(2026, 8, 7, 8, 49, 5, tzinfo=UTC),
+        coverage_start=date(_year, 1, 1),
+        coverage_end=date(_year, 12, 31),
+        geography="EEA reporting countries",
+        geography_version=f"EEA CO2 monitoring {_year} final {_annual.version}",
+        measure=Measure.NEW_REGISTRATIONS,
+        dependency_group=f"european-passenger-car-registrations-{_year}",
+        terms_url="https://creativecommons.org/licenses/by/4.0/",
+        permitted_local_use="Reuse permitted with attribution under CC BY 4.0.",
+        parser_name="eea_co2_cars_annual_aggregate_csv_v1",
+        expected_schema=f"EEA {_year} final {_annual.version} canonical aggregate export",
+        suffix=".csv",
+        artifact_bytes=_bytes,
+        sha256=_sha256,
+        raw_count=_annual.expected_source_rows,
+        accepted_count=_annual.expected_accepted_rows,
+        rejected_count=_annual.expected_rejected_rows,
+        direct_download=False,
+    )
+
 
 def validate_source_url(source: OfficialSource, candidate: str) -> None:
     expected = urlsplit(source.url)
@@ -250,6 +339,8 @@ def build_manifest(
 
 def download(source: OfficialSource, destination: Path) -> Path:
     """Download one exact allowlisted resource atomically and enforce its byte ceiling."""
+    if not source.direct_download:
+        raise ValueError("official source requires its reviewed acquisition adapter")
     validate_source_url(source, source.url)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None

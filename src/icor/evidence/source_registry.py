@@ -12,7 +12,7 @@ from icor.evidence.identity import (
     ExactNormalizedIdentityResolver,
     IdentityAttributingRepository,
 )
-from icor.evidence.sources.eea import EEAPassengerCarLoader
+from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
 from icor.evidence.sources.uk_dft import (
     UKActiveFleetLoader,
@@ -40,6 +40,7 @@ def official_loader_registry() -> Mapping[str, EvidenceLoader]:
 
     return {
         "eea_co2_cars_zip_v1": EEAPassengerCarLoader(),
+        "eea_co2_cars_annual_aggregate_csv_v1": EEAAnnualAggregateLoader(),
         "kba_fz10_xlsx_v1": KBAFZ10Loader(),
         "uk_dft_veh0120_csv_v1": UKActiveFleetLoader(),
         "uk_dft_veh0160_csv_v1": UKFirstRegistrationLoader(),

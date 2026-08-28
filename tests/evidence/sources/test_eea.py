@@ -11,7 +11,7 @@ import pytest
 
 from icor.domain.evidence import MappingStatus, Measure, PublicationStatus, ReleaseManifest
 from icor.evidence.serialization import sha256_file
-from icor.evidence.sources.eea import EEAPassengerCarLoader
+from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.infrastructure.release_store import StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
@@ -157,6 +157,7 @@ def test_loader_aggregates_only_identical_documented_vehicle_keys(tmp_path: Path
     assert all(row.mapping_status is MappingStatus.UNRESOLVED for row in observations)
     assert all(row.canonical_vehicle_id is None for row in observations)
     assert all(row.normalized_model_year is None for row in observations)
+    assert {row.registration_cohort_year for row in observations} == {2024}
 
 
 def test_loader_rejects_unidentifiable_rows_and_reconciles_manifest(tmp_path: Path) -> None:
@@ -217,3 +218,124 @@ def test_loader_rejects_unexpected_archive_member(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="archive member"):
         EEAPassengerCarLoader().load((release,), repository)
+
+
+def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "eea-2010-final.csv"
+    headers = (
+        "Year",
+        "Status",
+        "Version_file",
+        "MS",
+        "Mk",
+        "Cn",
+        "TAN",
+        "T",
+        "Va",
+        "Ve",
+        "Ft",
+        "Registrations",
+        "SourceRows",
+    )
+    with artifact.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, headers, delimiter=";", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(
+            (
+                {
+                    "Year": "2010",
+                    "Status": "F",
+                    "Version_file": "v2",
+                    "MS": "DE",
+                    "Mk": "VOLKSWAGEN",
+                    "Cn": "GOLF",
+                    "TAN": "E1*2007/46*0001",
+                    "T": "1K",
+                    "Va": "A",
+                    "Ve": "1",
+                    "Ft": "petrol",
+                    "Registrations": "2",
+                    "SourceRows": "2",
+                },
+                {
+                    "Year": "2010",
+                    "Status": "F",
+                    "Version_file": "v2",
+                    "MS": "FR",
+                    "Mk": "RENAULT",
+                    "Cn": "CLIO",
+                    "TAN": "",
+                    "T": "",
+                    "Va": "",
+                    "Ve": "",
+                    "Ft": "diesel",
+                    "Registrations": "3",
+                    "SourceRows": "1",
+                },
+                {
+                    "Year": "2010",
+                    "Status": "F",
+                    "Version_file": "v2",
+                    "MS": "DE",
+                    "Mk": "",
+                    "Cn": "UNKNOWN",
+                    "TAN": "",
+                    "T": "",
+                    "Va": "",
+                    "Ve": "",
+                    "Ft": "",
+                    "Registrations": "1",
+                    "SourceRows": "1",
+                },
+            )
+        )
+    manifest = ReleaseManifest(
+        release_id="eea-co2cars-2010-final-v2",
+        source_id="eea-co2-monitoring",
+        publisher="European Environment Agency / DG CLIMA",
+        source_url="https://discodata.eea.europa.eu/sql",
+        retrieved_at=datetime(2026, 8, 28, tzinfo=UTC),
+        published_at=datetime(2011, 12, 31, tzinfo=UTC),
+        coverage_start=date(2010, 1, 1),
+        coverage_end=date(2010, 12, 31),
+        geography="EEA reporting countries",
+        geography_version="EEA CO2 monitoring 2010 final v2",
+        measure=Measure.NEW_REGISTRATIONS,
+        unit="vehicles",
+        publication_status=PublicationStatus.FINAL,
+        dependency_group="european-passenger-car-registrations-2010",
+        terms_url="https://creativecommons.org/licenses/by/4.0/",
+        permitted_local_use="CC BY 4.0 with attribution",
+        artifact_path="artifact.csv",
+        artifact_bytes=artifact.stat().st_size,
+        sha256=sha256_file(artifact),
+        parser_name="eea_co2_cars_annual_aggregate_csv_v1",
+        parser_version="v1",
+        expected_schema="EEA 2010 final v2 canonical aggregate export",
+        raw_record_count=4,
+        accepted_record_count=3,
+        rejected_record_count=1,
+        quarantined_record_count=0,
+    )
+    release = StoredRelease(
+        manifest.source_id,
+        manifest.release_id,
+        artifact,
+        tmp_path / "manifest.json",
+        manifest,
+    )
+    repository = SQLiteEvidenceRepository(tmp_path / "annual.sqlite3", writable=True)
+    repository.add_release(manifest)
+
+    EEAAnnualAggregateLoader().load((release,), repository)
+
+    observations = repository.list_observations()
+    assert [(row.geography, row.original_model, row.value) for row in observations] == [
+        ("DE", "GOLF", Decimal("2")),
+        ("FR", "CLIO", Decimal("3")),
+    ]
+    assert {row.registration_cohort_year for row in observations} == {2010}
+    assert {row.manufacture_year for row in observations} == {None}
+    assert {row.model_year for row in observations} == {None}
