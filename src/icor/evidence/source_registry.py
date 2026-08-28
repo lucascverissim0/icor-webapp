@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 
+from icor.application.completeness import CompletenessService
 from icor.application.generation_mapping import GenerationMappingService
+from icor.application.generation_planning import GenerationPlanningService
 from icor.application.snapshot_build import EvidenceLoader
 from icor.domain.snapshots import SnapshotVersions
 from icor.evidence.identity import (
@@ -24,12 +26,12 @@ from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceReposit
 OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     source_registry="official-sources-v1",
     identity_registry="exact-normalized-model-family-v1",
-    reconciliation_method="not-applied-v1",
+    reconciliation_method="dependency-precedence-v1",
     confidence_method="source-evidence-v1",
-    estimation_method="not-applied-v1",
-    survival_method="not-applied-v1",
-    hazard_method="not-applied-v1",
-    forecast_method="not-applied-v1",
+    estimation_method="linear-gap-interpolation-v1",
+    survival_method="constant-annual-retention-v1",
+    hazard_method="age-band-geography-hazard-v1",
+    forecast_method="rolling-origin-simple-candidates-v1",
     generation_registry="generation-registry-v1",
     generation_resolver="generation-resolver-v1",
 )
@@ -72,3 +74,8 @@ def official_repository_finalizer(
     ).apply(repository, reviewed_at=reviewed_at)
     if result.unassigned_ids or result.assigned_count != result.usable_count:
         raise ValueError("official generation mapping is incomplete")
+    planning = GenerationPlanningService().apply(repository, seed=20260827)
+    if planning.cohort_count == 0 or planning.opportunity_count == 0:
+        raise ValueError("official generation planning is incomplete")
+    if CompletenessService().materialize(repository) == 0:
+        raise ValueError("official completeness reporting is unavailable")

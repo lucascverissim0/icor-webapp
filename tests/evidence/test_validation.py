@@ -595,3 +595,30 @@ def test_generation_enabled_snapshot_requires_one_assignment_per_usable_observat
     codes = {finding.code for finding in report.findings}
     assert "snapshot.generation_assignment_missing" in codes
     assert "snapshot.completeness_missing" in codes
+
+
+def test_active_fleet_without_cohort_semantics_is_evidence_only_not_unassigned(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    _corrupt(
+        repository,
+        "UPDATE observation SET measure = 'active_fleet', "
+        "registration_cohort_year = NULL, manufacture_year = NULL",
+        (),
+    )
+    manifest = replace(
+        _snapshot(repository),
+        versions=replace(
+            _snapshot(repository).versions,
+            generation_registry="generation-registry-v1",
+            generation_resolver="generation-resolver-v1",
+        ),
+    )
+
+    report = SnapshotValidator().validate(repository, manifest)
+
+    assert "snapshot.generation_assignment_missing" not in {
+        finding.code for finding in report.findings
+    }

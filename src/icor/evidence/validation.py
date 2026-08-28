@@ -340,6 +340,15 @@ def _generation_planning_findings(
         ON generation_assignment.observation_id = observation.observation_id
         WHERE observation.canonical_vehicle_id IS NOT NULL
         AND observation.mapping_status NOT IN ('ambiguous', 'rejected', 'unresolved')
+        AND (
+            observation.registration_cohort_year IS NOT NULL
+            OR observation.manufacture_year IS NOT NULL
+            OR (
+                observation.measure = 'new_registrations'
+                AND SUBSTR(observation.period_start, 1, 4) =
+                    SUBSTR(observation.period_end, 1, 4)
+            )
+        )
         AND generation_assignment.assignment_id IS NULL
         ORDER BY observation.observation_id"""
     ):
