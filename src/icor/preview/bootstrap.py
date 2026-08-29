@@ -152,9 +152,31 @@ class BootstrapCoordinator:
             source.release_id: self.release_is_valid(source.release_id)
             for source in plan.sources
         }
+        if all(validity.values()):
+            return
+        downloads_root = self._validated_downloads_root()
         for source in plan.sources:
             if validity[source.release_id]:
                 continue
+            official = OFFICIAL_SOURCES[source.source_key]
+            artifact: Path | None = None
+            if not official.direct_download:
+                artifact = (
+                    downloads_root
+                    / f"{source.source_key}{official.suffix}"
+                )
+                self._checked(
+                    (
+                        *self.python_command,
+                        str(self.repository_root / "scripts" / "acquire_eea_history.py"),
+                        "--destination",
+                        str(artifact),
+                        "--year",
+                        str(official.coverage_start.year),
+                    ),
+                    label="official EEA history acquisition",
+                )
+            artifact_args = () if artifact is None else ("--artifact", str(artifact))
             self._checked(
                 (
                     *self.python_command,
@@ -162,10 +184,26 @@ class BootstrapCoordinator:
                     "--source",
                     source.source_key,
                     "--root",
-                    str(self.evidence_root / "releases"),
+                    str(self.evidence_root),
+                    *artifact_args,
                 ),
                 label="official source acquisition",
             )
+
+    def _validated_downloads_root(self) -> Path:
+        downloads = self.evidence_root / "downloads"
+        try:
+            self.evidence_root.mkdir(parents=True, exist_ok=True)
+            evidence = self.evidence_root.resolve(strict=True)
+            if downloads.is_symlink():
+                raise BootstrapError("downloads directory cannot be a symlink")
+            downloads.mkdir(exist_ok=True)
+            resolved = downloads.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise BootstrapError("downloads directory is unavailable") from error
+        if not resolved.is_dir() or not resolved.is_relative_to(evidence):
+            raise BootstrapError("downloads directory is outside the evidence root")
+        return resolved
 
     def build(self, plan: BootstrapPlan) -> str:
         releases = tuple(

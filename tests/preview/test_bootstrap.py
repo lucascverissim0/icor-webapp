@@ -171,7 +171,9 @@ def test_acquisition_reuses_verified_releases_and_downloads_only_absent(
 ) -> None:
     runner = RecordingRunner()
     plan = default_plan()
-    absent = {plan.sources[0].release_id, plan.sources[-1].release_id}
+    historical = plan.sources[0]
+    direct = plan.sources[-1]
+    absent = {historical.release_id, direct.release_id}
     verified: list[str] = []
     coordinator = BootstrapCoordinator(
         repository_root=tmp_path,
@@ -185,20 +187,116 @@ def test_acquisition_reuses_verified_releases_and_downloads_only_absent(
 
     coordinator.acquire(plan)
 
-    acquisition_commands = [
-        command
-        for command in runner.commands
-        if "acquire_official_evidence.py" in " ".join(command)
+    assert runner.commands == [
+        (
+            "python",
+            str(tmp_path / "scripts" / "acquire_eea_history.py"),
+            "--destination",
+            str(tmp_path / "evidence" / "downloads" / "eea-2010-final.csv"),
+            "--year",
+            "2010",
+        ),
+        (
+            "python",
+            str(tmp_path / "scripts" / "acquire_official_evidence.py"),
+            "--source",
+            historical.source_key,
+            "--root",
+            str(tmp_path / "evidence"),
+            "--artifact",
+            str(tmp_path / "evidence" / "downloads" / "eea-2010-final.csv"),
+        ),
+        (
+            "python",
+            str(tmp_path / "scripts" / "acquire_official_evidence.py"),
+            "--source",
+            direct.source_key,
+            "--root",
+            str(tmp_path / "evidence"),
+        ),
     ]
-    assert len(acquisition_commands) == 2
-    assert acquisition_commands[0][-4:] == (
-        "--source",
-        plan.sources[0].source_key,
-        "--root",
-        str(tmp_path / "evidence" / "releases"),
-    )
     assert verified == [source.release_id for source in plan.sources]
 
+
+def test_acquisition_rejects_invalid_downloads_boundary_before_commands(
+    tmp_path: Path,
+) -> None:
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    (evidence_root / "downloads").write_text("not a directory", encoding="utf-8")
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=tmp_path,
+        evidence_root=evidence_root,
+        runner=runner,
+        release_is_valid=lambda _: False,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+
+    with pytest.raises(BootstrapError, match="downloads"):
+        coordinator.acquire(default_plan())
+
+    assert runner.commands == []
+
+
+def test_acquisition_rejects_escaping_downloads_symlink_before_commands(
+    tmp_path: Path,
+) -> None:
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (evidence_root / "downloads").symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symlink creation is unavailable: {error}")
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=tmp_path,
+        evidence_root=evidence_root,
+        runner=runner,
+        release_is_valid=lambda _: False,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+
+    with pytest.raises(BootstrapError, match="downloads"):
+        coordinator.acquire(default_plan())
+
+    assert runner.commands == []
+
+
+def test_all_historical_sources_use_the_reviewed_adapter(tmp_path: Path) -> None:
+    plan = default_plan()
+    historical_release_ids = {
+        source.release_id
+        for source in plan.sources
+        if source.source_key != "eea-2024-final"
+        and source.source_key.startswith("eea-")
+    }
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=tmp_path,
+        evidence_root=tmp_path / "evidence",
+        runner=runner,
+        release_is_valid=lambda release_id: release_id not in historical_release_ids,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+
+    coordinator.acquire(plan)
+
+    adapter_commands = runner.commands[::2]
+    assert len(adapter_commands) == 14
+    assert [command[-1] for command in adapter_commands] == [
+        str(year) for year in range(2010, 2024)
+    ]
+    assert all("acquire_eea_history.py" in command[1] for command in adapter_commands)
+    assert all("--artifact" in command for command in runner.commands[1::2])
 
 def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) -> None:
     runner = RecordingRunner()
