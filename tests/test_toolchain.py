@@ -37,8 +37,18 @@ def test_core_package_imports_outside_pytest() -> None:
 
 
 def test_devcontainer_uses_locked_secure_runtime() -> None:
-    configuration = (ROOT / ".devcontainer" / "devcontainer.json").read_text(encoding="utf-8")
-    assert "3.12-bookworm" in configuration
+    container_root = ROOT / ".devcontainer"
+    configuration = (container_root / "devcontainer.json").read_text(encoding="utf-8")
+    dockerfile = (container_root / "Dockerfile").read_text(encoding="utf-8")
+    assert '"dockerfile": "Dockerfile"' in configuration
+    assert (
+        "FROM mcr.microsoft.com/devcontainers/python:1-3.12-bookworm@sha256:"
+        "7876580dc67fd460fd962f004cbeb480027e9bbc0657096f1087db11f9eaff39"
+    ) in dockerfile
+    assert "RUN rm -f /etc/apt/sources.list.d/yarn.list" in dockerfile
+    assert "apt-key" not in dockerfile
+    assert "trusted=yes" not in dockerfile
+    assert "allow-insecure" not in dockerfile
     assert "uv sync --locked --all-groups" in configuration
     assert "enableCORS false" not in configuration
     assert "enableXsrfProtection false" not in configuration

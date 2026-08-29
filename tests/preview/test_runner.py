@@ -87,6 +87,8 @@ def test_devcontainer_never_autostarts_or_publishes_preview() -> None:
         "onAutoForward": "silent",
     }
     assert payload["forwardPorts"] == [8000]
+    assert "image" not in payload
+    assert payload["build"] == {"dockerfile": "Dockerfile"}
     assert payload["features"]["ghcr.io/devcontainers/features/sshd:1.1.0"] == {}
     assert payload["overrideFeatureInstallOrder"] == [
         "ghcr.io/devcontainers/features/sshd",
