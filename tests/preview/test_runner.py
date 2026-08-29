@@ -87,6 +87,20 @@ def test_devcontainer_never_autostarts_or_publishes_preview() -> None:
         "onAutoForward": "silent",
     }
     assert payload["forwardPorts"] == [8000]
+    assert payload["features"]["ghcr.io/devcontainers/features/sshd:1.1.0"] == {}
+    lock = json.loads((root / ".devcontainer" / "devcontainer-lock.json").read_text("utf-8"))
+    sshd_lock = lock["features"]["ghcr.io/devcontainers/features/sshd:1.1.0"]
+    assert sshd_lock == {
+        "version": "1.1.0",
+        "resolved": (
+            "ghcr.io/devcontainers/features/sshd@sha256:"
+            "f5251b8e4325f68f7280973c6cd65daff414449c66f240621502d4e8e74eb7ee"
+        ),
+        "integrity": (
+            "sha256:"
+            "f5251b8e4325f68f7280973c6cd65daff414449c66f240621502d4e8e74eb7ee"
+        ),
+    }
     assert "public" not in serialized
     for forbidden in ("password", "argon2", "session_secret", "icor_preview_users", "cors", "xsrf"):
         assert forbidden not in serialized

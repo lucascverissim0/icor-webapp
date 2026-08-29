@@ -4,7 +4,8 @@
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "24.15.0"
-    }
+    },
+    "ghcr.io/devcontainers/features/sshd:1.1.0": {}
   },
   "customizations": {
     "codespaces": {
