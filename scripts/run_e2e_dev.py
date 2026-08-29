@@ -8,10 +8,37 @@ import shutil
 import signal
 import subprocess
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 
+if __package__:
+    from scripts.e2e_fixture import prepare_e2e_fixture
+else:
+    from e2e_fixture import prepare_e2e_fixture
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def fixture_root_for(api_port: int, web_port: int) -> Path:
+    return ROOT / ".local" / f"e2e-fixture-{api_port}-{web_port}"
+
+
+def prepare_environment(
+    environment: Mapping[str, str],
+    *,
+    fixture_root: Path = ROOT / ".local" / "e2e-fixture",
+) -> dict[str, str]:
+    prepared = dict(environment)
+    evidence = prepared.get("ICOR_E2E_EVIDENCE_CANDIDATE")
+    generation = prepared.get("ICOR_E2E_GENERATION_CANDIDATE")
+    if bool(evidence) != bool(generation):
+        raise ValueError("E2E evidence and generation candidates must both be configured")
+    if not evidence:
+        candidate = str(prepare_e2e_fixture(fixture_root))
+        prepared["ICOR_E2E_EVIDENCE_CANDIDATE"] = candidate
+        prepared["ICOR_E2E_GENERATION_CANDIDATE"] = candidate
+    return prepared
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
@@ -33,7 +60,11 @@ def run(api_port: int, web_port: int) -> int:
     npm = shutil.which("npm")
     if uv is None or npm is None:
         return 2
-    web_environment = os.environ.copy()
+    process_environment = prepare_environment(
+        os.environ,
+        fixture_root=fixture_root_for(api_port, web_port),
+    )
+    web_environment = process_environment.copy()
     web_environment["ICOR_API_ORIGIN"] = f"http://127.0.0.1:{api_port}"
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     processes: list[subprocess.Popen[bytes]] = []
@@ -52,6 +83,7 @@ def run(api_port: int, web_port: int) -> int:
                     str(api_port),
                 ],
                 cwd=ROOT,
+                env=process_environment,
                 creationflags=flags,
                 start_new_session=os.name != "nt",
             )

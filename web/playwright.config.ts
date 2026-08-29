@@ -13,6 +13,7 @@ const coverageDatabase = fileURLToPath(
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  workers: process.env.ICOR_E2E_EVIDENCE_CANDIDATE ? 1 : undefined,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {

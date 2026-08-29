@@ -1770,4 +1770,59 @@ documented secrets outside Git/logs/conversation, run the private 20-release boo
 and full gates, and only then temporarily make port 8000 public for review. Do not push
 or merge `main`, publish a port, or start the remote acquisition without those actions.
 
+## 2026-08-29 release checkpoint: clean-room browser gate repaired
+
+Lucas authorized completing the previously documented Task 9 sequence: push only
+`development/windshield-demand-platform`, create the Codespace from that branch,
+configure the three documented Codespaces secrets, run the exact 20-release remote
+build and complete verification, verify authentication privately, temporarily expose
+port 8000 for manager review, and return it to private. This authorization does not
+permit a merge or push to `main` or a production deployment.
+
+The outgoing audit confirmed the local development worktree is still isolated at
+`45e9eca5732b480eda1a1fa40758305e019a2507`. Both the protected production checkout
+and remote `main` remain at `1ba1d7c41a5fa8354134685b5c85509a0b8f6137`. The remote
+development branch was absent at the time of the audit. The paused local release store
+remains present, `.local/evidence/releases` remains absent, and no abandoned
+`.build-*` candidate exists. The unrelated unstaged `AGENTS.md` edit is preserved and
+must remain excluded from commits.
+
+Fresh pre-push gates first passed lockfile verification, the maintained Ruff scope,
+544 backend tests with 11 documented skips and four characterization XFAILs, 62 Vitest
+tests, OpenAPI drift, TypeScript, ESLint, the production bundle, and Python/npm audits
+with no known third-party vulnerability. The first bare Playwright run then correctly
+exposed a release-blocking clean-room defect: CI supplied neither required sealed
+candidate path, so its API composition failed closed before tests ran. Supplying the
+two recorded ignored candidates proved the configuration diagnosis, but a four-worker
+large-candidate run reproduced resource/process failure; the same evidence file passed
+4/4 serially.
+
+The repair is test-only and does not change application, preview, Codespaces, or
+production runtime behavior. `scripts/e2e_fixture.py` builds a tiny deterministic
+sealed EEA candidate through production release staging, snapshot validation, and
+canonical identity boundaries when explicit candidates are absent.
+`scripts/run_e2e_dev.py` injects that candidate only into the browser-test composition,
+rejects partial explicit configuration, preserves two explicit paths unchanged, and
+uses a port-scoped ignored fixture root for concurrent runs. Explicit real-candidate
+runs retain their exact 542,455-observation, four-release, 6,929-model, and official
+registration assertions and automatically use one worker. CI Ruff coverage now includes
+the harness and all Codespaces security scripts touched by the release plan.
+
+TDD evidence recorded the missing module and missing runner environment as RED, then
+focused GREEN at 2/2. Final changed-tree verification is: expanded Ruff clean; 546
+backend tests passed with the same 11 skips and four XFAILs; 62 Vitest tests passed;
+OpenAPI, TypeScript, ESLint, Vite production build, lockfile, `pip-audit`, and
+`npm audit --audit-level=high` passed; bare clean-room Playwright passed 20/20 in
+40.6 seconds after review hardening; and the explicit large sealed-candidate suite
+passed 20/20 serially in 3.3 minutes. Independent read-only review found no Critical or
+Important issue; both Minor suggestions (concurrent fixture isolation and the complete
+environment matrix) were implemented and reverified.
+
+No test server is running. No GitHub branch, Codespace, secret, port, evidence release,
+snapshot promotion, deployment, production checkout, or `main` state changed during
+this checkpoint. Next: commit only the intended harness/CI/handoff files, re-audit the
+commit, push only `development/windshield-demand-platform`, then perform the documented
+Codespaces secret/bootstrap/private-auth/public-review/private-port sequence.
+
+
 Context safety: SAFE TO CLEAR — durable handoff is current.

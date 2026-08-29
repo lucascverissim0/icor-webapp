@@ -13,11 +13,15 @@ declare global {
 }
 
 const axePath = fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', import.meta.url))
+const usesRealCandidate = Boolean(process.env.ICOR_E2E_EVIDENCE_CANDIDATE)
+const expectedObservationCount = usesRealCandidate ? '542,455' : '3'
+const expectedReleaseCount = usesRealCandidate ? 4 : 1
+const expectedZeroMetrics = usesRealCandidate ? 2 : 3
 
 test.describe.configure({ timeout: 90_000 })
 
 function observationMetric(page: import('@playwright/test').Page) {
-  return page.locator('.evidence-metrics dd').filter({ hasText: /^542,455$/ })
+  return page.locator('.evidence-metrics dd').filter({ hasText: expectedObservationCount })
 }
 
 test('reviews the sealed official candidate without forecast claims', async ({ page }) => {
@@ -25,11 +29,13 @@ test('reviews the sealed official candidate without forecast claims', async ({ p
 
   await expect(page.getByRole('heading', { name: 'Source evidence', exact: true })).toBeVisible()
   await expect(observationMetric(page)).toBeVisible({ timeout: 60_000 })
-  await expect(page.locator('.release-card')).toHaveCount(4)
+  await expect(page.locator('.release-card')).toHaveCount(expectedReleaseCount)
   await expect(page.getByText(/exact normalized model-family identity/i)).toBeVisible()
   await expect(page.getByText(/registration year is not model year/i)).toBeVisible()
   await expect(page.getByText(/candidate does not feed forecasts/i)).toBeVisible()
-  await expect(page.getByRole('definition').filter({ hasText: /^0$/ })).toHaveCount(2)
+  await expect(page.getByRole('definition').filter({ hasText: /^0$/ })).toHaveCount(
+    expectedZeroMetrics,
+  )
 
   await page.getByRole('searchbox', { name: 'Search source labels' }).fill('ALFA ROMEO')
   await page.getByRole('button', { name: 'Apply filters' }).click()
