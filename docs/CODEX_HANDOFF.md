@@ -1826,3 +1826,88 @@ Codespaces secret/bootstrap/private-auth/public-review/private-port sequence.
 
 
 Context safety: SAFE TO CLEAR — durable handoff is current.
+
+## 2026-08-30 private Codespaces preview: acquisition checkpoint
+
+Lucas explicitly authorized pushing only `development/windshield-demand-platform`,
+creating a private Codespace, configuring the three documented Codespaces secrets,
+running the exact 20-release build and full gates, verifying private authentication,
+temporarily exposing port 8000 for manager review, and returning it to private. This
+does not authorize a merge/push to `main` or a production deployment. Lucas asked to
+defer choosing personal passwords and use generated temporary credentials meanwhile.
+Strong generated credentials for the named `Lucas` and `manager` preview accounts are
+stored only in Windows Credential Manager targets `ICOR-Preview-Lucas` and
+`ICOR-Preview-Manager`; no password was shown or placed in Git, logs, or documentation.
+The user-level repository-scoped Codespaces secrets `ICOR_PREVIEW_USERS`,
+`ICOR_PREVIEW_SESSION_SECRET`, and `ICOR_EXPORT_TOKEN` are configured. The original
+Git Credential Manager token was preserved, and the separate GitHub CLI token remains
+in the system keyring.
+
+The portable official GitHub CLI 2.98.0 is installed at
+`C:\Users\LucasCravoVERISSIMO\tools\gh-2.98.0\bin\gh.exe`; its Windows amd64 ZIP
+matched the official SHA-256
+`C28C7B3B584967A05B74D9EAF7481BFF24DDC34930BF2D6E442C148236561EB1`.
+The definitive private Codespace is
+`icor-windshield-preview-final-pjqjxgg6qrx4f9r94` (`standardLinux32gb`, West Europe,
+30-minute idle timeout, 168-hour retention). Failed predecessor Codespaces were
+deleted. The definitive Codespace is on branch
+`development/windshield-demand-platform`; port 8000 is currently **private**, and no
+manager-facing exposure has occurred.
+
+Four reviewed provisioning fixes were committed and pushed only to the development
+branch: `1be37ec` pins the Codespaces SSH Feature and lock digest; `578fca2` enforces
+canonical SSH-before-Node Feature ordering; `25a4121` pins the devcontainer base image
+and removes its stale Yarn APT source; and `d9f95fe` normalizes the platform suffix in
+`uv --version`. The Codespace then built successfully with Python 3.12.11, Node
+24.15.0, npm 11.12.1, and uv 0.11.3. Its only unrelated worktree difference is the
+known final-newline change in `.devcontainer/devcontainer-lock.json` made by
+Codespaces. The local unrelated `AGENTS.md` edit remains unstaged and excluded.
+
+The first live `--prepare` attempt exposed two coordinator defects: historical EEA
+sources were incorrectly sent to the generic direct downloader, and the CLI received
+the releases directory instead of the evidence root. Commit `ff84287` fixes both
+test-first: EEA 2010-2023 uses `acquire_eea_history.py` followed by checksum-gated
+`acquire_official_evidence.py --artifact`; every acquisition gets the correct evidence
+root; all-valid releases remain no-op; and the downloads root is resolved and rejected
+if it is a file, symlink, unavailable, or outside the evidence tree. Independent review
+found the symlink boundary before commit; the regression was observed RED, then the
+complete bootstrap suite passed 17 tests with one Windows symlink-privilege skip.
+Focused acquisition/parser verification passed 28 tests, Ruff and `git diff --check`
+passed, and the fresh final backend suite passed 549 tests with 12 documented skips and
+four known characterization XFAILs. A prior full-suite attempt had one Windows
+`MoveFileW` access-denied fixture error; the exact test passed immediately in isolation
+and the full rerun passed. Independent re-review found no Critical or Important issue.
+Remote development and the Codespace are both at
+`ff842875a2daa054d1d9c4238e69308a0c2cbdf0`; protected remote `main` remains unchanged
+at `1ba1d7c41a5fa8354134685b5c85509a0b8f6137`.
+
+The corrected bootstrap environment check returns
+`{"release_count":20,"state":"ready"}`, but live acquisition is not yet complete.
+The reviewed 2010 adapter reproduced every pinned aggregate count (162,167 groups,
+285,764 source rows, 282,966 accepted rows, 2,798 rejected rows, and 12,939,010
+registrations), while its current artifact was 10,582,166 bytes with SHA-256
+`d7eed251b30a3cc8d14ad9106e30c2655938b277192f88d051f8ce34538dba07`; the pinned
+artifact was 10,582,165 bytes with a different digest. Row-level comparison against the
+preserved validated local release found exactly 128 changed rows. The only changes were
+case differences in `Mk`, `Cn`, `T`, `Va`, or `Ve`, plus one trailing space in `Mk`;
+all row ordering, counts, and nonpresentation values were unchanged. This proves the
+official SQL endpoint's case/trailing-space-insensitive grouping returns unstable
+representative text. The checksum gate correctly rejected it; no release was staged,
+no candidate or active snapshot was created or changed, and the exact remote download
+fragment plus local temporary comparison copy were removed after validation.
+
+This newly discovered issue upgrades the next step to a bounded data-contract design
+requiring Lucas's explicit approval under the brainstorming workflow. Recommended
+design: canonicalize every historical EEA grouping label deterministically using the
+same NFC/whitespace/casefold identity rule before CSV serialization; issue new immutable
+`-r1` release IDs for all 14 historical releases rather than reusing IDs for different
+bytes; keep the parser backward-compatible with the preserved old IDs; derive and pin
+all 14 new sizes/digests; verify the current and preserved 2010 exports canonicalize to
+identical bytes; then rerun local gates, independent review, development-only push,
+remote acquisition, build/completeness/promotion, frontend/browser/security/audit
+gates, private authentication, temporary manager exposure, and immediate return to
+private. Do not weaken checksum validation or stage the nondeterministic artifacts.
+
+No application server is running in the Codespace. Port 8000 has a GitHub forwarded
+URL but is private. The next action is to obtain Lucas's explicit approval for the
+bounded canonicalization/new-release-revision design before any implementation.
