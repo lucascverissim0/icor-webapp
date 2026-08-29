@@ -88,6 +88,10 @@ def test_devcontainer_never_autostarts_or_publishes_preview() -> None:
     }
     assert payload["forwardPorts"] == [8000]
     assert payload["features"]["ghcr.io/devcontainers/features/sshd:1.1.0"] == {}
+    assert payload["overrideFeatureInstallOrder"] == [
+        "ghcr.io/devcontainers/features/sshd",
+        "ghcr.io/devcontainers/features/node",
+    ]
     lock = json.loads((root / ".devcontainer" / "devcontainer-lock.json").read_text("utf-8"))
     sshd_lock = lock["features"]["ghcr.io/devcontainers/features/sshd:1.1.0"]
     assert sshd_lock == {
