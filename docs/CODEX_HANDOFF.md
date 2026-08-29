@@ -1877,9 +1877,10 @@ passed, and the fresh final backend suite passed 549 tests with 12 documented sk
 four known characterization XFAILs. A prior full-suite attempt had one Windows
 `MoveFileW` access-denied fixture error; the exact test passed immediately in isolation
 and the full rerun passed. Independent re-review found no Critical or Important issue.
-Remote development and the Codespace are both at
-`ff842875a2daa054d1d9c4238e69308a0c2cbdf0`; protected remote `main` remains unchanged
-at `1ba1d7c41a5fa8354134685b5c85509a0b8f6137`.
+The verified application-code checkpoint and the Codespace are at
+`ff842875a2daa054d1d9c4238e69308a0c2cbdf0`; after this checkpoint is committed, the
+remote development branch is one documentation-only commit ahead. Protected remote
+`main` remains unchanged at `1ba1d7c41a5fa8354134685b5c85509a0b8f6137`.
 
 The corrected bootstrap environment check returns
 `{"release_count":20,"state":"ready"}`, but live acquisition is not yet complete.
