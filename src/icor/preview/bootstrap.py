@@ -273,7 +273,7 @@ def probe_environment(workspaces_root: Path) -> EnvironmentReport:
         python_version=sys.version_info[:3],
         node_version=_tool_version(("node", "--version")),
         npm_version=_tool_version(("npm", "--version")),
-        uv_version=_tool_version(("uv", "--version")).removeprefix("uv "),
+        uv_version=_tool_version(("uv", "--version")).removeprefix("uv ").partition(" ")[0],
         free_bytes=shutil.disk_usage(workspaces_root).free,
     )
 

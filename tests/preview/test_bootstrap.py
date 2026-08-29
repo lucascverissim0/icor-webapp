@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ from icor.preview.bootstrap import (
     CommandResult,
     EnvironmentReport,
     default_plan,
+    probe_environment,
     validate_environment,
 )
 
@@ -50,6 +52,28 @@ def _environment(**changes) -> EnvironmentReport:
     values.update(changes)
     return EnvironmentReport(**values)
 
+
+def test_probe_environment_normalizes_uv_platform_suffix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import icor.preview.bootstrap as bootstrap
+
+    versions = {
+        ("node", "--version"): "v24.15.0",
+        ("npm", "--version"): "11.12.1",
+        ("uv", "--version"): "uv 0.11.3 (x86_64-unknown-linux-gnu)",
+    }
+    monkeypatch.setenv("CODESPACES", "true")
+    monkeypatch.setattr(bootstrap, "_tool_version", versions.__getitem__)
+    monkeypatch.setattr(
+        bootstrap.shutil,
+        "disk_usage",
+        lambda _: SimpleNamespace(free=24 * 1024**3),
+    )
+
+    report = probe_environment(tmp_path)
+
+    assert report.uv_version == "0.11.3"
 
 def test_environment_accepts_supported_codespace_and_workspaces_root(
     tmp_path: Path,
