@@ -1912,3 +1912,59 @@ private. Do not weaken checksum validation or stage the nondeterministic artifac
 No application server is running in the Codespace. Port 8000 has a GitHub forwarded
 URL but is private. The next action is to obtain Lucas's explicit approval for the
 bounded canonicalization/new-release-revision design before any implementation.
+## 2026-08-31 canonical EEA releases and direct-source redirect checkpoint
+
+Lucas explicitly approved the bounded historical EEA canonicalization/new-release
+revision design and reiterated that Codex must work only in the ICOR web app even after
+terminal or conversation context is cleared. This conversation remains anchored to
+`C:\Users\LucasCravoVERISSIMO\icor-webapp-development`; the unrelated unstaged
+`AGENTS.md` edit remains preserved and excluded. Protected remote `main` remains
+`1ba1d7c41a5fa8354134685b5c85509a0b8f6137`, and no production deployment or merge
+was performed.
+
+Commit `e666c433317fd420753ef560c7b0e51709c5d5cf` was pushed only to
+`development/windshield-demand-platform`. Historical EEA 2010-2023 group labels are now
+serialized deterministically: `MS` uses NFC, collapsed whitespace, and uppercase ISO
+country-code casing; `Mk`, `Cn`, `TAN`, `T`, `Va`, `Ve`, and `Ft` use NFC, collapsed
+whitespace, and casefolding. All 14 releases have new immutable `-r1` IDs and exact
+canonical sizes/SHA-256 pins. The loader remains compatible with both preserved legacy
+IDs and new `-r1` IDs and defensively uppercases geography before aggregation.
+
+The initial independent review found that casefolding `MS` would break the application's
+uppercase EU27 geography filters. That finding was verified against
+`src/icor/application/registrations.py`, reproduced RED at both acquisition and loader
+boundaries, and corrected test-first. Independent re-review found no remaining Critical
+or Important issue. All 14 canonical artifacts derived from the preserved verified
+release store passed the real `build_manifest` checksum/size/identity gate. A live 2010
+export with independently varying raw presentation canonicalized to the same bytes as
+the preserved release. Focused local verification passed 32 tests with one documented
+Windows symlink skip; the private Linux Codespace passed all 33 focused tests with no
+skip. Local lockfile and full Ruff gates passed, and the fresh complete backend suite
+passed 551 tests with 12 documented skips and four known characterization XFAILs.
+Temporary local derivation artifacts and diagnostic copies were removed.
+
+The definitive private Codespace
+`icor-windshield-preview-final-pjqjxgg6qrx4f9r94` is at application commit `e666c43`
+with only its known devcontainer-lock final-newline difference. Its environment check
+returns `{"release_count":20,"state":"ready"}`. Real acquisition immutably staged all
+14 canonical EEA history releases (2010-2023) before stopping at EEA 2024. No candidate
+build, promotion, or active snapshot change occurred.
+
+EEA 2024 failed only because the strict URL allowlist rejected the official endpoint's
+new HTTP 302 target. The public landing URL now redirects to the exact versioned
+EEA-managed object
+`https://dis2datalake.blob.core.windows.net/discodata/co2emission/v7r2/co2cars_2024fv30.zip`.
+The blob reports 138,252,239 bytes, last-modified 2026-08-07 08:49:05 UTC, and its
+verified SHA-256 remains the existing pinned
+`122dab33e931ea04d3ddb4bb2691dae85dc0da14428fc17873d3fb1f648b7b67`.
+The verified archive is retained only as an unstaged acquisition download in the
+private Codespace. KBA and all four UK direct sources return HTTP 200 at their existing
+exact allowlisted URLs with no redirect.
+
+The next bounded design requires Lucas's explicit approval under the brainstorming
+workflow: replace only EEA 2024's download URL with the exact versioned EEA-managed blob
+while keeping its release ID, size, checksum, counts, terms, parser, and all strict URL
+validation unchanged. Add a failing exact-URL regression test, implement the metadata
+change, rerun focused/full gates and independent review, push only the development
+branch, then resume acquisition using the already verified archive. Port 8000 remains
+private and no application server is running.
