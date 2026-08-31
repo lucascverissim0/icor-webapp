@@ -52,7 +52,10 @@ OFFICIAL_SOURCES = {
         release_id="eea-co2cars-2024-final-v30-r1",
         source_id="eea-co2-monitoring",
         publisher="European Environment Agency / European Commission DG CLIMA",
-        url="https://discodata.eea.europa.eu/download/CO2Emission/latest/co2cars_2024Fv30",
+        url=(
+            "https://dis2datalake.blob.core.windows.net/discodata/co2emission/"
+            "v7r2/co2cars_2024fv30.zip"
+        ),
         published_at=datetime(2026, 8, 7, 8, 49, 5, tzinfo=UTC),
         coverage_start=date(2024, 1, 1),
         coverage_end=date(2024, 12, 31),

@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-08-28
+Last updated: 2026-08-31
 
 ## Project objective
 
@@ -1968,3 +1968,37 @@ validation unchanged. Add a failing exact-URL regression test, implement the met
 change, rerun focused/full gates and independent review, push only the development
 branch, then resume acquisition using the already verified archive. Port 8000 remains
 private and no application server is running.
+
+## 2026-08-31 EEA 2024 versioned-source implementation checkpoint
+
+Lucas explicitly approved the bounded list from the preceding checkpoint and asked
+Codex to keep all durable working context in the GitHub repository so work can resume
+after conversation or terminal context is cleared. The mandatory startup and handoff
+rules in AGENTS.md already enforce that policy; the separate pre-existing unstaged
+AGENTS.md productivity edit remains preserved and excluded.
+
+The approved EEA 2024 source change is implemented locally on
+development/windshield-demand-platform. Only the source URL now points to the exact
+versioned EEA-managed blob documented above. The immutable release ID, byte size,
+SHA-256, source counts, publication time, licence terms, parser, schema, suffix, and
+strict exact-URL validation remain unchanged. The regression also pins those invariant
+identity fields and validates the exact new URL.
+
+TDD RED was observed as one focused assertion failure showing the obsolete moving EEA
+landing URL versus the versioned blob; the other four acquisition tests passed. Focused
+GREEN is 5/5. Fresh complete verification is: uv lock --check resolved 107 packages;
+the complete maintained Ruff gate passed; backend pytest reported 552 passed, 12
+documented skips, and four known characterization XFAILs in 103.26 seconds; and
+git diff --check exited zero with informational Windows line-ending warnings only.
+Independent read-only review found no Critical, Important, or Minor issue and confirmed
+the immutable contract and fail-closed redirect validation remain intact.
+
+No commit or push has occurred yet in this checkpoint. The protected main checkout,
+production, active snapshot, Codespaces releases, candidate/promotion state, port
+visibility, and secrets are unchanged. Port 8000 remains private and no application
+server is running. Next: commit only the EEA metadata, regression, and this handoff;
+re-audit the commit; push only development/windshield-demand-platform; update the
+private Codespace; resume acquisition from EEA 2024 using the already verified archive;
+then continue the documented build, completeness, promotion, application, browser,
+security, audit, private-authentication, temporary manager-review, and immediate
+return-to-private sequence.

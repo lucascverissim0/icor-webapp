@@ -43,6 +43,18 @@ def test_historical_sources_use_new_canonical_release_revisions() -> None:
     )
 
 
+def test_eea_2024_uses_verified_versioned_blob_without_revising_release() -> None:
+    source = OFFICIAL_SOURCES["eea-2024-final"]
+
+    assert source.url == (
+        "https://dis2datalake.blob.core.windows.net/discodata/co2emission/v7r2/co2cars_2024fv30.zip"
+    )
+    assert source.release_id == "eea-co2cars-2024-final-v30-r1"
+    assert source.artifact_bytes == 138_252_239
+    assert source.sha256 == ("122dab33e931ea04d3ddb4bb2691dae85dc0da14428fc17873d3fb1f648b7b67")
+    validate_source_url(source, source.url)
+
+
 def test_source_url_rejects_changed_host_or_path():
     source = OFFICIAL_SOURCES["eea-2024-final"]
     with pytest.raises(ValueError, match="allowlisted"):
