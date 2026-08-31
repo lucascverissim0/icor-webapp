@@ -220,8 +220,12 @@ def test_loader_rejects_unexpected_archive_member(tmp_path: Path) -> None:
         EEAPassengerCarLoader().load((release,), repository)
 
 
+@pytest.mark.parametrize(
+    "release_id",
+    ("eea-co2cars-2010-final-v2", "eea-co2cars-2010-final-v2-r1"),
+)
 def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights(
-    tmp_path: Path,
+    tmp_path: Path, release_id: str
 ) -> None:
     artifact = tmp_path / "eea-2010-final.csv"
     headers = (
@@ -248,7 +252,7 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
                     "Year": "2010",
                     "Status": "F",
                     "Version_file": "v2",
-                    "MS": "DE",
+                    "MS": "de",
                     "Mk": "VOLKSWAGEN",
                     "Cn": "GOLF",
                     "TAN": "E1*2007/46*0001",
@@ -263,7 +267,7 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
                     "Year": "2010",
                     "Status": "F",
                     "Version_file": "v2",
-                    "MS": "FR",
+                    "MS": "fr",
                     "Mk": "RENAULT",
                     "Cn": "CLIO",
                     "TAN": "",
@@ -278,7 +282,7 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
                     "Year": "2010",
                     "Status": "F",
                     "Version_file": "v2",
-                    "MS": "DE",
+                    "MS": "de",
                     "Mk": "VOLKSWAGEN",
                     "Cn": "GOLF",
                     "TAN": "E1*2007/46*0001",
@@ -293,7 +297,7 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
                     "Year": "2010",
                     "Status": "F",
                     "Version_file": "v2",
-                    "MS": "DE",
+                    "MS": "de",
                     "Mk": "",
                     "Cn": "UNKNOWN",
                     "TAN": "",
@@ -307,7 +311,7 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
             )
         )
     manifest = ReleaseManifest(
-        release_id="eea-co2cars-2010-final-v2",
+        release_id=release_id,
         source_id="eea-co2-monitoring",
         publisher="European Environment Agency / DG CLIMA",
         source_url="https://discodata.eea.europa.eu/sql",

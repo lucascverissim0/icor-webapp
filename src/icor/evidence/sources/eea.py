@@ -111,7 +111,7 @@ class EEAAnnualAggregateLoader:
         repository: SQLiteEvidenceRepository,
     ) -> None:
         manifest = release.manifest
-        match = fullmatch(r"eea-co2cars-(20\d{2})-final-(v\d+)", manifest.release_id)
+        match = fullmatch(r"eea-co2cars-(20\d{2})-final-(v\d+)(?:-r1)?", manifest.release_id)
         if match is None:
             raise ValueError("EEA annual aggregate release ID is unsupported")
         year, version = int(match.group(1)), match.group(2)
@@ -170,6 +170,7 @@ class EEAAnnualAggregateLoader:
                 if any(normalize_vehicle_label(value) is None for value in key[:3]):
                     continue
                 country, make, model = key[:3]
+                country = country.upper()
                 batch.append(
                     (
                         country,

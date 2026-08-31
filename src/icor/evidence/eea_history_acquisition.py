@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import os
+import unicodedata
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from icor.evidence.sources.eea import ANNUAL_AGGREGATE_SCHEMA
 API_URL = "https://discodata.eea.europa.eu/sql"
 _COMBINED_TABLE = "[CO2Emission].[latest].[co2cars]"
 _MAX_RESPONSE_BYTES = 250 * 1024 * 1024
+_GROUP_LABEL_FIELDS = ("Mk", "Cn", "TAN", "T", "Va", "Ve", "Ft")
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +211,13 @@ def _canonical_row(row: dict[str, object], release: AnnualRelease) -> dict[str, 
         field: "" if row[field] is None else str(row[field])
         for field in ANNUAL_AGGREGATE_SCHEMA
     }
+    canonical["MS"] = " ".join(
+        unicodedata.normalize("NFC", canonical["MS"]).split()
+    ).upper()
+    for field in _GROUP_LABEL_FIELDS:
+        canonical[field] = " ".join(
+            unicodedata.normalize("NFC", canonical[field]).split()
+        ).casefold()
     if canonical["Year"] != str(release.year):
         raise ValueError("EEA API row year is unexpected")
     if canonical["Status"] != "F" or canonical["Version_file"] != release.version:

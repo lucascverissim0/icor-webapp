@@ -200,69 +200,27 @@ OFFICIAL_SOURCES = {
 }
 
 _EEA_HISTORY_ARTIFACTS = {
-    2010: (
-        10_582_165,
-        "a01a28f4eb8ff2318970870c53d931535c179293ee3212f6f765fff527bb86ea",
-    ),
-    2011: (
-        17_207_785,
-        "2725e16f9e0f76fb38f6a07f1b6fe21d21bd80d0403688723a6cfd2ff915eb55",
-    ),
-    2012: (
-        22_507_939,
-        "2630dd33d793357546c676719a45151759d3a92ef0f98ae7349b9754aadc7c8f",
-    ),
-    2013: (
-        24_756_965,
-        "0bff6f5f82a5ce6a1580160c49cfca4a0b40023aa88c943d408285dc03710b68",
-    ),
-    2014: (
-        27_121_572,
-        "343a03d43cf85652fc1f3f1612287c8188980604ad140ef72d6cbcc1ce5ec698",
-    ),
-    2015: (
-        28_983_867,
-        "8d13bac32ea7213535ffcc73ccb5bc9a3304a1707d8fc60a423e977cd038c82b",
-    ),
-    2016: (
-        30_234_374,
-        "173f64ee3eb5217fcd0c087b74f2bd6e2b81a623b373bd820f4d05bf6683f9e3",
-    ),
-    2017: (
-        32_648_871,
-        "f18aa6c2550bad36bb9b77bad04c9b592ef721753d4d37c8c0e56f209794f616",
-    ),
-    2018: (
-        31_809_504,
-        "dfc4ebfe820593d83b2ef31a37bd569970db73b89a5fbbf4f7b4c6ced2a3af94",
-    ),
-    2019: (
-        35_428_516,
-        "6d8b5674beec5183b4dabfd7f872bf23566954a41e6a02abdc31ddb214d0b31a",
-    ),
-    2020: (
-        35_381_313,
-        "65eab3dbb250e4619e1b4e77ca4e4b3bb742e5fc5f44a9e71dfe73bc306da349",
-    ),
-    2021: (
-        34_088_459,
-        "004de558b475559008d8e455c59e701006f59bd37901a9935856f41d654a8e10",
-    ),
-    2022: (
-        31_865_846,
-        "ca5736c6ff35d7242c0aef87ef1b186361fe7417e431bd4c4ed8b4d50474cb7d",
-    ),
-    2023: (
-        27_973_567,
-        "65ae15b00d2804214b50e88bb8f32df1cc409ca7cde26cc54a69104ce664b3ad",
-    ),
+    2010: (10_578_850, "8cfd48f14583b77273965d3637b12408120009c6aa7159ed0aff0ca01a47d888"),
+    2011: (17_194_080, "b77f437fd2da316dbd206cf154b7b67a759760e709afb366caed043ca6653f85"),
+    2012: (22_491_741, "a4dbe1738ee95b6fc878e4ba55486f6c97bf63512c612293f279383a22014f89"),
+    2013: (24_750_345, "ae253fd56a5d52ac9b148bc5307033beeca01d17451c7892b9b7589e7b76337b"),
+    2014: (27_117_175, "3aa60f41f1e2681a6d87ca56ee46498b0b3979e02ff10440c9c96a24854f740e"),
+    2015: (28_982_636, "1d63b196570dfb6ad2e1e815579ff2e6498ea4b07661627a6f916d98b872c2f5"),
+    2016: (30_233_425, "17a39e411e81d857865a4ba3ced42eec83ab1e0d60eb6ae58e4ca45ab66f02bc"),
+    2017: (32_504_019, "00319619e1e69ffa91c10bd9f94bc895a5e4aa3722dfac983d1fca90e100c299"),
+    2018: (31_763_338, "9d5a75d8ce80c8d0a7ffc6221860886b3726eb1eb1f1d6471442573bec31bdcb"),
+    2019: (35_336_669, "36bb63ed9a0fddf3864d8b890b84ea0ad597da41a99c2c2b9e851d0d682e01ae"),
+    2020: (35_324_261, "c5f1ee097f6c07c87909a3905f3e90a513f26a5da34e4bad087210a23f6b6988"),
+    2021: (33_972_664, "bb96ec19a2dca90d8c65394690f8b9fb57a21d852fbd695f37b84ddb45c57944"),
+    2022: (31_862_928, "74585b1353d205c739b070f1f6d20cb5abfad606accfed871cb7b1bb0ac61a2f"),
+    2023: (27_973_283, "bbd0e95c50fbf649be3bf7e356469b98365edc827c9dc5935d187a2473331bb6"),
 }
 
 for _year, _annual in ANNUAL_RELEASES.items():
     _bytes, _sha256 = _EEA_HISTORY_ARTIFACTS[_year]
     OFFICIAL_SOURCES[f"eea-{_year}-final"] = OfficialSource(
         key=f"eea-{_year}-final",
-        release_id=f"eea-co2cars-{_year}-final-{_annual.version}",
+        release_id=f"eea-co2cars-{_year}-final-{_annual.version}-r1",
         source_id="eea-co2-monitoring",
         publisher="European Environment Agency / European Commission DG CLIMA",
         url=API_URL,
