@@ -2014,3 +2014,72 @@ resume acquisition from EEA 2024 using the already verified archive, and continu
 documented build, completeness, promotion, application, browser, security, audit,
 private-authentication, temporary manager-review, and immediate return-to-private
 sequence.
+
+## 2026-08-31 portable all-release build checkpoint
+
+Lucas explicitly approved publishing the two preceding local commits, including this
+detailed tracked handoff, and stated that all important state must be committed and
+pushed so development can resume from any machine. Treat a material checkpoint as
+portable only after its handoff is committed and pushed to the development branch; do
+not report that it is safe to clear or switch machines while newer material state
+exists only in a terminal or Codespace process.
+
+The approved development push succeeded. Remote
+`development/windshield-demand-platform` reached
+`3b0d81a9dc5665d21bcf521bfc81011fe4bb7f0f`; protected `main` remained unchanged.
+Commit `c2fb8e7` pins the exact EEA 2024 versioned source and its regression, and commit
+`3b0d81a` records the prior push boundary. The local branch was synchronized except for
+the preserved unrelated unstaged `AGENTS.md` edit.
+
+The definitive private Codespace was fast-forwarded to `3b0d81a`. The retained EEA
+2024 archive was reverified at 138,252,239 bytes and staged as
+`eea-co2cars-2024-final-v30-r1`. Acquisition then completed for all 20 pinned releases,
+and a repeated acquisition was a 20-manifest no-op. No active snapshot exists; status
+correctly returned `{"active_snapshot_id":null,"state":"unavailable"}` with exit 4.
+Port 8000 remains private and no application server is running.
+
+The first complete build was silently stopped when the Codespace hit its 30-minute idle
+timeout: GitHub defines idle as absence of user-indicative activity, and silent terminal
+sessions do not reset the timeout. The intact `.build-*` tree proved abrupt container
+termination rather than a normal Python exception, because `SnapshotBuilder.build`
+always removes staging in `finally`. The exact abandoned scratch path was verified to
+be beneath `/workspaces/.icor/evidence/candidates`, confirmed to have no live worker or
+active pointer, and permanently removed with the project's containment-checked
+`SnapshotFilesystem.cleanup_directory`; all 20 release manifests remained intact.
+
+An exact-command retry used harmless terminal heartbeats every 120 seconds and stayed
+alive for more than three hours, proving the idle mitigation. It then exposed a separate
+capacity limit in the 32 GB workspace. During canonical replay the builder must retain
+the 12 GB scratch database while writing an approximately 11 GB final WAL and then
+checkpointing that WAL into the main database. Workspace use reached 100% (28 KB free)
+before the checkpoint could finish. A graceful SIGINT could not be delivered while
+SQLite was inside its C checkpoint. The single capacity-doomed worker was therefore
+terminated, and only its exact verified staging directory
+`.build-463d04c93ecc4b6db1b2aef43d65caed` was permanently removed with
+`SnapshotFilesystem.cleanup_directory`. Workspace capacity returned to 26 GB free;
+the release store, repository, active pointer, and port state were untouched.
+
+The Codespace exposes `/tmp` as a separate 118 GB filesystem with 108 GB free. A unique
+retry root `/tmp/icor-evidence-build-20260831T1520Z` now contains a verified copy of all
+20 immutable release manifests/artifacts (685 MB). The initial preflight correctly
+refused before building because its manifest-count command assumed the wrong directory
+depth; a recursive verification then proved exactly 20 manifests. No candidate was
+created by that refused preflight.
+
+The deterministic large-volume retry is currently running in the private Codespace as
+PID 43316 under a 120-second terminal heartbeat. Its command is:
+
+`uv run python scripts/bootstrap_codespaces_preview.py --build --workspaces-root / --evidence-root /tmp/icor-evidence-build-20260831T1520Z`
+
+Its first heartbeat was `2026-08-31T15:22:38+00:00`. This build performs candidate
+validation but no promotion. If the terminal session is lost, first inspect PID 43316,
+the exact temporary root, and `/tmp` capacity; do not start a duplicate worker while it
+is alive. After success, run the independent completeness report against the temporary
+candidate and require zero warnings plus the exact 20 release IDs. Then import only the
+finished immutable candidate into `/workspaces/.icor/evidence/candidates` through a
+containment-checked staging/publish operation, rerun candidate validation there, verify
+active state is still unavailable, and promote only that verified candidate. Continue
+with active status/verification, idempotent `--prepare`, backend/frontend/security/audit
+gates, private authentication, and private browser review. Keep port 8000 private until
+all private gates pass. Record and push every material outcome before reporting the
+workspace portable.
