@@ -106,6 +106,8 @@ class SnapshotFilesystem:
             directory=True,
             allow_writes=True,
         )
+        previous_operation_root = getattr(self, "_pinned_operation_root", None)
+        previous_root_handle = getattr(self, "_pinned_root_handle", None)
         operation_root: Path | None = None
         try:
             operation_root = self._operation_root_for_handle(
@@ -114,6 +116,7 @@ class SnapshotFilesystem:
                 identity,
             )
             self._pinned_operation_root = operation_root
+            self._pinned_root_handle = handle
             yield operation_root
             self._assert_stable_path_identity(
                 safe_root,
@@ -131,7 +134,8 @@ class SnapshotFilesystem:
             raise
         finally:
             if operation_root is not None:
-                self._pinned_operation_root = None
+                self._pinned_operation_root = previous_operation_root
+                self._pinned_root_handle = previous_root_handle
             self._close_stable_handle(handle)
 
     @staticmethod
@@ -250,6 +254,13 @@ class SnapshotFilesystem:
 
     def fsync_directory(self, path: Path) -> None:
         if os.name != "nt":
+            pinned_root = getattr(self, "_pinned_operation_root", None)
+            pinned_handle = getattr(self, "_pinned_root_handle", None)
+            if path == pinned_root and pinned_handle is not None:
+                if not stat.S_ISDIR(os.fstat(pinned_handle).st_mode):
+                    raise SnapshotPathError("pinned evidence root is not a directory")
+                os.fsync(pinned_handle)
+                return
             descriptor = os.open(
                 path,
                 os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
