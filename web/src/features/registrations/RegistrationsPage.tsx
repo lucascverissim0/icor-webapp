@@ -73,7 +73,7 @@ export function RegistrationsWorkbench({
 
   function applySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    updateSearch({ search: draftSearch.trim() || undefined, page: 1 })
+    updateSearch({ ...routeSearch, search: draftSearch.trim() || undefined, page: 1 })
   }
 
   return (

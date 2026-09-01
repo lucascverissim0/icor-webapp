@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -258,11 +259,13 @@ class RegistrationService:
             *country_codes,
         ]
         if search is not None:
-            escaped = _escape_like(search.casefold())
-            vehicle_clauses.append(
-                "(LOWER(v.make) LIKE ? ESCAPE '\\' OR LOWER(v.model) LIKE ? ESCAPE '\\')"
-            )
-            parameters.extend((f"%{escaped}%", f"%{escaped}%"))
+            for token in _search_tokens(search):
+                escaped = _escape_like(token)
+                vehicle_clauses.append(
+                    "(LOWER(v.make) LIKE ? ESCAPE '\\' OR "
+                    "LOWER(v.model) LIKE ? ESCAPE '\\')"
+                )
+                parameters.extend((f"%{escaped}%", f"%{escaped}%"))
         return (
             f"""SELECT v.vehicle_id, v.make, v.model, grouped.registrations,
             grouped.evidence_confidence, grouped.input_observation_count,
@@ -337,6 +340,12 @@ def _registration_row(row: sqlite3.Row) -> RegistrationRow:
 
 def _split_group(value: str) -> tuple[str, ...]:
     return tuple(sorted(value.split(",")))
+
+
+def _search_tokens(value: str) -> tuple[str, ...]:
+    normalized = value.casefold().strip()
+    tokens = tuple(re.findall(r"[^\W_]+", normalized))
+    return tokens or (normalized,)
 
 
 def _escape_like(value: str) -> str:

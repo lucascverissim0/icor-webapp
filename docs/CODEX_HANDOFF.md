@@ -2225,3 +2225,11 @@ deleted.
 Execution is inline because this task has no permitted subagent delegation. The first task
 is the TDD fix for route-scope preservation and multi-token registration search. Preserve
 the unrelated local `AGENTS.md` modification and do not touch protected `main`.
+
+Task 1 reached verified green before commit. The frontend regression first failed because
+search submission dropped `geography` and `year`; after spreading route state it passed,
+with 5 registration-page tests green. Backend regressions first returned zero for both
+`Example Motors Alpha` and its punctuated equivalent; tokenized AND-across-make-or-model
+matching then passed 26 registration application/API tests. Ruff passed for the changed
+Python scope, TypeScript completed with exit code 0, and `git diff --check` reported no
+errors. Wildcard escaping remains covered.

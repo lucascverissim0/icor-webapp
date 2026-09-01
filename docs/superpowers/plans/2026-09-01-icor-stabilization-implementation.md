@@ -36,38 +36,38 @@
 - Consumes: existing `RegistrationQuery(search: str | None)` and URL-backed registration search state.
 - Produces: `_search_tokens(search: str) -> tuple[str, ...]`; token predicates that match across canonical make plus model; route updates that preserve geography/year/page-size.
 
-- [ ] **Step 1: Write the failing frontend regression test**
+- [x] **Step 1: Write the failing frontend regression test**
 
-Add a test that starts at `?geography=DE&year=2023&pageSize=50`, enters `Volkswagen Golf`, submits, and asserts the route becomes `geography=DE&year=2023&pageSize=50&search=Volkswagen+Golf&page=1`.
+Add a test that starts at `?geography=DE&year=2023&page=4`, enters `Volkswagen Golf`, submits, and asserts the state becomes `geography=DE&year=2023&search=Volkswagen+Golf&page=1`.
 
-- [ ] **Step 2: Run the frontend test and verify RED**
+- [x] **Step 2: Run the frontend test and verify RED**
 
 Run: `npm test -- RegistrationsPage.test.tsx --run`
-Expected: FAIL because geography, year, and page size are replaced by the search-only object.
+Expected: FAIL because geography and year are replaced by the search-only object.
 
-- [ ] **Step 3: Preserve route-backed filters**
+- [x] **Step 3: Preserve route-backed filters**
 
 Change the submit update to spread the parsed route state before setting trimmed search and page 1. Keep the clear action subject to the same preservation rule.
 
-- [ ] **Step 4: Run the frontend test and verify GREEN**
+- [x] **Step 4: Run the frontend test and verify GREEN**
 
 Run: `npm test -- RegistrationsPage.test.tsx --run`
 Expected: PASS.
 
-- [ ] **Step 5: Write failing backend multi-token tests**
+- [x] **Step 5: Write failing backend multi-token tests**
 
 Create a real temporary SQLite fixture containing canonical `volkswagen / golf`, `volkswagen / polo`, and `ford / golf` rows. Assert `Volkswagen Golf` returns only the Volkswagen Golf identity, while punctuation and repeated whitespace normalize to the same result and `%` remains literal.
 
-- [ ] **Step 6: Run backend tests and verify RED**
+- [x] **Step 6: Run backend tests and verify RED**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/application/test_registrations.py tests/api/test_registration_api.py -q`
 Expected: FAIL because the whole string is matched independently against make or model.
 
-- [ ] **Step 7: Implement tokenized cross-field matching**
+- [x] **Step 7: Implement tokenized cross-field matching**
 
 Add `_search_tokens` using Unicode case folding, whitespace compression, and punctuation-to-space normalization. For every token, append a parenthesized `(LOWER(v.make) LIKE ? OR LOWER(v.model) LIKE ?)` predicate; combine token predicates with `AND` and retain `_escape_like` for literal wildcards.
 
-- [ ] **Step 8: Verify Task 1 and commit**
+- [x] **Step 8: Verify Task 1 and commit**
 
 Run the two focused frontend/backend commands, Ruff on `registrations.py`, and `git diff --check`. Commit only Task 1 files with `fix: make registration search scope aware`.
 

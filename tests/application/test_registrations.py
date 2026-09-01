@@ -222,6 +222,23 @@ def test_ranking_is_stable_paginated_and_searchable(mapped_candidate: Path) -> N
     assert escaped.items == ()
 
 
+@pytest.mark.parametrize(
+    "search",
+    ("Example Motors Alpha", "  Example,   Motors / Alpha  "),
+)
+def test_search_matches_normalized_tokens_across_make_and_model(
+    mapped_candidate: Path, search: str
+) -> None:
+    page = RegistrationService.from_candidate(mapped_candidate).ranking(
+        RegistrationQuery(search=search)
+    )
+
+    assert page.total == 1
+    assert [(row.make, row.model) for row in page.items] == [
+        ("Example Motors", "Alpha")
+    ]
+
+
 def test_ranking_aggregates_observations_before_vehicle_lookup(
     mapped_candidate: Path,
 ) -> None:

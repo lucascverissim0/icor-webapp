@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AppProviders } from '../src/app/providers'
 import { RegistrationsWorkbench } from '../src/features/registrations/RegistrationsPage'
 import { PlannerApiClient } from '../src/lib/api/client'
+import type { RegistrationSearch } from '../src/lib/registration-search'
 
 
 const summary = {
@@ -45,11 +46,19 @@ function successFetcher() {
   })
 }
 
-function renderRegistrations(fetcher: typeof fetch) {
+function renderRegistrations(
+  fetcher: typeof fetch,
+  search?: RegistrationSearch,
+  onSearchChange?: (next: RegistrationSearch) => void,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <AppProviders queryClient={queryClient}>
-      <RegistrationsWorkbench apiClient={new PlannerApiClient(fetcher)} />
+      <RegistrationsWorkbench
+        apiClient={new PlannerApiClient(fetcher)}
+        onSearchChange={onSearchChange}
+        search={search}
+      />
     </AppProviders>,
   )
 }
@@ -87,6 +96,30 @@ describe('RegistrationsWorkbench', () => {
       expect.stringMatching(/\/api\/v1\/registrations\/ranking\?.*page=2/),
       expect.any(Object),
     )
+  })
+
+  it('preserves geography and year when a multiword search is submitted', async () => {
+    const user = userEvent.setup()
+    const onSearchChange = vi.fn<(next: RegistrationSearch) => void>()
+    renderRegistrations(
+      successFetcher(),
+      { geography: 'DE', year: 2023, page: 4 },
+      onSearchChange,
+    )
+
+    await screen.findByText('Example Motors')
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search make or model' }),
+      'Volkswagen Golf',
+    )
+    await user.click(screen.getByRole('button', { name: 'Search registrations' }))
+
+    expect(onSearchChange).toHaveBeenLastCalledWith({
+      geography: 'DE',
+      year: 2023,
+      search: 'Volkswagen Golf',
+      page: 1,
+    })
   })
 
   it('shows a safe unavailable state with no prototype fallback', async () => {
