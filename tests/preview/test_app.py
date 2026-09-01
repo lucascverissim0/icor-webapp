@@ -79,6 +79,36 @@ def test_factory_fails_closed_without_frontend(
         preview_module.create_preview_app(settings, asset_root=tmp_path / "missing")
 
 
+def test_factory_uses_configured_active_snapshot_root(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: PreviewSettings,
+    assets: Path,
+    tmp_path: Path,
+) -> None:
+    from icor.preview import app as preview_module
+
+    selected_root = tmp_path / "evidence"
+    captured: dict[str, object] = {}
+
+    def create_core(**kwargs: object) -> FastAPI:
+        captured.update(kwargs)
+        return _stub_api()
+
+    monkeypatch.setenv("ICOR_EVIDENCE_ACTIVE_ROOT", str(selected_root))
+    monkeypatch.setattr(preview_module, "create_app", create_core)
+
+    preview_module.create_preview_app(settings, asset_root=assets)
+
+    assert captured["snapshot_root"] == selected_root
+
+    explicit_root = tmp_path / "explicit-evidence"
+    captured.clear()
+    preview_module.create_preview_app(
+        settings, asset_root=assets, snapshot_root=explicit_root
+    )
+    assert captured["snapshot_root"] == explicit_root
+
+
 def test_login_logout_and_protected_navigation(
     monkeypatch: pytest.MonkeyPatch,
     settings: PreviewSettings,

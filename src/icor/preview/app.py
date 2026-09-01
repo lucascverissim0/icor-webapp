@@ -41,7 +41,10 @@ def create_preview_app(
 ) -> FastAPI:
     """Build the fail-closed Codespaces composition from validated runtime state."""
     selected_settings = settings or PreviewSettings.from_environment(os.environ)
-    core = create_app(snapshot_root=snapshot_root or DEFAULT_EVIDENCE_ROOT)
+    selected_snapshot_root = snapshot_root or Path(
+        os.environ.get("ICOR_EVIDENCE_ACTIVE_ROOT", str(DEFAULT_EVIDENCE_ROOT))
+    )
+    core = create_app(snapshot_root=selected_snapshot_root)
     if getattr(core.state, "snapshot_manifest", None) is None:
         raise ConfigurationError("preview active snapshot is unavailable")
     return _compose(core, selected_settings, asset_root or DEFAULT_ASSET_ROOT)
