@@ -2233,3 +2233,14 @@ with 5 registration-page tests green. Backend regressions first returned zero fo
 matching then passed 26 registration application/API tests. Ruff passed for the changed
 Python scope, TypeScript completed with exit code 0, and `git diff --check` reported no
 errors. Wildcard escaping remains covered.
+
+Task 2 reached verified green before commit. Schema v5 adds immutable registration-family,
+registration-label, evidence-release-summary, and planner-option projections plus composite
+indexes for registration scope, Evidence filters, canonical search, and reverse opportunity
+lineage. Writable v2/v3/v4 databases migrate forward; sealed read-only snapshots remain
+immutable. Projection materialization runs after canonical replay and before finalization,
+so it is deterministic and included in the snapshot checksum. Red tests first observed
+schema version 4, then a missing rebuild method, then empty candidate projections. Green
+verification reported 77 passed and one documented Windows symlink-privilege skip across
+the full repository and snapshot-build files; Ruff and `git diff --check` passed. A reversed
+input build remained byte-identical.

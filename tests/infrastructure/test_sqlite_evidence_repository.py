@@ -316,10 +316,111 @@ def test_repository_round_trips_generation_planning_records(
     assert repository.list_completeness_records() == (completeness,)
 
 
-def test_empty_database_migrates_to_schema_v4(tmp_path: Path) -> None:
+def test_empty_database_initializes_schema_v5_query_contract(tmp_path: Path) -> None:
     repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
 
-    assert repository.schema_version == 4
+    assert repository.schema_version == 5
+    with repository._connect() as connection:
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        indexes = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
+
+    assert {
+        "registration_family_aggregate",
+        "registration_label_aggregate",
+        "evidence_release_summary",
+        "planner_option",
+    } <= tables
+    assert {
+        "observation_registration_scope_idx",
+        "observation_evidence_filter_idx",
+        "canonical_vehicle_search_idx",
+        "opportunity_input_cohort_idx",
+    } <= indexes
+
+
+def test_query_projections_materialize_registration_evidence_and_planner_options(
+    repository: SQLiteEvidenceRepository,
+    release: ReleaseManifest,
+    vehicle: CanonicalVehicle,
+    observation: Observation,
+) -> None:
+    seed_dependencies(repository, release, vehicle, observation)
+    generation, assignment, cohort, opportunity, completeness = generation_records(
+        vehicle, observation
+    )
+    alternative = replace(
+        generation,
+        generation_id="generation-vw-golf-7-de",
+        display_name="Golf VII",
+        start_month=date(2012, 9, 1),
+        end_month=date(2020, 12, 1),
+        platform="MQB",
+    )
+    repository.add_generations((alternative, generation))
+    repository.add_generation_assignments((assignment,))
+    repository.add_cohort_estimates((cohort,))
+    repository.add_opportunity_estimates((opportunity,))
+    repository.add_completeness_records((completeness,))
+
+    result = repository.rebuild_query_projections()
+
+    assert result == {
+        "registration_families": 1,
+        "registration_labels": 1,
+        "evidence_releases": 1,
+        "planner_options": 4,
+    }
+    with repository._connect() as connection:
+        family = dict(connection.execute(
+            "SELECT geography, year, publication_status, evidence_kind, "
+            "make, model, registrations, input_observation_count "
+            "FROM registration_family_aggregate"
+        ).fetchone())
+        evidence = dict(connection.execute(
+            "SELECT release_id, observation_count, total_value, "
+            "mapping_status_counts, validation_flag_counts "
+            "FROM evidence_release_summary"
+        ).fetchone())
+        options = {
+            (row["option_kind"], row["option_value"])
+            for row in connection.execute(
+                "SELECT option_kind, option_value FROM planner_option"
+            )
+        }
+
+    assert family == {
+        "geography": "DE",
+        "year": 2024,
+        "publication_status": "final",
+        "evidence_kind": "observed",
+        "make": "Volkswagen",
+        "model": "Golf",
+        "registrations": "1",
+        "input_observation_count": 1,
+    }
+    assert evidence == {
+        "release_id": "eea-2024",
+        "observation_count": 1,
+        "total_value": "1",
+        "mapping_status_counts": '{"exact_identifier":1}',
+        "validation_flag_counts": "{}",
+    }
+    assert options == {
+        ("brand", "Volkswagen"),
+        ("horizon", "2028"),
+        ("market", "DE"),
+        ("model", "Golf"),
+    }
 
 
 def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path) -> None:
@@ -331,7 +432,7 @@ def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path)
 
     repository = SQLiteEvidenceRepository(path, writable=True)
 
-    assert repository.schema_version == 4
+    assert repository.schema_version == 5
     with repository._connect() as connection:
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(observation)")
@@ -348,7 +449,7 @@ def test_writable_schema_v3_migrates_forward_with_generation_tables(tmp_path: Pa
 
     repository = SQLiteEvidenceRepository(path, writable=True)
 
-    assert repository.schema_version == 4
+    assert repository.schema_version == 5
     with repository._connect() as connection:
         tables = {
             row["name"]
@@ -370,7 +471,7 @@ def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-        connection.execute("INSERT INTO schema_version (version) VALUES (5)")
+        connection.execute("INSERT INTO schema_version (version) VALUES (6)")
 
     with pytest.raises(EvidenceSchemaError, match="newer"):
         SQLiteEvidenceRepository(path, writable=True)

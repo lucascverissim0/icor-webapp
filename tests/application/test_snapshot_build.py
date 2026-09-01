@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import sqlite3
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -263,6 +264,28 @@ def test_identical_inputs_produce_identical_snapshot(
     assert first.database_path.read_bytes() == second.database_path.read_bytes()
     assert first.manifest.built_at == BUILD_AS_OF
     assert first.manifest.status is SnapshotStatus.CANDIDATE
+
+
+def test_build_materializes_query_projections_before_sealing(
+    tmp_path: Path,
+    release_store: ReleaseStore,
+    build_request: SnapshotBuildRequest,
+) -> None:
+    result = _builder(tmp_path / "projected", release_store, reverse=False).build(
+        build_request
+    )
+
+    with sqlite3.connect(result.database_path) as connection:
+        registration_rows = connection.execute(
+            "SELECT geography, registrations FROM registration_family_aggregate "
+            "ORDER BY geography"
+        ).fetchall()
+        evidence_row = connection.execute(
+            "SELECT observation_count, total_value FROM evidence_release_summary"
+        ).fetchone()
+
+    assert registration_rows == [("DE", "10"), ("FR", "5")]
+    assert evidence_row == (2, "15")
 
 
 def test_candidate_contains_canonical_manifest_database_and_validation_report(

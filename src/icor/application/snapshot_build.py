@@ -13,6 +13,7 @@ from re import fullmatch
 from typing import Protocol, cast
 from uuid import uuid4
 
+from icor.application.snapshot_queries import SnapshotQueryProjectionService
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.evidence.release_manifests import (
     load_snapshot_manifest,
@@ -295,6 +296,7 @@ class SnapshotBuilder:
         database_path = staging_path / "evidence.sqlite3"
         repository = SQLiteEvidenceRepository(database_path, writable=True)
         self._replay_canonically(scratch_repository, repository)
+        SnapshotQueryProjectionService().apply(repository)
         self.filesystem.cleanup_directory(scratch_root, self.root)
         self._finalize_database(database_path)
 

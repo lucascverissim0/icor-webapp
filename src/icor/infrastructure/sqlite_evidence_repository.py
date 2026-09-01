@@ -50,7 +50,7 @@ class ImmutableEvidenceError(RuntimeError):
     """A write would mutate the ledger or refer to unavailable evidence."""
 
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _SQLITE_MULTI_CHARACTER_OPERATORS = (
     "->>",
     "!=",
@@ -243,6 +243,137 @@ class SQLiteEvidenceRepository:
             self._completeness,
         )
 
+    def rebuild_query_projections(self) -> dict[str, int]:
+        if not self.writable:
+            raise ImmutableEvidenceError("evidence repository is read-only")
+        confidence = """CASE
+            WHEN o.confidence_applied_cap IS NOT NULL
+                AND o.confidence_applied_cap < (
+                    o.confidence_authority + o.confidence_publication_status +
+                    o.confidence_coverage + o.confidence_identity +
+                    o.confidence_independent_agreement
+                )
+            THEN o.confidence_applied_cap
+            ELSE o.confidence_authority + o.confidence_publication_status +
+                o.confidence_coverage + o.confidence_identity +
+                o.confidence_independent_agreement
+            END"""
+        publishable = ", ".join("?" for _ in _NON_PUBLISHABLE_STATUSES)
+        parameters = tuple(sorted(_NON_PUBLISHABLE_STATUSES))
+        with self._connect() as connection, connection:
+            for table in (
+                "registration_label_aggregate",
+                "registration_family_aggregate",
+                "evidence_release_summary",
+                "planner_option",
+            ):
+                connection.execute(f"DELETE FROM {table}")
+            connection.execute(
+                f"""INSERT INTO registration_family_aggregate
+                SELECT o.geography, CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                    o.publication_status, 'observed', v.vehicle_id, v.make, v.model,
+                    CAST(SUM(CAST(o.value AS NUMERIC)) AS TEXT), MIN({confidence}),
+                    COUNT(o.observation_id),
+                    json_group_array(DISTINCT o.release_id),
+                    json_group_array(DISTINCT r.source_id)
+                FROM observation o
+                JOIN source_release r ON r.release_id = o.release_id
+                JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                WHERE o.measure = 'new_registrations' AND o.unit = 'vehicles'
+                    AND o.canonical_vehicle_id IS NOT NULL
+                    AND o.mapping_status NOT IN ({publishable})
+                    AND SUBSTR(o.period_start, 1, 4) = SUBSTR(o.period_end, 1, 4)
+                GROUP BY o.geography, CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                    o.publication_status, v.vehicle_id, v.make, v.model""",
+                parameters,
+            )
+            connection.execute(
+                f"""INSERT INTO registration_label_aggregate
+                SELECT o.geography, CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                    o.publication_status, 'observed', v.vehicle_id,
+                    o.original_make, o.original_model,
+                    CAST(SUM(CAST(o.value AS NUMERIC)) AS TEXT),
+                    COUNT(o.observation_id),
+                    json_group_array(DISTINCT o.release_id),
+                    json_group_array(DISTINCT r.source_id)
+                FROM observation o
+                JOIN source_release r ON r.release_id = o.release_id
+                JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                WHERE o.measure = 'new_registrations' AND o.unit = 'vehicles'
+                    AND o.canonical_vehicle_id IS NOT NULL
+                    AND o.mapping_status NOT IN ({publishable})
+                    AND SUBSTR(o.period_start, 1, 4) = SUBSTR(o.period_end, 1, 4)
+                GROUP BY o.geography, CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                    o.publication_status, v.vehicle_id,
+                    o.original_make, o.original_model""",
+                parameters,
+            )
+            for release_id in (
+                row["release_id"]
+                for row in connection.execute(
+                    "SELECT release_id FROM source_release ORDER BY release_id"
+                )
+            ):
+                summary = connection.execute(
+                    """SELECT COUNT(*) observation_count,
+                    CAST(COALESCE(SUM(CAST(value AS NUMERIC)), 0) AS TEXT) total_value
+                    FROM observation WHERE release_id = ?""",
+                    (release_id,),
+                ).fetchone()
+                mapping_counts = connection.execute(
+                    """SELECT COALESCE(json_group_object(mapping_status, count), '{}')
+                    FROM (SELECT mapping_status, COUNT(*) count FROM observation
+                    WHERE release_id = ? GROUP BY mapping_status
+                    ORDER BY mapping_status)""",
+                    (release_id,),
+                ).fetchone()[0]
+                flag_counts = connection.execute(
+                    """SELECT COALESCE(json_group_object(flag, count), '{}')
+                    FROM (SELECT flags.value flag, COUNT(*) count
+                    FROM observation o, json_each(o.validation_flags) flags
+                    WHERE o.release_id = ? GROUP BY flags.value ORDER BY flags.value)""",
+                    (release_id,),
+                ).fetchone()[0]
+                connection.execute(
+                    "INSERT INTO evidence_release_summary VALUES (?, ?, ?, ?, ?)",
+                    (
+                        release_id,
+                        summary["observation_count"],
+                        summary["total_value"],
+                        mapping_counts,
+                        flag_counts,
+                    ),
+                )
+            option_queries = {
+                "market": """SELECT DISTINCT g.market value FROM opportunity_estimate o
+                    JOIN generation_entry g ON g.generation_id = o.generation_id""",
+                "horizon": "SELECT DISTINCT CAST(horizon_year AS TEXT) value FROM opportunity_estimate",
+                "brand": """SELECT DISTINCT v.make value FROM opportunity_estimate o
+                    JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id""",
+                "model": """SELECT DISTINCT v.model value FROM opportunity_estimate o
+                    JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id""",
+            }
+            for kind, query in option_queries.items():
+                connection.execute(
+                    f"""INSERT INTO planner_option
+                    SELECT ?, value, LOWER(value) FROM ({query}) ORDER BY value""",
+                    (kind,),
+                )
+            return {
+                "registration_families": connection.execute(
+                    "SELECT COUNT(*) FROM registration_family_aggregate"
+                ).fetchone()[0],
+                "registration_labels": connection.execute(
+                    "SELECT COUNT(*) FROM registration_label_aggregate"
+                ).fetchone()[0],
+                "evidence_releases": connection.execute(
+                    "SELECT COUNT(*) FROM evidence_release_summary"
+                ).fetchone()[0],
+                "planner_options": connection.execute(
+                    "SELECT COUNT(*) FROM planner_option"
+                ).fetchone()[0],
+            }
+
     def _prepare_writable_schema(self) -> None:
         existing = self.path.exists() and self.path.stat().st_size > 0
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +388,9 @@ class SQLiteEvidenceRepository:
                     version = 3
                 if version == 3:
                     self._migrate_v3_to_v4(connection)
+                    version = 4
+                if version == 4:
+                    self._migrate_v4_to_v5(connection)
 
     def _migrate_v2_to_v3(self, connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
@@ -288,6 +422,23 @@ class SQLiteEvidenceRepository:
                 "CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 4))"
             )
             connection.execute("INSERT INTO schema_version (version) VALUES (4)")
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        self._validate_schema(connection)
+
+    def _migrate_v4_to_v5(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in self._v5_extension_statements():
+                connection.execute(statement)
+            connection.execute("DROP TABLE schema_version")
+            connection.execute(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 5))"
+            )
+            connection.execute("INSERT INTO schema_version (version) VALUES (5)")
         except BaseException:
             connection.rollback()
             raise
@@ -332,6 +483,15 @@ class SQLiteEvidenceRepository:
             connection.commit()
 
     def _migration_statements(self) -> tuple[str, ...]:
+        return self._schema_statements(
+            version=5,
+            model_year_sql="INTEGER",
+            observation_year_sql=(
+                ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
+            ),
+        ) + self._v4_extension_statements() + self._v5_extension_statements()
+
+    def _v4_migration_statements(self) -> tuple[str, ...]:
         return self._schema_statements(
             version=4,
             model_year_sql="INTEGER",
@@ -553,6 +713,77 @@ class SQLiteEvidenceRepository:
             if statement.strip()
         )
 
+    def _v5_extension_statements(self) -> tuple[str, ...]:
+        statements = """
+                CREATE TABLE registration_family_aggregate (
+                    geography TEXT NOT NULL, year INTEGER NOT NULL,
+                    publication_status TEXT NOT NULL, evidence_kind TEXT NOT NULL,
+                    family_vehicle_id TEXT NOT NULL REFERENCES canonical_vehicle(vehicle_id),
+                    make TEXT NOT NULL, model TEXT NOT NULL, registrations TEXT NOT NULL,
+                    evidence_confidence INTEGER NOT NULL,
+                    input_observation_count INTEGER NOT NULL,
+                    release_ids TEXT NOT NULL, source_ids TEXT NOT NULL,
+                    PRIMARY KEY (
+                        geography, year, publication_status, evidence_kind,
+                        family_vehicle_id
+                    )
+                );
+                CREATE TABLE registration_label_aggregate (
+                    geography TEXT NOT NULL, year INTEGER NOT NULL,
+                    publication_status TEXT NOT NULL, evidence_kind TEXT NOT NULL,
+                    family_vehicle_id TEXT NOT NULL REFERENCES canonical_vehicle(vehicle_id),
+                    source_make TEXT NOT NULL, source_model TEXT NOT NULL,
+                    registrations TEXT NOT NULL, input_observation_count INTEGER NOT NULL,
+                    release_ids TEXT NOT NULL, source_ids TEXT NOT NULL,
+                    PRIMARY KEY (
+                        geography, year, publication_status, evidence_kind,
+                        family_vehicle_id, source_make, source_model
+                    )
+                );
+                CREATE TABLE evidence_release_summary (
+                    release_id TEXT PRIMARY KEY REFERENCES source_release(release_id),
+                    observation_count INTEGER NOT NULL, total_value TEXT NOT NULL,
+                    mapping_status_counts TEXT NOT NULL,
+                    validation_flag_counts TEXT NOT NULL
+                );
+                CREATE TABLE planner_option (
+                    option_kind TEXT NOT NULL, option_value TEXT NOT NULL,
+                    sort_key TEXT NOT NULL,
+                    PRIMARY KEY (option_kind, option_value)
+                );
+                CREATE INDEX observation_registration_scope_idx
+                ON observation (
+                    measure, unit, publication_status, period_end, geography,
+                    mapping_status, canonical_vehicle_id, release_id
+                );
+                CREATE INDEX observation_evidence_filter_idx
+                ON observation (
+                    release_id, geography, measure, mapping_status, period_end,
+                    observation_id
+                );
+                CREATE INDEX canonical_vehicle_search_idx
+                ON canonical_vehicle (
+                    make COLLATE NOCASE, model COLLATE NOCASE, model_year, market
+                );
+                CREATE INDEX opportunity_input_cohort_idx
+                ON opportunity_input (cohort_id, opportunity_id);
+                CREATE INDEX registration_family_scope_idx
+                ON registration_family_aggregate (
+                    geography, year, publication_status, evidence_kind,
+                    registrations, make, model
+                );
+                CREATE INDEX registration_label_family_idx
+                ON registration_label_aggregate (
+                    geography, year, publication_status, evidence_kind,
+                    family_vehicle_id
+                );
+                """
+        return tuple(
+            statement.strip()
+            for statement in statements.split(";")
+            if statement.strip()
+        )
+
     @staticmethod
     def _enum_check(enum_type: type[Any]) -> str:
         return "(" + ", ".join(repr(member.value) for member in enum_type) + ")"
@@ -583,6 +814,8 @@ class SQLiteEvidenceRepository:
             statements = self._v2_migration_statements()
         elif version == 3:
             statements = self._v3_migration_statements()
+        elif version == 4:
+            statements = self._v4_migration_statements()
         else:
             statements = self._migration_statements()
         self._validate_structure(connection, statements)

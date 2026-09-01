@@ -84,32 +84,32 @@ Run the two focused frontend/backend commands, Ruff on `registrations.py`, and `
 - Produces: schema version 5; `SnapshotQueryProjectionService.apply(repository) -> SnapshotQueryProjectionResult`.
 - Produces tables: `registration_family_aggregate`, `registration_label_aggregate`, `evidence_release_summary`, and `planner_option`.
 
-- [ ] **Step 1: Write failing schema tests**
+- [x] **Step 1: Write failing schema tests**
 
 Assert fresh repositories report schema 5 and contain composite indexes for observation scope/year/status, evidence filters, cohort opportunity joins, and canonical normalized make/model. Assert opening future schema 6 fails.
 
-- [ ] **Step 2: Run schema tests and verify RED**
+- [x] **Step 2: Run schema tests and verify RED**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/infrastructure/test_sqlite_evidence_repository.py -q`
 Expected: FAIL at schema version and missing table/index assertions.
 
-- [ ] **Step 3: Add schema 5**
+- [x] **Step 3: Add schema 5**
 
 Create the four query tables with primary keys that include scope, year, publication status, and canonical identity. Add indexes matching registration ordering/search, Evidence filters/sorts, Planner option queries, opportunity horizon/geography, and lineage joins. Migrate mutable test databases from version 4; sealed active snapshots remain immutable.
 
-- [ ] **Step 4: Verify schema GREEN**
+- [x] **Step 4: Verify schema GREEN**
 
 Run the schema test command and expect PASS.
 
-- [ ] **Step 5: Write failing projection tests**
+- [x] **Step 5: Write failing projection tests**
 
 Build a small snapshot with Golf official-label variants, final and provisional releases, active-fleet vintage rows, and planner rows. Assert family totals, label breakdown, release summaries, and planner options are deterministic; assert active fleet never enters new-registration aggregates.
 
-- [ ] **Step 6: Implement projection build and verify GREEN**
+- [x] **Step 6: Implement projection build and verify GREEN**
 
 Use `INSERT ... SELECT ... GROUP BY` inside one repository transaction. Preserve source/release lineage as stable JSON arrays and keep observed/provisional/estimated statuses in separate rows. Call projection creation after generation planning and before candidate sealing. Run focused snapshot-build tests and expect PASS.
 
-- [ ] **Step 7: Verify Task 2 and commit**
+- [x] **Step 7: Verify Task 2 and commit**
 
 Run focused repository/build tests, Ruff, and `git diff --check`. Commit with `feat: build indexed snapshot query projections`.
 
