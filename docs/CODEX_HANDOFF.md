@@ -2203,3 +2203,25 @@ explicitly chooses the already-authorized bounded manager-review window, and ret
 to private immediately afterward. Before new feature work, fast-forward this development
 branch, read this handoff, preserve unrelated worktree changes, and never merge or push
 to `main` without separate explicit authorization.
+
+## 2026-09-01 ICOR stabilization execution checkpoint
+
+Lucas approved and commit `33e5cb2` records the design at
+`docs/superpowers/specs/2026-09-01-icor-search-data-performance-stabilization-design.md`.
+The executable plan is
+`docs/superpowers/plans/2026-09-01-icor-stabilization-implementation.md`. Lucas directed
+Codex to use the recommended choices without further approval questions and begin building.
+
+Live diagnosis found the main 2024 EU27 Golf label at 61,900 registrations plus variants.
+The focused query took 9.668 seconds; a full request was interrupted after 90 seconds.
+The 10.75 GB snapshot has 1,529,210 observations and 1,736,619 cohort estimates. Planner
+and Opportunity materialize unbounded projections in Python; Evidence performs unindexed
+aggregates. Official EEA model-level data is loaded for 2010-2024 final, while 2025
+provisional is available but not loaded and 2000-2009 EU model values require explicit
+estimate labels. The apparent 1914 registrations are valid UK vintage active-fleet
+first-use/manufacture years, not annual sales, so semantics must be fixed rather than data
+deleted.
+
+Execution is inline because this task has no permitted subagent delegation. The first task
+is the TDD fix for route-scope preservation and multi-token registration search. Preserve
+the unrelated local `AGENTS.md` modification and do not touch protected `main`.
