@@ -2083,3 +2083,123 @@ with active status/verification, idempotent `--prepare`, backend/frontend/securi
 gates, private authentication, and private browser review. Keep port 8000 private until
 all private gates pass. Record and push every material outcome before reporting the
 workspace portable.
+
+## 2026-09-01 promoted evidence, durable bootstrap, and authenticated preview checkpoint
+
+Lucas repeatedly approved continuing the bounded build and reiterated that every
+material state needed to resume from another machine must be committed and pushed to
+GitHub. Work remained on `development/windshield-demand-platform`; protected
+`main` and production were not changed. The unrelated local `AGENTS.md` productivity
+edit remains unstaged and excluded.
+
+The capacity-safe evidence workflow completed after the preceding temporary-root build.
+Commit `692ab0c` records the portable evidence-build checkpoint. The exact active
+snapshot is `snapshot-b238373eba183733bf60` with database SHA-256
+`856415af05386ff0fb39109eacfabc135ee7a3ca950776e1aea578c008879c26`,
+1,529,210 observations, zero published values, zero warnings, and the exact 20 pinned
+releases: canonical EEA CO2 cars 2010-2023 `-r1`, EEA 2024 v30, KBA FZ10 2024-12,
+and the four pinned UK DfT 2025 releases. Candidate validation, completeness, import
+into the persistent evidence root, promotion, active status, and full repository
+verification all passed.
+
+Commit `e4f8861` makes `--prepare` portable on a low-capacity machine without
+weakening validation. It reuses the active snapshot only when all 20 release
+manifests/artifacts validate, the active snapshot exactly matches the intended release
+plan, and production matching returns the actual snapshot ID. Capacity is reprobed
+before every non-reuse path. TDD and independent review passed. The real private
+Codespace had about 5.2 GB free and returned:
+`{"release_count":20,"reused":true,"snapshot_id":"snapshot-b238373eba183733bf60","start_command":"python scripts/run_codespaces_preview.py","state":"prepared"}`.
+
+The first post-bootstrap Linux integration run exposed a POSIX durability defect.
+After active-pointer replacement, `SnapshotFilesystem` attempted to reopen its pinned
+`/proc/self/fd/<n>` root with `O_NOFOLLOW|O_DIRECTORY`, raising
+`NotADirectoryError` even though promotion had succeeded. Commit `f49521d` retains
+the verified pinned root handle and fsyncs that exact handle directly while preserving
+nofollow directory opens elsewhere. Independent review found and drove a nested
+`pin_root` reentrancy regression; the final implementation saves/restores prior pin
+state. Both failing Linux promotion integrations and both POSIX unit regressions pass.
+Fresh local verification at that checkpoint was 557 passed, 14 skipped, four XFAILs;
+the private Linux Codespace reported 567 passed, four skipped, four XFAILs. Lock,
+maintained Ruff, and `pip-audit` passed locally and remotely.
+
+Frontend post-promotion gates passed in the private Codespace: OpenAPI compatibility,
+62 Vitest tests, TypeScript, ESLint, the production Vite build, and npm high-severity
+audit with zero vulnerabilities. The first Playwright run failed before assertions
+because the pinned Chromium revision was absent. After the exact
+`npx playwright install chromium`, the second failed because Linux browser libraries
+such as `libatk-1.0.so.0` were absent. `npx playwright install-deps chromium`
+completed successfully. The final browser run passed all 20 assertions in 3.0 minutes.
+The harness teardown initially waited on service children left by the two environmental
+failures; only the exact verified Vite/uvicorn test-service PIDs were terminated, after
+which Playwright finalized cleanly. No Playwright, Vite, or test uvicorn process
+remained. These browser binaries/libraries persist in the current Codespace but must be
+installed again in a replacement Codespace.
+
+The persistent production-coverage database did not yet exist. It was initialized
+through the supported `SQLiteCoverageRepository` adapter at
+`/workspaces/.icor/production-coverage.sqlite3`; schema version 1 was asserted and
+the initial coverage list was empty. This ignored runtime file is intentionally not in
+Git and exists only in the persistent private Codespace workspace. After initialization,
+`uv run python scripts/run_codespaces_preview.py --check` returned
+`{"state":"ready"}`.
+
+Actual preview startup then exposed a separate configuration bug: the runner correctly
+set `ICOR_EVIDENCE_ACTIVE_ROOT=/workspaces/.icor/evidence`, but
+`create_preview_app` always supplied the repository-local default to the core factory,
+overriding the environment. Commit `51dd3a6` resolves roots explicitly in this order:
+a supplied `snapshot_root`, then `ICOR_EVIDENCE_ACTIVE_ROOT`, then the repository
+default. The regression was observed RED against the repository-local path and GREEN
+after implementation. Independent review requested a conflicting explicit-versus-env
+assertion; it was added, and final re-review found no remaining issue.
+
+Fresh local verification for `51dd3a6`: `uv lock --check` passed; the exact
+CI-maintained Ruff scope passed; pytest reported 558 passed, 14 documented Windows or
+real-snapshot skips, and four known characterization XFAILs in 251.18 seconds;
+`pip-audit` found no known vulnerabilities and skipped only the unpublished local
+package; and `git diff --check` passed with informational Windows line-ending warnings.
+The accidentally broader Ruff probe over every legacy scraper reported 486 pre-existing
+findings and was not the maintained gate; no legacy scraper was changed. Focused Linux
+verification after fast-forward reported 16 passed and Ruff clean. Commit `51dd3a6`
+was pushed to the public development branch; local and remote hashes matched.
+
+The live authenticated preview then started successfully from the persistent snapshot.
+Factory planning took about 13 minutes and performed substantial SQLite I/O before
+uvicorn reported application startup complete on port 8000. Anonymous results were:
+`/healthz` 200; application root, a compiled asset, opportunities API, docs,
+`openapi.json`, and export paths all 401. Passwords remained only in Windows
+Credential Manager targets `ICOR-Preview-Lucas` and `ICOR-Preview-Manager`.
+Both stored credentials produced 303 login redirects to `/` with Secure, HttpOnly,
+SameSite=strict, and Path=/ cookie flags; no password, cookie, session secret, or export
+token was printed or placed on a command line.
+
+Signed same-origin live checks returned 200 for both `Lucas` and `manager` on the
+compiled application, planner options, grouped opportunities, evidence summary, and
+completeness endpoints. A localhost request carrying the in-memory export capability
+returned 200 for `/api/exports/ml.csv?cutoff=2024-12-31` with CSV media type,
+`Cache-Control: no-store`, attachment disposition, and the expected
+`observation_id,snapshot_id,release_id,` header prefix. Logout returned 303 to
+`/auth/login` and `Max-Age=0`. Port 8000 remained private throughout at
+`https://icor-windshield-preview-final-pjqjxgg6qrx4f9r94-8000.app.github.dev`;
+no manager-facing public exposure occurred.
+
+Final post-smoke snapshot status and verification both passed again. They reported the
+same snapshot ID and SHA, 20 release IDs, zero warnings, manifest observation count
+1,529,210, repository observation count 1,529,210, manifest/repository published value
+counts zero, and state `verified`. The temporary preview was stopped with a clean
+uvicorn shutdown; the loopback tunnel and both diagnostic SSH shells were closed.
+Port 8000 is private but no application server is currently running.
+
+The definitive private Codespace is
+`icor-windshield-preview-final-pjqjxgg6qrx4f9r94`, checked out at
+`51dd3a6222da116e22cd35683cca3f7e9fb497b3`. Its only worktree difference is the
+known final-newline drift in `.devcontainer/devcontainer-lock.json`. To restart from
+another authorized machine, use the documented portable GitHub CLI or an installed
+official `gh`, open an interactive Codespace shell so Codespaces secrets are injected,
+run `cd /workspaces/icor-webapp`, confirm
+`/home/vscode/.local/bin/uv run python scripts/run_codespaces_preview.py --check`
+returns ready, then run the same command without `--check`. Allow roughly 13 minutes
+for the 11 GB snapshot factory to become healthy. Keep port 8000 private unless Lucas
+explicitly chooses the already-authorized bounded manager-review window, and return it
+to private immediately afterward. Before new feature work, fast-forward this development
+branch, read this handoff, preserve unrelated worktree changes, and never merge or push
+to `main` without separate explicit authorization.
