@@ -93,6 +93,7 @@ def validate_environment(
     repository_root: Path,
     workspaces_root: Path,
     evidence_root: Path,
+    require_build_capacity: bool = True,
 ) -> None:
     if not report.codespaces:
         raise BootstrapError("bootstrap requires GitHub Codespaces")
@@ -104,7 +105,7 @@ def validate_environment(
         raise BootstrapError("npm is unavailable")
     if report.uv_version != REQUIRED_UV_VERSION:
         raise BootstrapError("uv version is unsupported")
-    if report.free_bytes < MINIMUM_FREE_BYTES:
+    if require_build_capacity and report.free_bytes < MINIMUM_FREE_BYTES:
         raise BootstrapError("available disk is insufficient")
     try:
         workspace = workspaces_root.resolve(strict=True)
@@ -269,9 +270,25 @@ class BootstrapCoordinator:
         self._checked((*self.npm_command, "ci"), label="frontend dependency install", cwd=web)
         self._checked((*self.npm_command, "run", "build"), label="frontend build", cwd=web)
 
-    def prepare(self, plan: BootstrapPlan) -> BootstrapResult:
-        self.acquire(plan)
-        active = self.active_matches(plan)
+    def reusable_active(self, plan: BootstrapPlan) -> bool | str:
+        if not all(self.release_is_valid(release_id) for release_id in plan.release_ids):
+            return False
+        return self.active_matches(plan)
+
+    def prepare(
+        self,
+        plan: BootstrapPlan,
+        *,
+        reusable_active: bool | str | None = None,
+    ) -> BootstrapResult:
+        active = (
+            self.reusable_active(plan)
+            if reusable_active is None
+            else reusable_active
+        )
+        if not active:
+            self.acquire(plan)
+            active = self.active_matches(plan)
         if active:
             self.compile_frontend()
             return BootstrapResult(

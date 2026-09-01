@@ -367,3 +367,194 @@ def test_prepare_reuses_matching_active_snapshot(tmp_path: Path) -> None:
         for command in runner.commands
     )
     assert runner.commands[-2:] == [("npm", "ci"), ("npm", "run", "build")]
+
+
+def test_prepare_reuses_exact_active_snapshot_below_build_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import scripts.bootstrap_codespaces_preview as bootstrap_script
+
+    workspace = tmp_path / "workspaces"
+    repository = workspace / "icor"
+    repository.mkdir(parents=True)
+    for relative in ("pyproject.toml", "uv.lock", "web/package-lock.json"):
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("locked", encoding="utf-8")
+    evidence = workspace / ".icor" / "evidence"
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=repository,
+        evidence_root=evidence,
+        runner=runner,
+        release_is_valid=lambda _: True,
+        active_matches=lambda _: "snapshot-active",
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+    monkeypatch.setattr(
+        bootstrap_script,
+        "probe_environment",
+        lambda _: _environment(free_bytes=4 * 1024**3),
+    )
+    monkeypatch.setattr(bootstrap_script, "_coordinator", lambda *_: coordinator)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_codespaces_preview.py",
+            "--prepare",
+            "--repository-root",
+            str(repository),
+            "--workspaces-root",
+            str(workspace),
+            "--evidence-root",
+            str(evidence),
+        ],
+    )
+
+    assert bootstrap_script.main() == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "release_count": 20,
+        "reused": True,
+        "snapshot_id": "snapshot-active",
+        "start_command": "python scripts/run_codespaces_preview.py",
+        "state": "prepared",
+    }
+    assert runner.commands == [("npm", "ci"), ("npm", "run", "build")]
+
+
+@pytest.mark.parametrize(
+    ("releases_valid", "active"),
+    (
+        (True, False),
+        (False, "snapshot-active"),
+    ),
+)
+def test_prepare_requires_build_capacity_when_exact_reuse_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    releases_valid: bool,
+    active: bool | str,
+) -> None:
+    import scripts.bootstrap_codespaces_preview as bootstrap_script
+
+    workspace = tmp_path / "workspaces"
+    repository = workspace / "icor"
+    repository.mkdir(parents=True)
+    for relative in ("pyproject.toml", "uv.lock", "web/package-lock.json"):
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("locked", encoding="utf-8")
+    evidence = workspace / ".icor" / "evidence"
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=repository,
+        evidence_root=evidence,
+        runner=runner,
+        release_is_valid=lambda _: releases_valid,
+        active_matches=lambda _: active,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+    monkeypatch.setattr(
+        bootstrap_script,
+        "probe_environment",
+        lambda _: _environment(free_bytes=4 * 1024**3),
+    )
+    monkeypatch.setattr(bootstrap_script, "_coordinator", lambda *_: coordinator)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_codespaces_preview.py",
+            "--prepare",
+            "--repository-root",
+            str(repository),
+            "--workspaces-root",
+            str(workspace),
+            "--evidence-root",
+            str(evidence),
+        ],
+    )
+
+    assert bootstrap_script.main() == 2
+    assert json.loads(capsys.readouterr().out) == {"state": "rejected"}
+    assert runner.commands == []
+
+
+def test_prepare_reprobes_capacity_before_non_reuse_work(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import scripts.bootstrap_codespaces_preview as bootstrap_script
+
+    workspace = tmp_path / "workspaces"
+    repository = workspace / "icor"
+    repository.mkdir(parents=True)
+    for relative in ("pyproject.toml", "uv.lock", "web/package-lock.json"):
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("locked", encoding="utf-8")
+    evidence = workspace / ".icor" / "evidence"
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=repository,
+        evidence_root=evidence,
+        runner=runner,
+        release_is_valid=lambda _: True,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+    reports = iter(
+        (
+            _environment(free_bytes=24 * 1024**3),
+            _environment(free_bytes=4 * 1024**3),
+        )
+    )
+    monkeypatch.setattr(bootstrap_script, "probe_environment", lambda _: next(reports))
+    monkeypatch.setattr(bootstrap_script, "_coordinator", lambda *_: coordinator)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_codespaces_preview.py",
+            "--prepare",
+            "--repository-root",
+            str(repository),
+            "--workspaces-root",
+            str(workspace),
+            "--evidence-root",
+            str(evidence),
+        ],
+    )
+
+    assert bootstrap_script.main() == 2
+    assert json.loads(capsys.readouterr().out) == {"state": "rejected"}
+    assert runner.commands == []
+
+
+def test_production_coordinator_returns_matching_snapshot_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import scripts.bootstrap_codespaces_preview as bootstrap_script
+
+    plan = default_plan()
+    manifest = SimpleNamespace(
+        release_ids=plan.release_ids,
+        built_at=SimpleNamespace(isoformat=lambda: plan.build_as_of),
+        deterministic_seed=plan.deterministic_seed,
+        snapshot_id="snapshot-active",
+    )
+    monkeypatch.setattr(
+        bootstrap_script,
+        "SnapshotStore",
+        lambda _: SimpleNamespace(active_manifest=lambda: manifest),
+    )
+
+    coordinator = bootstrap_script._coordinator(tmp_path, tmp_path / "evidence")
+
+    assert coordinator.active_matches(plan) == "snapshot-active"

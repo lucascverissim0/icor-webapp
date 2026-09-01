@@ -37,17 +37,31 @@ def main() -> int:
     parser.add_argument("--evidence-root", type=Path, default=Path("/workspaces/.icor/evidence"))
     args = parser.parse_args()
     try:
+        environment = probe_environment(args.workspaces_root)
         validate_environment(
-            probe_environment(args.workspaces_root),
+            environment,
             repository_root=args.repository_root,
             workspaces_root=args.workspaces_root,
             evidence_root=args.evidence_root,
+            require_build_capacity=not args.prepare,
         )
         plan = default_plan()
+        reusable_active: bool | str | None = None
+        if args.prepare:
+            coordinator = _coordinator(args.repository_root, args.evidence_root)
+            reusable_active = coordinator.reusable_active(plan)
+            if not reusable_active:
+                validate_environment(
+                    probe_environment(args.workspaces_root),
+                    repository_root=args.repository_root,
+                    workspaces_root=args.workspaces_root,
+                    evidence_root=args.evidence_root,
+                )
         if args.check:
             payload: dict[str, object] = {"release_count": 20, "state": "ready"}
         else:
-            coordinator = _coordinator(args.repository_root, args.evidence_root)
+            if not args.prepare:
+                coordinator = _coordinator(args.repository_root, args.evidence_root)
             if args.acquire:
                 coordinator.acquire(plan)
                 payload = {"release_count": 20, "state": "acquired"}
@@ -61,7 +75,7 @@ def main() -> int:
                 coordinator.promote(args.snapshot)
                 payload = {"snapshot_id": args.snapshot, "state": "promoted"}
             else:
-                result = coordinator.prepare(plan)
+                result = coordinator.prepare(plan, reusable_active=reusable_active)
                 payload = {
                     "release_count": len(plan.release_ids),
                     "reused": result.reused_active,
@@ -89,16 +103,18 @@ def _coordinator(repository_root: Path, evidence_root: Path) -> BootstrapCoordin
             raise BootstrapError("stored release validation failed") from error
         return True
 
-    def active_matches(plan) -> bool:  # type: ignore[no-untyped-def]
+    def active_matches(plan) -> bool | str:  # type: ignore[no-untyped-def]
         try:
             manifest = snapshot_store.active_manifest()
         except SnapshotUnavailableError:
             return False
-        return (
+        if (
             manifest.release_ids == plan.release_ids
             and manifest.built_at.isoformat() == plan.build_as_of
             and manifest.deterministic_seed == plan.deterministic_seed
-        )
+        ):
+            return manifest.snapshot_id
+        return False
 
     return BootstrapCoordinator(
         repository_root=repository_root,
