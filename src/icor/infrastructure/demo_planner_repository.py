@@ -14,8 +14,11 @@ from icor.domain.planner import (
     Equipment,
     EvidenceStatus,
     ModelYearDemand,
+    PlannerPage,
+    PlannerQuery,
     PlanningConfiguration,
     SourceSummary,
+    filter_sort_paginate,
 )
 
 DATA_VERSION = "demo-planner-v1"
@@ -64,8 +67,31 @@ class DemoPlannerRepository:
     def get(self, configuration_id: str) -> PlanningConfiguration | None:
         return self._by_id.get(configuration_id)
 
-    def list_model_year_demand(self) -> tuple[ModelYearDemand, ...]:
-        return self._model_year_demand
+    def options(self):  # type: ignore[no-untyped-def]
+        from icor.application.planner import options_from_records
+
+        return options_from_records(self._records)
+
+    def search(self, query: PlannerQuery) -> PlannerPage:
+        return filter_sort_paginate(self._records, query)
+
+    def list_model_year_demand(
+        self,
+        configuration_id: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> tuple[ModelYearDemand, ...]:
+        rows = (
+            self._model_year_demand
+            if configuration_id is None
+            else tuple(
+                row
+                for row in self._model_year_demand
+                if row.configuration_id == configuration_id
+            )
+        )
+        start = (page - 1) * page_size
+        return rows[start : start + page_size]
 
 
 def _parse_confidence(value: Any) -> Confidence:

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
+from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
 
@@ -106,6 +111,87 @@ class Ledger:
         )
 
 
+class SQLiteLedger(Ledger):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+
+@pytest.fixture
+def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
+    path = tmp_path / "planner.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE canonical_vehicle (
+                vehicle_id TEXT PRIMARY KEY, make TEXT, model TEXT
+            );
+            CREATE TABLE generation_entry (
+                generation_id TEXT PRIMARY KEY, display_name TEXT, start_month TEXT,
+                end_month TEXT, identity_kind TEXT, body_style TEXT, facelift TEXT,
+                confidence_reasons TEXT, evidence_ids TEXT
+            );
+            CREATE TABLE cohort_estimate (
+                cohort_id TEXT PRIMARY KEY, registration_cohort_year INTEGER
+            );
+            CREATE TABLE opportunity_estimate (
+                opportunity_id TEXT PRIMARY KEY, generation_id TEXT,
+                canonical_vehicle_id TEXT, geography TEXT, horizon_year INTEGER,
+                p10 TEXT, p50 TEXT, p90 TEXT, active_fleet_p50 TEXT,
+                confidence TEXT, assumption_ids TEXT, reason_codes TEXT
+            );
+            CREATE TABLE opportunity_input (opportunity_id TEXT, cohort_id TEXT);
+            CREATE TABLE planner_option (
+                option_kind TEXT, option_value TEXT, sort_key TEXT
+            );
+            """
+        )
+        for suffix, make, model, demand in (
+            ("golf", "Volkswagen", "Golf", "13"),
+            ("polo", "Volkswagen", "Polo", "8"),
+        ):
+            vehicle_id = f"vehicle-{suffix}"
+            generation_id = f"generation-{suffix}"
+            cohort_id = f"cohort-{suffix}"
+            opportunity_id = f"opportunity-{suffix}"
+            connection.execute(
+                "INSERT INTO canonical_vehicle VALUES (?, ?, ?)",
+                (vehicle_id, make, model),
+            )
+            connection.execute(
+                "INSERT INTO generation_entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    generation_id, f"{model} generation", "2020-01-01", "2024-12-01",
+                    "estimated", "Hatchback", None, '["estimated"]', '["obs"]',
+                ),
+            )
+            connection.execute(
+                "INSERT INTO cohort_estimate VALUES (?, 2020)", (cohort_id,)
+            )
+            connection.execute(
+                "INSERT INTO opportunity_estimate VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    opportunity_id, generation_id, vehicle_id, "DE", 2028,
+                    str(int(demand) - 2), demand, str(int(demand) + 3), "90",
+                    "low", '["assumption"]', '["reason"]',
+                ),
+            )
+            connection.execute(
+                "INSERT INTO opportunity_input VALUES (?, ?)",
+                (opportunity_id, cohort_id),
+            )
+        connection.executemany(
+            "INSERT INTO planner_option VALUES (?, ?, ?)",
+            (
+                ("market", "DE", "de"),
+                ("horizon", "2028", "2028"),
+                ("brand", "Volkswagen", "volkswagen"),
+                ("model", "Golf", "golf"),
+                ("model", "Polo", "polo"),
+            ),
+        )
+    return SnapshotPlannerRepository(SQLiteLedger(path), _manifest())
+
+
 def test_snapshot_adapter_exposes_generation_opportunity_without_fitment_claims() -> None:
     repository = SnapshotPlannerRepository(Ledger(), _manifest())
 
@@ -135,3 +221,46 @@ def test_snapshot_adapter_reports_one_shared_snapshot_version_set() -> None:
     assert repository.versions.generation_registry == "generation-registry-v1"
     assert repository.get("opportunity-golf-de-2028") == repository.list_all()[0]
     assert repository.get("missing") is None
+
+
+def test_sqlite_options_search_and_detail_are_bounded(
+    sqlite_repository: SnapshotPlannerRepository,
+) -> None:
+    options = sqlite_repository.options()
+    page = sqlite_repository.search(PlannerQuery(page=1, page_size=1))
+    detail = sqlite_repository.get("opportunity-golf")
+    demand = sqlite_repository.list_model_year_demand(
+        "opportunity-golf", page=1, page_size=1
+    )
+
+    assert options.markets == ("DE",)
+    assert options.models == ("Golf", "Polo")
+    assert page.total == 2
+    assert len(page.items) == 1
+    assert page.items[0].configuration_id == "opportunity-golf"
+    assert detail is not None and detail.configuration_id == "opportunity-golf"
+    assert demand == detail.model_year_demand
+    assert sqlite_repository._records is None
+
+
+def test_interactive_sqlite_methods_reject_an_unbounded_projection(
+    sqlite_repository: SnapshotPlannerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query = sqlite_repository._query_sqlite
+
+    def guarded_query(
+        path: Path,
+        where: str,
+        parameters: tuple[object, ...],
+        order_by: str,
+        limit: int | None,
+        offset: int,
+    ):
+        if limit is None:
+            raise AssertionError("interactive query attempted an unbounded projection")
+        return query(path, where, parameters, order_by, limit, offset)
+
+    monkeypatch.setattr(sqlite_repository, "_query_sqlite", guarded_query)
+    assert len(sqlite_repository.search(PlannerQuery(page_size=1)).items) == 1
+    assert sqlite_repository.get("opportunity-golf") is not None

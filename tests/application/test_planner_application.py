@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from icor.application.planner import PlannerService
+from icor.application.planner import PlannerService, options_from_records
 from icor.domain.planner import (
     Confidence,
     ConfidenceLevel,
@@ -68,7 +68,15 @@ class FakeRepository:
         self.records = records
 
     def list_all(self) -> tuple[PlanningConfiguration, ...]:
-        return self.records
+        raise AssertionError("interactive planner service must not call list_all")
+
+    def options(self):  # type: ignore[no-untyped-def]
+        return options_from_records(self.records)
+
+    def search(self, query: PlannerQuery):  # type: ignore[no-untyped-def]
+        from icor.domain.planner import filter_sort_paginate
+
+        return filter_sort_paginate(self.records, query)
 
     def get(self, configuration_id: str) -> PlanningConfiguration | None:
         return next(

@@ -276,6 +276,19 @@ describe('PlannerWorkbench', () => {
     })
   })
 
+  it('makes configuration requests cancellable when filters or pages change', async () => {
+    const { fetcher } = renderWorkbench()
+    await screen.findAllByText('1,240 units')
+
+    const request = fetcher.mock.calls.find(([input]) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      return url.includes('/planner/configurations')
+    })
+    expect(request?.[1]?.signal).toBeInstanceOf(AbortSignal)
+  })
+
   it('has no automated accessibility violations in the successful state', async () => {
     const { container } = renderWorkbench()
     await screen.findAllByText('1,240 units')

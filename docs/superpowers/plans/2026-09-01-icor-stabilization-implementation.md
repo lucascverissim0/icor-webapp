@@ -193,23 +193,23 @@ Run focused Python/Vitest tests and query-plan checks; commit with `feat: make s
 **Interfaces:**
 - Replace interactive `list_all()` calls with `options()`, `search(query)`, `get(id)`, and `list_model_year_demand(id, page, page_size)` repository methods.
 
-- [ ] **Step 1: Write failing repository/API tests**
+- [x] **Step 1: Write failing repository/API tests**
 
 Assert options use `planner_option`, search returns one SQL-paginated page, detail loads one configuration, and a guard connection raises if an unbounded projection query is attempted.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run focused Planner tests and observe failures from the current `list_all()` contract.
 
-- [ ] **Step 3: Implement dedicated SQL methods**
+- [x] **Step 3: Implement dedicated SQL methods**
 
 Push filters, sorting, count, pagination, model-year demand, and requested-record lineage into SQLite. Cache only immutable options/version metadata. Remove `list_all()` from interactive services.
 
-- [ ] **Step 4: Add bounded UI loading/error recovery**
+- [x] **Step 4: Add bounded UI loading/error recovery**
 
 Render controls from options independently, cancel stale page requests, show actionable retry errors, and prevent an indefinite loading shell.
 
-- [ ] **Step 5: Verify Task 5 and commit**
+- [x] **Step 5: Verify Task 5 and commit**
 
 Run focused tests and representative query timing; commit with `perf: paginate generation planner in sqlite`.
 

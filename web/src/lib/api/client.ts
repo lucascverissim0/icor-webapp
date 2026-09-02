@@ -129,7 +129,10 @@ export class PlannerApiClient {
     return this.request<PlannerOptions>('/api/v1/planner/options')
   }
 
-  async configurations(query: PlannerConfigurationsQuery): Promise<PlannerPage> {
+  async configurations(
+    query: PlannerConfigurationsQuery,
+    signal?: AbortSignal,
+  ): Promise<PlannerPage> {
     const parameters = new URLSearchParams()
     appendMany(parameters, 'market', query.markets)
     appendMany(parameters, 'horizon', query.horizons)
@@ -141,7 +144,10 @@ export class PlannerApiClient {
     if (query.page !== undefined) parameters.set('page', String(query.page))
     if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
     const suffix = parameters.size > 0 ? `?${parameters.toString()}` : ''
-    return this.request<PlannerPage>(`/api/v1/planner/configurations${suffix}`)
+    return this.request<PlannerPage>(
+      `/api/v1/planner/configurations${suffix}`,
+      { signal },
+    )
   }
 
   async configuration(configurationId: string): Promise<PlanningConfiguration> {

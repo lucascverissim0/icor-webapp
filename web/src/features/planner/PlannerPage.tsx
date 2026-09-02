@@ -158,11 +158,11 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
   }, [canonicalSearch, onSearchChange, parsedSearch.invalidKeys.length])
   const configurationsQuery = useQuery({
     queryKey: ['planner', 'configurations', canonicalSearch],
-    queryFn: () => apiClient.configurations({
+    queryFn: ({ signal }) => apiClient.configurations({
       markets: canonicalSearch.market, horizons: canonicalSearch.horizon, brands: canonicalSearch.brand,
       models: canonicalSearch.model, evidence: canonicalSearch.evidence, sort: canonicalSearch.sort,
       direction: canonicalSearch.direction, page: canonicalSearch.page,
-    }),
+    }, signal),
     enabled: optionsQuery.isSuccess,
   })
   const constraints = activeConstraintNames(canonicalSearch)

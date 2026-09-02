@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
+from math import ceil
 from pathlib import Path
 
 from icor.domain.evidence import ConfidenceBand
@@ -17,8 +18,14 @@ from icor.domain.planner import (
     Equipment,
     EvidenceStatus,
     ModelYearDemand,
+    PlannerPage,
+    PlannerQuery,
+    PlannerSummary,
     PlanningConfiguration,
+    SortDirection,
+    SortField,
     SourceSummary,
+    filter_sort_paginate,
 )
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
 
@@ -32,6 +39,7 @@ class SnapshotPlannerRepository:
         self.snapshot_id = manifest.snapshot_id
         self.versions: SnapshotVersions = manifest.versions
         self._records: tuple[PlanningConfiguration, ...] | None = None
+        self._source_cache: tuple[SourceSummary, ...] | None = None
 
     def list_all(self) -> tuple[PlanningConfiguration, ...]:
         if self._records is None:
@@ -39,15 +47,77 @@ class SnapshotPlannerRepository:
         return self._records
 
     def get(self, configuration_id: str) -> PlanningConfiguration | None:
+        path = getattr(self._ledger, "path", None)
+        if isinstance(path, Path):
+            rows = self._query_sqlite(
+                path,
+                "opportunity.opportunity_id = ?",
+                (configuration_id,),
+                "opportunity.opportunity_id",
+                1,
+                0,
+            )
+            return rows[0] if rows else None
         return next(
             (row for row in self.list_all() if row.configuration_id == configuration_id),
             None,
         )
 
-    def list_model_year_demand(self) -> tuple[ModelYearDemand, ...]:
-        return tuple(
-            demand for row in self.list_all() for demand in row.model_year_demand
+    def list_model_year_demand(
+        self, configuration_id: str, page: int = 1, page_size: int = 100
+    ) -> tuple[ModelYearDemand, ...]:
+        if page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("model-year pagination is invalid")
+        record = self.get(configuration_id)
+        if record is None:
+            return ()
+        start = (page - 1) * page_size
+        return record.model_year_demand[start : start + page_size]
+
+    def options(self):  # type: ignore[no-untyped-def]
+        from icor.application.planner import (
+            PlannerOptions,
+            ScenarioMetadata,
+            options_from_records,
         )
+
+        path = getattr(self._ledger, "path", None)
+        if not isinstance(path, Path):
+            return options_from_records(self._project_objects(), self.versions)
+        with self._connect(path) as connection:
+            rows = connection.execute(
+                """SELECT option_kind, option_value FROM planner_option
+                ORDER BY option_kind, sort_key, option_value"""
+            ).fetchall()
+        if not rows:
+            raise ValueError("planner repository contains no configurations")
+        grouped: dict[str, list[str]] = {}
+        for row in rows:
+            grouped.setdefault(row["option_kind"], []).append(row["option_value"])
+        return PlannerOptions(
+            markets=tuple(grouped.get("market", ())),
+            horizons=tuple(int(value) for value in grouped.get("horizon", ())),
+            brands=tuple(grouped.get("brand", ())),
+            models=tuple(grouped.get("model", ())),
+            evidence_statuses=(EvidenceStatus.VALIDATED,),
+            scenario=ScenarioMetadata(
+                name="Generation replacement opportunity baseline",
+                description=(
+                    "Official registration history projected to generation-level "
+                    "replacement opportunity ranges. This is not exact fitment demand."
+                ),
+                evidence_status=EvidenceStatus.VALIDATED,
+                data_version=self.snapshot_id,
+                updated_at=self.manifest.built_at,
+                versions=self.versions,
+            ),
+        )
+
+    def search(self, query: PlannerQuery) -> PlannerPage:
+        path = getattr(self._ledger, "path", None)
+        if not isinstance(path, Path):
+            return filter_sort_paginate(self._project_objects(), query)
+        return self._search_sqlite(path, query)
 
     def _project(self) -> tuple[PlanningConfiguration, ...]:
         path = getattr(self._ledger, "path", None)
@@ -56,23 +126,38 @@ class SnapshotPlannerRepository:
         return self._project_objects()
 
     def _sources(self) -> tuple[SourceSummary, ...]:
-        return tuple(
+        if self._source_cache is None:
+            self._source_cache = tuple(
             SourceSummary(
                 name=item.publisher,
                 description=f"Official release {item.release_id}: {item.source_url}",
             )
             for item in self._ledger.list_releases()
-        )
+            )
+        return self._source_cache
 
     def _project_sqlite(self, path: Path) -> tuple[PlanningConfiguration, ...]:
-        sources = self._sources()
-        connection = sqlite3.connect(
-            f"{path.resolve().as_uri()}?mode=ro", uri=True
+        return self._query_sqlite(
+            path, "1 = 1", (), "opportunity_id", None, 0
         )
-        connection.row_factory = sqlite3.Row
-        try:
+
+    def _query_sqlite(
+        self,
+        path: Path,
+        where: str,
+        parameters: tuple[object, ...],
+        order_by: str,
+        limit: int | None,
+        offset: int,
+    ) -> tuple[PlanningConfiguration, ...]:
+        sources = self._sources()
+        with self._connect(path) as connection:
+            suffix = "" if limit is None else " LIMIT ? OFFSET ?"
+            query_parameters = (
+                parameters if limit is None else (*parameters, limit, offset)
+            )
             rows = connection.execute(
-                """SELECT opportunity.*, generation.display_name,
+                f"""SELECT opportunity.*, generation.display_name,
                 generation.start_month, generation.end_month,
                 generation.identity_kind, generation.body_style,
                 generation.facelift, generation.confidence_reasons,
@@ -86,11 +171,11 @@ class SnapshotPlannerRepository:
                 JOIN opportunity_input input
                     ON input.opportunity_id = opportunity.opportunity_id
                 JOIN cohort_estimate cohort ON cohort.cohort_id = input.cohort_id
+                WHERE {where}
                 GROUP BY opportunity.opportunity_id
-                ORDER BY opportunity.opportunity_id"""
+                ORDER BY {order_by}{suffix}""",
+                query_parameters,
             ).fetchall()
-        finally:
-            connection.close()
         records = []
         for row in rows:
             downside, base, upside = (
@@ -154,6 +239,104 @@ class SnapshotPlannerRepository:
                 )
             )
         return tuple(records)
+
+    def _search_sqlite(self, path: Path, query: PlannerQuery) -> PlannerPage:
+        clauses: list[str] = []
+        parameters: list[object] = []
+        for column, values in (
+            ("opportunity.geography", query.markets),
+            ("opportunity.horizon_year", query.horizons),
+            ("vehicle.make", query.brands),
+            ("vehicle.model", query.models),
+        ):
+            if values:
+                clauses.append(f"{column} IN ({', '.join('?' for _ in values)})")
+                parameters.extend(values)
+        if query.evidence and EvidenceStatus.VALIDATED not in query.evidence:
+            return PlannerPage(
+                items=(),
+                total=0,
+                page=query.page,
+                page_size=query.page_size,
+                pages=0,
+                summary=PlannerSummary(0, 0, 0, 0),
+            )
+        where = " AND ".join(clauses) if clauses else "1 = 1"
+        with self._connect(path) as connection:
+            summary = connection.execute(
+                f"""WITH filtered AS ({self._base_sql(where)})
+                SELECT COUNT(*) candidate_count,
+                    COALESCE(SUM(CAST(ROUND(CAST(p10 AS NUMERIC), 0) AS INTEGER)), 0)
+                        downside_units,
+                    COALESCE(SUM(CAST(ROUND(CAST(p50 AS NUMERIC), 0) AS INTEGER)), 0)
+                        base_units,
+                    COALESCE(SUM(CAST(ROUND(CAST(p90 AS NUMERIC), 0) AS INTEGER)), 0)
+                        upside_units
+                FROM filtered""",
+                tuple(parameters),
+            ).fetchone()
+        sort_columns = {
+            SortField.BASE_DEMAND: "CAST(p50 AS NUMERIC)",
+            SortField.DOWNSIDE_DEMAND: "CAST(p10 AS NUMERIC)",
+            SortField.UPSIDE_DEMAND: "CAST(p90 AS NUMERIC)",
+            SortField.BRAND: "LOWER(make)",
+            SortField.MODEL: "LOWER(model)",
+            SortField.IDENTITY_CONFIDENCE: (
+                "CASE identity_kind WHEN 'estimated' THEN 1 ELSE 3 END"
+            ),
+            SortField.DATA_QUALITY_CONFIDENCE: (
+                "CASE confidence WHEN 'very_low' THEN 1 WHEN 'low' THEN 1 "
+                "WHEN 'medium' THEN 2 ELSE 3 END"
+            ),
+        }
+        direction = "DESC" if query.direction is SortDirection.DESC else "ASC"
+        order_by = f"{sort_columns[query.sort]} {direction}, opportunity_id ASC"
+        offset = (query.page - 1) * query.page_size
+        items = self._query_sqlite(
+            path, where, tuple(parameters), order_by, query.page_size, offset
+        )
+        total = int(summary["candidate_count"])
+        return PlannerPage(
+            items=items,
+            total=total,
+            page=query.page,
+            page_size=query.page_size,
+            pages=ceil(total / query.page_size),
+            summary=PlannerSummary(
+                candidate_count=total,
+                downside_units=int(summary["downside_units"]),
+                base_units=int(summary["base_units"]),
+                upside_units=int(summary["upside_units"]),
+            ),
+        )
+
+    @staticmethod
+    def _base_sql(where: str) -> str:
+        return f"""SELECT opportunity.*, generation.display_name,
+            generation.start_month, generation.end_month,
+            generation.identity_kind, generation.body_style,
+            generation.facelift, generation.confidence_reasons,
+            generation.evidence_ids, vehicle.make, vehicle.model,
+            MIN(cohort.registration_cohort_year) AS first_cohort_year
+            FROM opportunity_estimate opportunity
+            JOIN generation_entry generation
+                ON generation.generation_id = opportunity.generation_id
+            JOIN canonical_vehicle vehicle
+                ON vehicle.vehicle_id = opportunity.canonical_vehicle_id
+            JOIN opportunity_input input
+                ON input.opportunity_id = opportunity.opportunity_id
+            JOIN cohort_estimate cohort ON cohort.cohort_id = input.cohort_id
+            WHERE {where}
+            GROUP BY opportunity.opportunity_id"""
+
+    @staticmethod
+    def _connect(path: Path) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            f"{path.resolve().as_uri()}?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        return connection
 
     def _project_objects(self) -> tuple[PlanningConfiguration, ...]:
         vehicles = {item.vehicle_id: item for item in self._ledger.list_vehicles()}

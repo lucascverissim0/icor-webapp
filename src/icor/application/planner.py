@@ -12,17 +12,20 @@ from icor.domain.planner import (
     PlannerPage,
     PlannerQuery,
     PlanningConfiguration,
-    filter_sort_paginate,
 )
 from icor.domain.snapshots import SnapshotVersions
 
 
 class PlannerRepository(Protocol):
-    def list_all(self) -> tuple[PlanningConfiguration, ...]: ...
+    def options(self) -> PlannerOptions: ...
+
+    def search(self, query: PlannerQuery) -> PlannerPage: ...
 
     def get(self, configuration_id: str) -> PlanningConfiguration | None: ...
 
-    def list_model_year_demand(self) -> tuple[ModelYearDemand, ...]: ...
+    def list_model_year_demand(
+        self, configuration_id: str, page: int, page_size: int
+    ) -> tuple[ModelYearDemand, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,46 +60,52 @@ class PlannerService:
         self._repository = repository
 
     def options(self) -> PlannerOptions:
-        records = self._repository.list_all()
-        if not records:
-            raise ValueError("planner repository contains no configurations")
-        data_versions = {record.data_version for record in records}
-        if len(data_versions) != 1:
-            raise ValueError("planner repository contains mixed data versions")
-        evidence_statuses = tuple(
-            sorted(
-                {record.evidence_status for record in records},
-                key=_EVIDENCE_RANK.__getitem__,
-            )
-        )
-        is_validated_snapshot = evidence_statuses == (EvidenceStatus.VALIDATED,)
-        return PlannerOptions(
-            markets=tuple(sorted({record.market for record in records})),
-            horizons=tuple(sorted({record.forecast_horizon for record in records})),
-            brands=tuple(sorted({record.brand for record in records})),
-            models=tuple(sorted({record.model for record in records})),
-            evidence_statuses=evidence_statuses,
-            scenario=ScenarioMetadata(
-                name=(
-                    "Generation replacement opportunity baseline"
-                    if is_validated_snapshot
-                    else "Windshield demand planning demonstration"
-                ),
-                description=(
-                    "Official registration history projected to generation-level "
-                    "replacement opportunity ranges. This is not exact fitment demand."
-                    if is_validated_snapshot
-                    else "Synthetic configuration-level demand for product workflow review."
-                ),
-                evidence_status=evidence_statuses[0],
-                data_version=data_versions.pop(),
-                updated_at=max(record.updated_at for record in records),
-                versions=getattr(self._repository, "versions", None),
-            ),
-        )
+        return self._repository.options()
 
     def search(self, query: PlannerQuery) -> PlannerPage:
-        return filter_sort_paginate(self._repository.list_all(), query)
+        return self._repository.search(query)
 
     def detail(self, configuration_id: str) -> PlanningConfiguration | None:
         return self._repository.get(configuration_id)
+
+
+def options_from_records(
+    records: tuple[PlanningConfiguration, ...],
+    versions: SnapshotVersions | None = None,
+) -> PlannerOptions:
+    if not records:
+        raise ValueError("planner repository contains no configurations")
+    data_versions = {record.data_version for record in records}
+    if len(data_versions) != 1:
+        raise ValueError("planner repository contains mixed data versions")
+    evidence_statuses = tuple(
+        sorted(
+            {record.evidence_status for record in records},
+            key=_EVIDENCE_RANK.__getitem__,
+        )
+    )
+    is_validated_snapshot = evidence_statuses == (EvidenceStatus.VALIDATED,)
+    return PlannerOptions(
+        markets=tuple(sorted({record.market for record in records})),
+        horizons=tuple(sorted({record.forecast_horizon for record in records})),
+        brands=tuple(sorted({record.brand for record in records})),
+        models=tuple(sorted({record.model for record in records})),
+        evidence_statuses=evidence_statuses,
+        scenario=ScenarioMetadata(
+            name=(
+                "Generation replacement opportunity baseline"
+                if is_validated_snapshot
+                else "Windshield demand planning demonstration"
+            ),
+            description=(
+                "Official registration history projected to generation-level "
+                "replacement opportunity ranges. This is not exact fitment demand."
+                if is_validated_snapshot
+                else "Synthetic configuration-level demand for product workflow review."
+            ),
+            evidence_status=evidence_statuses[0],
+            data_version=data_versions.pop(),
+            updated_at=max(record.updated_at for record in records),
+            versions=versions,
+        ),
+    )
