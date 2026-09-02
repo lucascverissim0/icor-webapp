@@ -227,23 +227,23 @@ Run focused tests and representative query timing; commit with `perf: paginate g
 **Interfaces:**
 - Produces: `OpportunityRepository.search(query) -> OpportunityPage` and `drill_down(group_id, query, page, page_size)` with SQL-side grouping and coverage resolution.
 
-- [ ] **Step 1: Write failing bounded-query tests**
+- [x] **Step 1: Write failing bounded-query tests**
 
 Assert deterministic brand/model/model-year ranking, summary totals, coverage states, pagination, and selected-group drill-down without calling Planner `list_all()`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run focused opportunity tests and confirm current all-atom aggregation fails the bounded repository contract.
 
-- [ ] **Step 3: Implement SQL opportunity repository**
+- [x] **Step 3: Implement SQL opportunity repository**
 
 Aggregate requested group/market/horizon in SQLite, join exact/fallback coverage, compute deterministic scoring inputs, paginate before Python serialization, and query drill-down only for one group.
 
-- [ ] **Step 4: Update API and UI**
+- [x] **Step 4: Update API and UI**
 
 Add page/sort parameters and render loading, error, retry, empty, and paginated results without blocking on the entire snapshot.
 
-- [ ] **Step 5: Verify Task 6 and commit**
+- [x] **Step 5: Verify Task 6 and commit**
 
 Run focused tests and production-sized timing; commit with `perf: rank opportunities with bounded sql`.
 

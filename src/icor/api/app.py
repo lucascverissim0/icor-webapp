@@ -28,6 +28,7 @@ from icor.application.opportunities import OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandReadinessV1
 from icor.application.registrations import RegistrationService
+from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
 from icor.infrastructure.snapshot_store import SnapshotStore, SnapshotUnavailableError
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
@@ -104,15 +105,24 @@ def create_app(
         if selected_repository is not None
         else None
     )
-    app.state.opportunity_service = (
-        OpportunityService(
+    if isinstance(selected_repository, SnapshotPlannerRepository) and isinstance(
+        selected_coverage_repository, SQLiteCoverageRepository
+    ):
+        app.state.opportunity_service = OpportunityService(
+            repository=SnapshotOpportunityRepository(
+                selected_repository,
+                selected_coverage_repository,
+                DemandReadinessV1(),
+            )
+        )
+    elif selected_repository is not None:
+        app.state.opportunity_service = OpportunityService(
             selected_repository,
             selected_coverage_repository,
             DemandReadinessV1(),
         )
-        if selected_repository is not None
-        else None
-    )
+    else:
+        app.state.opportunity_service = None
     if evidence_service is None and snapshot_manifest is not None and snapshot_ledger is not None:
         evidence_service = EvidenceReviewService.from_snapshot(
             snapshot_ledger.path, snapshot_manifest

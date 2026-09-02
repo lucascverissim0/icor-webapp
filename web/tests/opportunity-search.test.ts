@@ -25,6 +25,7 @@ describe('opportunity URL state', () => {
       groupBy: 'model_year',
       market: ['FR'],
       horizon: [2030],
+      page: 1,
     })
     expect(parsed.invalidKeys).toEqual([])
   })
@@ -34,8 +35,14 @@ describe('opportunity URL state', () => {
       serializeOpportunitySearch({
         groupBy: 'model',
         market: ['DE'],
+        page: 1,
         invalidKeys: ['horizon'],
       }),
-    ).toEqual({ groupBy: 'model', market: ['DE'] })
+    ).toEqual({ groupBy: 'model', market: ['DE'], page: 1 })
+  })
+
+  it('normalizes pagination and rejects invalid page values', () => {
+    expect(parseOpportunitySearch({ groupBy: 'brand', page: '3' }).value.page).toBe(3)
+    expect(parseOpportunitySearch({ groupBy: 'brand', page: '0' }).invalidKeys).toContain('page')
   })
 })

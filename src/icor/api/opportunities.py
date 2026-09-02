@@ -50,11 +50,15 @@ def _query(
     group_by: OpportunityGroupBy,
     market: list[str] | None,
     horizon: list[int] | None,
+    page: int = 1,
+    page_size: int = 25,
 ) -> OpportunityQuery:
     return OpportunityQuery(
         group_by=group_by,
         markets=tuple(market or ()),
         horizons=tuple(horizon or ()),
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -83,11 +87,13 @@ def opportunities(
     group_by: OpportunityGroupBy = OpportunityGroupBy.BRAND,
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> OpportunityPageResponse | JSONResponse:
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
-    result = service.list(_query(group_by, market, horizon))
+    result = service.list(_query(group_by, market, horizon, page, page_size))
     return OpportunityPageResponse.model_validate(result)
 
 
@@ -102,12 +108,14 @@ def opportunity_configurations(
     group_by: OpportunityGroupBy = OpportunityGroupBy.BRAND,
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> list[OpportunityDrillDownResponse] | JSONResponse:
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
     rows = service.drill_down(
-        group_id, _query(group_by, market, horizon)
+        group_id, _query(group_by, market, horizon), page, page_size
     )
     if not rows:
         return _problem(

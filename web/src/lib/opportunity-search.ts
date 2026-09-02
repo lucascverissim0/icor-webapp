@@ -7,6 +7,7 @@ export interface OpportunitySearch {
   groupBy: OpportunityGroupBy
   market?: string[]
   horizon?: number[]
+  page: number
 }
 
 export interface OpportunityRouteSearch extends OpportunitySearch {
@@ -59,10 +60,14 @@ export function parseOpportunitySearch(
   ]
   const allHorizonsValid = rawHorizons.every((value) => Number.isInteger(Number(value)))
   if (!allHorizonsValid) invalid.add('horizon')
+  const parsedPage = Number(raw.page ?? 1)
+  const page = Number.isInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1
+  if (raw.page !== undefined && page !== parsedPage) invalid.add('page')
 
   return {
     value: {
       groupBy,
+      page,
       ...(markets.length > 0 && { market: markets }),
       ...(horizons.length > 0 && { horizon: horizons }),
     },
@@ -75,6 +80,7 @@ export function serializeOpportunitySearch<T extends OpportunityRouteSearch>(
 ): OpportunitySearch {
   return {
     groupBy: search.groupBy,
+    page: search.page,
     ...(search.market && { market: search.market }),
     ...(search.horizon && { horizon: search.horizon }),
   }

@@ -69,6 +69,10 @@ export const opportunities = {
   strategy_name: 'demand_readiness',
   strategy_version: '1',
   integrity_warnings: [],
+  total: 2,
+  page: 1,
+  page_size: 1,
+  pages: 2,
 } as const
 
 export const drillDown = [{
@@ -110,7 +114,7 @@ export function renderOpportunities(fetcher: typeof fetch) {
       <OpportunitiesWorkbench
         apiClient={client}
         onSearchChange={onSearchChange}
-        search={{ groupBy: 'brand' }}
+        search={{ groupBy: 'brand', page: 1 }}
       />
     </AppProviders>,
   )
@@ -149,13 +153,25 @@ describe('OpportunitiesWorkbench', () => {
     const onSearchChange = vi.fn()
     render(
       <AppProviders queryClient={queryClient}>
-        <OpportunitiesWorkbench apiClient={client} onSearchChange={onSearchChange} search={{ groupBy: 'brand', market: ['FR'] }} />
+        <OpportunitiesWorkbench apiClient={client} onSearchChange={onSearchChange} search={{ groupBy: 'brand', market: ['FR'], page: 1 }} />
       </AppProviders>,
     )
 
     await user.click(await screen.findByRole('button', { name: 'Model years' }))
 
-    expect(onSearchChange).toHaveBeenCalledWith({ groupBy: 'model_year', market: ['FR'] })
+    expect(onSearchChange).toHaveBeenCalledWith({ groupBy: 'model_year', market: ['FR'], page: 1 })
+  })
+
+  it('navigates ranking pages and keeps filters', async () => {
+    const user = userEvent.setup()
+    const fetcher = successFetcher()
+    const client = new PlannerApiClient(fetcher)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const onSearchChange = vi.fn()
+    render(<AppProviders queryClient={queryClient}><OpportunitiesWorkbench apiClient={client} onSearchChange={onSearchChange} search={{ groupBy: 'brand', market: ['FR'], page: 1 }} /></AppProviders>)
+
+    await user.click(await screen.findByRole('button', { name: 'Next page' }))
+    expect(onSearchChange).toHaveBeenCalledWith({ groupBy: 'brand', market: ['FR'], page: 2 })
   })
 
   it('drills into contributing configuration and model-year demand', async () => {

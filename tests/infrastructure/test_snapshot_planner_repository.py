@@ -8,11 +8,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from icor.application.opportunities import OpportunityGroupBy, OpportunityQuery
+from icor.application.ranking import DemandReadinessV1
 from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
 from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
+from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
+from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 
 def _manifest() -> SnapshotManifest:
@@ -264,3 +268,39 @@ def test_interactive_sqlite_methods_reject_an_unbounded_projection(
     monkeypatch.setattr(sqlite_repository, "_query_sqlite", guarded_query)
     assert len(sqlite_repository.search(PlannerQuery(page_size=1)).items) == 1
     assert sqlite_repository.get("opportunity-golf") is not None
+
+
+def test_sqlite_opportunity_ranking_and_drill_down_are_bounded(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    query = OpportunityQuery(
+        group_by=OpportunityGroupBy.MODEL, page=1, page_size=1
+    )
+    calls: list[int | None] = []
+    original = sqlite_repository._query_sqlite
+
+    def guarded_query(path, where, parameters, order_by, limit, offset):  # type: ignore[no-untyped-def]
+        calls.append(limit)
+        if limit is None:
+            raise AssertionError("opportunity drill-down attempted an unbounded query")
+        return original(path, where, parameters, order_by, limit, offset)
+
+    monkeypatch.setattr(sqlite_repository, "_query_sqlite", guarded_query)
+    page = repository.search(query)
+
+    assert page.total == 2
+    assert page.pages == 2
+    assert len(page.items) == 1
+    assert page.summary.base_units == 21
+    assert page.items[0].brand == "Volkswagen"
+    assert page.items[0].coverage_status.value == "uncovered"
+    rows = repository.drill_down(page.items[0].group_id, query, 1, 1)
+    assert len(rows) == 1
+    assert calls == [1]

@@ -42,6 +42,8 @@ export interface OpportunitiesQuery {
   groupBy: OpportunityGroupBy
   markets?: string[]
   horizons?: number[]
+  page?: number
+  pageSize?: number
 }
 
 export interface EvidenceObservationsQuery {
@@ -157,9 +159,9 @@ export class PlannerApiClient {
     )
   }
 
-  async opportunities(query: OpportunitiesQuery): Promise<OpportunityPage> {
+  async opportunities(query: OpportunitiesQuery, signal?: AbortSignal): Promise<OpportunityPage> {
     const parameters = opportunityParameters(query)
-    return this.request<OpportunityPage>(`/api/v1/opportunities?${parameters}`)
+    return this.request<OpportunityPage>(`/api/v1/opportunities?${parameters}`, { signal })
   }
 
   async opportunityConfigurations(
@@ -306,6 +308,8 @@ function opportunityParameters(query: OpportunitiesQuery): URLSearchParams {
   const parameters = new URLSearchParams({ group_by: query.groupBy })
   appendMany(parameters, 'market', query.markets)
   appendMany(parameters, 'horizon', query.horizons)
+  if (query.page !== undefined) parameters.set('page', String(query.page))
+  if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
   return parameters
 }
 

@@ -213,6 +213,10 @@ class OpportunityPageResponse(ApiModel):
     integrity_warnings: tuple[str, ...]
     snapshot_id: str | None = None
     versions: SnapshotVersionsResponse | None = None
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class OpportunityDrillDownResponse(ApiModel):

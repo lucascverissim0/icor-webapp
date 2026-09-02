@@ -577,6 +577,12 @@ export interface components {
             integrity_warnings: string[];
             /** Items */
             items: components["schemas"]["OpportunityRowResponse"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Pages */
+            pages: number;
             /** Snapshot Id */
             snapshot_id?: string | null;
             /** Strategy Name */
@@ -584,6 +590,8 @@ export interface components {
             /** Strategy Version */
             strategy_version: string;
             summary: components["schemas"]["OpportunitySummaryResponse"];
+            /** Total */
+            total: number;
             versions?: components["schemas"]["SnapshotVersionsResponse"] | null;
         };
         /** OpportunityRowResponse */
@@ -1181,6 +1189,8 @@ export interface operations {
                 group_by?: components["schemas"]["OpportunityGroupBy"];
                 market?: string[] | null;
                 horizon?: number[] | null;
+                page?: number;
+                page_size?: number;
             };
             header?: never;
             path?: never;
@@ -1232,6 +1242,8 @@ export interface operations {
                 group_by?: components["schemas"]["OpportunityGroupBy"];
                 market?: string[] | null;
                 horizon?: number[] | null;
+                page?: number;
+                page_size?: number;
             };
             header?: never;
             path: {

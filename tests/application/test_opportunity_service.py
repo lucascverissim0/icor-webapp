@@ -145,3 +145,26 @@ def test_drill_down_returns_only_contributing_model_year_rows() -> None:
     assert {row.configuration.brand for row in rows} == {"Aurora Mobility"}
     assert sum(row.model_year_demand.demand.base_units for row in rows) == 2_150
 
+
+def test_service_delegates_to_a_bounded_opportunity_repository() -> None:
+    expected = service().list(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
+
+    class Repository:
+        def search(self, query):  # type: ignore[no-untyped-def]
+            assert query.page == 2
+            return expected
+
+        def drill_down(self, group_id, query, page, page_size):  # type: ignore[no-untyped-def]
+            assert (group_id, page, page_size) == ("group", 2, 10)
+            return ()
+
+    bounded = OpportunityService(repository=Repository())
+    assert bounded.list(
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND, page=2)
+    ) is expected
+    assert bounded.drill_down(
+        "group",
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND),
+        page=2,
+        page_size=10,
+    ) == ()

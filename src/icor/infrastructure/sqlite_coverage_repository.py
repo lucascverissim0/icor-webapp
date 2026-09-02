@@ -26,6 +26,10 @@ class SQLiteCoverageRepository:
     def schema_version(self) -> int:
         return SCHEMA_VERSION
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self._path)
         connection.row_factory = sqlite3.Row

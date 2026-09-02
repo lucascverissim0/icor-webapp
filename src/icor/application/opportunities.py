@@ -6,6 +6,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 from enum import StrEnum
+from math import ceil
+from typing import Protocol
 
 from icor.application.coverage import CoverageRepository
 from icor.application.planner import PlannerRepository
@@ -26,6 +28,18 @@ from icor.domain.planner import (
 from icor.domain.snapshots import SnapshotVersions
 
 
+class OpportunityRepository(Protocol):
+    def search(self, query: OpportunityQuery) -> OpportunityPage: ...
+
+    def drill_down(
+        self,
+        group_id: str,
+        query: OpportunityQuery,
+        page: int,
+        page_size: int,
+    ) -> tuple[OpportunityDrillDownRow, ...]: ...
+
+
 class OpportunityGroupBy(StrEnum):
     BRAND = "brand"
     MODEL = "model"
@@ -37,6 +51,12 @@ class OpportunityQuery:
     group_by: OpportunityGroupBy
     markets: tuple[str, ...] = ()
     horizons: tuple[int, ...] = ()
+    page: int = 1
+    page_size: int = 25
+
+    def __post_init__(self) -> None:
+        if self.page < 1 or not 1 <= self.page_size <= 100:
+            raise ValueError("opportunity pagination is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +93,10 @@ class OpportunityPage:
     integrity_warnings: tuple[str, ...]
     snapshot_id: str | None = None
     versions: SnapshotVersions | None = None
+    total: int = 0
+    page: int = 1
+    page_size: int = 25
+    pages: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,15 +116,21 @@ class _DemandAtom:
 class OpportunityService:
     def __init__(
         self,
-        planner_repository: PlannerRepository,
-        coverage_repository: CoverageRepository,
-        ranking_strategy: RankingStrategy,
+        planner_repository: PlannerRepository | None = None,
+        coverage_repository: CoverageRepository | None = None,
+        ranking_strategy: RankingStrategy | None = None,
+        *,
+        repository: OpportunityRepository | None = None,
     ) -> None:
         self._planner_repository = planner_repository
         self._coverage_repository = coverage_repository
         self._ranking_strategy = ranking_strategy
+        self._repository = repository
 
     def list(self, query: OpportunityQuery) -> OpportunityPage:
+        if self._repository is not None:
+            return self._repository.search(query)
+        assert self._ranking_strategy is not None
         atoms, warnings = self._resolved_atoms(query)
         grouped = self._group(atoms, query.group_by)
         candidates = tuple(
@@ -132,8 +162,10 @@ class OpportunityService:
                 key=lambda row: (-row.score.total_points, -row.demand.base_units, row.group_id),
             )
         )
+        total = len(rows)
+        start = (query.page - 1) * query.page_size
         return OpportunityPage(
-            items=rows,
+            items=rows[start : start + query.page_size],
             summary=OpportunitySummary(
                 base_units=sum(row.demand.base_units for row in rows),
                 exact_covered_base_units=sum(
@@ -150,11 +182,23 @@ class OpportunityService:
             integrity_warnings=warnings,
             snapshot_id=getattr(self._planner_repository, "snapshot_id", None),
             versions=getattr(self._planner_repository, "versions", None),
+            total=total,
+            page=query.page,
+            page_size=query.page_size,
+            pages=ceil(total / query.page_size),
         )
 
     def drill_down(
-        self, group_id: str, query: OpportunityQuery
+        self,
+        group_id: str,
+        query: OpportunityQuery,
+        page: int = 1,
+        page_size: int = 100,
     ) -> tuple[OpportunityDrillDownRow, ...]:
+        if self._repository is not None:
+            return self._repository.drill_down(
+                group_id, query, page, page_size
+            )
         atoms, _warnings = self._resolved_atoms(query)
         grouped = self._group(atoms, query.group_by)
         return tuple(

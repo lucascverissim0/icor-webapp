@@ -23,6 +23,8 @@ function queryFromSearch(search: OpportunitySearch): OpportunitiesQuery {
     groupBy: search.groupBy,
     markets: search.market,
     horizons: search.horizon,
+    page: search.page,
+    pageSize: 25,
   }
 }
 
@@ -49,7 +51,7 @@ export function OpportunitiesWorkbench({
   const opportunityQuery = queryFromSearch(search)
   const ranking = useQuery({
     queryKey: queryKeys.opportunities(opportunityQuery),
-    queryFn: () => apiClient.opportunities(opportunityQuery),
+    queryFn: ({ signal }) => apiClient.opportunities(opportunityQuery, signal),
   })
   const drillDown = useQuery({
     queryKey: queryKeys.opportunityConfigurations(selectedGroup ?? '', opportunityQuery),
@@ -83,7 +85,7 @@ export function OpportunitiesWorkbench({
             key={value}
             onClick={() => {
               setSelectedGroup(null)
-              onSearchChange({ ...search, groupBy: value })
+              onSearchChange({ ...search, groupBy: value, page: 1 })
             }}
             type="button"
           >
@@ -110,6 +112,13 @@ export function OpportunitiesWorkbench({
               rows={ranking.data.items}
               selectedGroup={selectedGroup}
             />
+          )}
+          {ranking.data.pages > 1 && (
+            <nav aria-label="Opportunity pages" className="pagination">
+              <button disabled={ranking.data.page <= 1} onClick={() => onSearchChange({ ...search, page: ranking.data.page - 1 })} type="button">Previous page</button>
+              <span>Page {ranking.data.page} of {ranking.data.pages}</span>
+              <button disabled={ranking.data.page >= ranking.data.pages} onClick={() => onSearchChange({ ...search, page: ranking.data.page + 1 })} type="button">Next page</button>
+            </nav>
           )}
         </>
       )}
