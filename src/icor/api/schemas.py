@@ -268,6 +268,10 @@ class EvidenceReleaseSummaryResponse(ApiModel):
     quarantined_record_count: int
     observation_count: int
     total_value: Decimal
+    publication_status: str = "final"
+    validation_warning_count: int = 0
+    what_it_proves: str = ""
+    limitations: str = ""
 
 
 class EvidenceSummaryResponse(ApiModel):
@@ -306,6 +310,10 @@ class EvidenceObservationResponse(ApiModel):
     validation_flags: tuple[str, ...]
     confidence_total: int
     confidence_reasons: tuple[str, ...]
+    observation_year: int
+    registration_cohort_year: int | None
+    manufacture_year: int | None
+    model_year: int | None
 
 
 class EvidenceObservationPageResponse(ApiModel):

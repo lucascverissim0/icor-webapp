@@ -30,7 +30,9 @@ const summary = {
     coverage_end: '2025-12-31', geography: 'United Kingdom', measure: 'registrations',
     dependency_group: 'uk-dft', raw_record_count: 10, accepted_record_count: 9,
     rejected_record_count: 1, quarantined_record_count: 0, observation_count: 9,
-    total_value: '1500',
+    total_value: '1500', publication_status: 'final', validation_warning_count: 0,
+    what_it_proves: 'Counts licensed stock observed in the release period.',
+    limitations: 'Stock is not annual registrations; cohort years describe vehicle age.',
   }],
   mapping_status_counts: { unresolved: 542455 },
   geographies: ['United Kingdom'],
@@ -46,6 +48,8 @@ const observations = {
     original_model_year: null, original_type: 'CAR', mapping_status: 'unresolved',
     transformation_notes: ['Whitespace normalized'], validation_flags: [], confidence_total: 70,
     confidence_reasons: ['Official publisher release'],
+    observation_year: 2025, registration_cohort_year: 1914,
+    manufacture_year: null, model_year: null,
   }],
   total: 1, page: 1, page_size: 25, pages: 1,
 } as const
@@ -77,17 +81,29 @@ function successFetcher() {
 
 describe('EvidenceWorkbench', () => {
   it('presents candidate provenance with the exact identity boundary', async () => {
-    renderEvidence(successFetcher())
+    const fetcher = successFetcher()
+    renderEvidence(fetcher)
 
     expect(await screen.findByText('542,455')).toBeVisible()
+    expect(screen.getByText(summary.releases[0].what_it_proves)).toBeVisible()
+    expect(screen.getByText(summary.releases[0].limitations)).toBeVisible()
     expect(screen.getByText(/exact normalized model-family identity/i)).toBeVisible()
     expect(screen.getByText(/registration year is not model year/i)).toBeVisible()
     expect(screen.getByText(/candidate does not feed forecasts/i)).toBeVisible()
+    expect(fetcher).not.toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/evidence/observations'),
+      expect.any(Object),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Browse raw observations' }))
     expect(screen.getByText('ACME')).toBeVisible()
     expect(screen.getByText('ROADRUNNER')).toBeVisible()
     expect(screen.getByText('Unresolved')).toBeVisible()
     expect(screen.getByRole('link', { name: 'Open source' })).toHaveAttribute('rel', expect.stringContaining('noopener'))
     expect(screen.getByRole('link', { name: 'Usage terms' })).toHaveAttribute('href', summary.releases[0].terms_url)
+    expect(screen.getAllByText('Observation year').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('First registration').length).toBeGreaterThan(0)
+    expect(screen.getByText('1914')).toBeVisible()
+    expect(screen.queryByText('1914 registrations')).not.toBeInTheDocument()
   })
 
   it('sends bounded filters and page changes to the evidence endpoint', async () => {
@@ -95,12 +111,23 @@ describe('EvidenceWorkbench', () => {
     const fetcher = successFetcher()
     renderEvidence(fetcher)
 
+    await screen.findByText(summary.releases[0].what_it_proves)
+    await user.click(screen.getByRole('button', { name: 'Browse raw observations' }))
     await screen.findByText('ROADRUNNER')
     await user.type(screen.getByRole('searchbox', { name: 'Search source labels' }), 'acme')
+    await user.type(screen.getByRole('spinbutton', { name: 'Observation year' }), '2024')
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Year field' }),
+      'registration_cohort_year',
+    )
     await user.click(screen.getByRole('button', { name: 'Apply filters' }))
 
     expect(fetcher).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/v1\/evidence\/observations\?.*search=acme/),
+      expect.any(Object),
+    )
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringMatching(/observation_year=2024.*year_semantics=registration_cohort_year/),
       expect.any(Object),
     )
   })
@@ -119,7 +146,7 @@ describe('EvidenceWorkbench', () => {
 
   it('has no automated accessibility violations in the populated state', async () => {
     const { container } = renderEvidence(successFetcher())
-    await screen.findByText('ROADRUNNER')
+    await screen.findByText(summary.releases[0].what_it_proves)
 
     expect((await axe.run(container)).violations).toEqual([])
   })

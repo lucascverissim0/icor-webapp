@@ -50,6 +50,8 @@ export interface EvidenceObservationsQuery {
   measure?: EvidenceMeasure
   mappingStatus?: EvidenceMappingStatus
   search?: string
+  observationYear?: number
+  yearSemantics?: 'observation_year' | 'registration_cohort_year' | 'manufacture_year' | 'model_year'
   page?: number
   pageSize?: number
 }
@@ -203,6 +205,10 @@ export class PlannerApiClient {
     if (query.measure) parameters.set('measure', query.measure)
     if (query.mappingStatus) parameters.set('mapping_status', query.mappingStatus)
     if (query.search) parameters.set('search', query.search)
+    if (query.observationYear !== undefined) {
+      parameters.set('observation_year', String(query.observationYear))
+    }
+    if (query.yearSemantics) parameters.set('year_semantics', query.yearSemantics)
     if (query.page !== undefined) parameters.set('page', String(query.page))
     if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
     return this.request<EvidenceObservationPage>(

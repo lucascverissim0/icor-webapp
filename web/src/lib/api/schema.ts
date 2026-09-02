@@ -363,12 +363,18 @@ export interface components {
             confidence_total: number;
             /** Geography */
             geography: string;
+            /** Manufacture Year */
+            manufacture_year: number | null;
             /** Mapping Status */
             mapping_status: string;
             /** Measure */
             measure: string;
+            /** Model Year */
+            model_year: number | null;
             /** Observation Id */
             observation_id: string;
+            /** Observation Year */
+            observation_year: number;
             /** Original Make */
             original_make: string;
             /** Original Model */
@@ -393,6 +399,8 @@ export interface components {
             period_start: string;
             /** Publication Status */
             publication_status: string;
+            /** Registration Cohort Year */
+            registration_cohort_year: number | null;
             /** Release Id */
             release_id: string;
             /** Transformation Notes */
@@ -422,10 +430,20 @@ export interface components {
             dependency_group: string;
             /** Geography */
             geography: string;
+            /**
+             * Limitations
+             * @default
+             */
+            limitations: string;
             /** Measure */
             measure: string;
             /** Observation Count */
             observation_count: number;
+            /**
+             * Publication Status
+             * @default final
+             */
+            publication_status: string;
             /**
              * Published At
              * Format: date-time
@@ -449,6 +467,16 @@ export interface components {
             terms_url: string;
             /** Total Value */
             total_value: string;
+            /**
+             * Validation Warning Count
+             * @default 0
+             */
+            validation_warning_count: number;
+            /**
+             * What It Proves
+             * @default
+             */
+            what_it_proves: string;
         };
         /**
          * EvidenceStatus
@@ -1078,6 +1106,8 @@ export interface operations {
                 measure?: components["schemas"]["Measure"] | null;
                 mapping_status?: components["schemas"]["MappingStatus"] | null;
                 search?: string | null;
+                observation_year?: number | null;
+                year_semantics?: ("observation_year" | "registration_cohort_year" | "manufacture_year" | "model_year") | null;
                 page?: number;
                 page_size?: number;
             };

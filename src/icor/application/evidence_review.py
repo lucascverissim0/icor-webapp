@@ -15,6 +15,20 @@ from icor.evidence.release_manifests import load_snapshot_manifest
 from icor.evidence.serialization import sha256_file
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
+_YEAR_SEMANTICS = {
+    "observation_year",
+    "registration_cohort_year",
+    "manufacture_year",
+    "model_year",
+}
+_OBSERVATION_RESPONSE_COLUMNS = """observation_id, release_id, original_row_locator,
+    geography, period_start, period_end, period_precision, measure, value, unit,
+    publication_status, original_make, original_model, original_model_year, original_type,
+    mapping_status, transformation_notes, validation_flags, confidence_authority,
+    confidence_publication_status, confidence_coverage, confidence_identity,
+    confidence_independent_agreement, confidence_reasons, confidence_applied_cap,
+    registration_cohort_year, manufacture_year, model_year"""
+
 
 @dataclass(frozen=True, slots=True)
 class EvidenceReleaseSummary:
@@ -35,6 +49,10 @@ class EvidenceReleaseSummary:
     quarantined_record_count: int
     observation_count: int
     total_value: Decimal
+    publication_status: str = "final"
+    validation_warning_count: int = 0
+    what_it_proves: str = ""
+    limitations: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +78,8 @@ class EvidenceObservationQuery:
     measure: str | None = None
     mapping_status: str | None = None
     search: str | None = None
+    observation_year: int | None = None
+    year_semantics: str | None = None
     page: int = 1
     page_size: int = 25
 
@@ -76,6 +96,13 @@ class EvidenceObservationQuery:
             item.value for item in MappingStatus
         }:
             raise ValueError("mapping status is unsupported")
+        if self.observation_year is not None and (
+            type(self.observation_year) is not int
+            or not 1900 <= self.observation_year <= 2200
+        ):
+            raise ValueError("observation year is unsupported")
+        if self.year_semantics is not None and self.year_semantics not in _YEAR_SEMANTICS:
+            raise ValueError("year semantics is unsupported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +127,10 @@ class EvidenceObservationRow:
     validation_flags: tuple[str, ...]
     confidence_total: int
     confidence_reasons: tuple[str, ...]
+    observation_year: int
+    registration_cohort_year: int | None
+    manufacture_year: int | None
+    model_year: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,28 +208,16 @@ class EvidenceReviewService:
     def summary(self) -> EvidenceSummary:
         with self._connect() as connection:
             release_rows = connection.execute(
-                """SELECT r.*, COUNT(o.observation_id) AS observation_count,
-                COALESCE(SUM(CAST(o.value AS NUMERIC)), 0) AS total_value
+                """SELECT r.*, s.observation_count, s.total_value,
+                s.mapping_status_counts, s.validation_flag_counts,
+                s.geographies, s.measures, s.observation_years
                 FROM source_release r
-                LEFT JOIN observation o ON o.release_id = r.release_id
-                GROUP BY r.release_id ORDER BY r.release_id"""
+                JOIN evidence_release_summary s ON s.release_id = r.release_id
+                ORDER BY r.release_id"""
             ).fetchall()
-            mapping_rows = connection.execute(
-                "SELECT mapping_status, COUNT(*) AS count FROM observation "
-                "GROUP BY mapping_status ORDER BY mapping_status"
-            ).fetchall()
-            geographies = tuple(
-                row[0]
-                for row in connection.execute(
-                    "SELECT DISTINCT geography FROM observation ORDER BY geography"
-                )
-            )
-            measures = tuple(
-                row[0]
-                for row in connection.execute(
-                    "SELECT DISTINCT measure FROM observation ORDER BY measure"
-                )
-            )
+        mapping_status_counts: dict[str, int] = {}
+        geographies: set[str] = set()
+        measures: set[str] = set()
         releases = tuple(
             EvidenceReleaseSummary(
                 release_id=row["release_id"],
@@ -218,9 +237,20 @@ class EvidenceReviewService:
                 quarantined_record_count=row["quarantined_record_count"],
                 observation_count=row["observation_count"],
                 total_value=Decimal(str(row["total_value"])),
+                publication_status=row["publication_status"],
+                validation_warning_count=sum(
+                    _json_count_mapping(row["validation_flag_counts"]).values()
+                ),
+                what_it_proves=_source_explanation(row["measure"])[0],
+                limitations=_source_explanation(row["measure"])[1],
             )
             for row in release_rows
         )
+        for row in release_rows:
+            for status, count in _json_count_mapping(row["mapping_status_counts"]).items():
+                mapping_status_counts[status] = mapping_status_counts.get(status, 0) + count
+            geographies.update(_json_tuple(row["geographies"]))
+            measures.update(_json_tuple(row["measures"]))
         return EvidenceSummary(
             snapshot_id=self.manifest.snapshot_id,
             status=self.manifest.status.value,
@@ -231,9 +261,9 @@ class EvidenceReviewService:
             warning_count=len(self.manifest.warnings),
             versions=self.manifest.versions,
             releases=releases,
-            mapping_status_counts={row["mapping_status"]: row["count"] for row in mapping_rows},
-            geographies=geographies,
-            measures=measures,
+            mapping_status_counts=mapping_status_counts,
+            geographies=tuple(sorted(geographies)),
+            measures=tuple(sorted(measures)),
         )
 
     def list_observations(self, query: EvidenceObservationQuery) -> EvidenceObservationPage:
@@ -248,6 +278,16 @@ class EvidenceReviewService:
             if value:
                 clauses.append(f"{column} = ?")
                 parameters.append(value)
+        if query.observation_year is not None:
+            clauses.append("period_end BETWEEN ? AND ?")
+            parameters.extend(
+                (
+                    f"{query.observation_year:04d}-01-01",
+                    f"{query.observation_year:04d}-12-31",
+                )
+            )
+        if query.year_semantics and query.year_semantics != "observation_year":
+            clauses.append(f"{query.year_semantics} IS NOT NULL")
         if query.search and query.search.strip():
             escaped = _escape_like(query.search.strip().casefold())
             clauses.append(
@@ -264,7 +304,7 @@ class EvidenceReviewService:
                 ).fetchone()[0]
             )
             rows = connection.execute(
-                f"""SELECT * FROM observation{where}
+                f"""SELECT {_OBSERVATION_RESPONSE_COLUMNS} FROM observation{where}
                 ORDER BY release_id, geography, original_make, original_model,
                 period_end, observation_id LIMIT ? OFFSET ?""",
                 (*parameters, query.page_size, offset),
@@ -283,6 +323,34 @@ def _json_tuple(value: str) -> tuple[str, ...]:
     if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
         raise ValueError("evidence JSON field is invalid")
     return tuple(parsed)
+
+
+def _json_count_mapping(value: str) -> dict[str, int]:
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict) or any(
+        not isinstance(key, str) or type(count) is not int
+        for key, count in parsed.items()
+    ):
+        raise ValueError("evidence count JSON field is invalid")
+    return parsed
+
+
+def _source_explanation(measure: str) -> tuple[str, str]:
+    if measure == Measure.NEW_REGISTRATIONS.value:
+        return (
+            "Counts newly registered vehicles in the release's stated place and period.",
+            "Registration year does not prove model year, manufacture year, or windshield fitment.",
+        )
+    if measure == Measure.ACTIVE_FLEET.value:
+        return (
+            "Counts licensed or registered stock observed in the release period.",
+            "Stock is not annual registrations; cohort years describe vehicle age, "
+            "not observation time.",
+        )
+    return (
+        "Reports the publisher's stated vehicle measure and coverage.",
+        "The source does not prove facts outside its stated measure, geography, and period.",
+    )
 
 
 def _observation_row(row: sqlite3.Row) -> EvidenceObservationRow:
@@ -319,4 +387,8 @@ def _observation_row(row: sqlite3.Row) -> EvidenceObservationRow:
         validation_flags=_json_tuple(row["validation_flags"]),
         confidence_total=confidence_total,
         confidence_reasons=_json_tuple(row["confidence_reasons"]),
+        observation_year=date.fromisoformat(row["period_end"]).year,
+        registration_cohort_year=row["registration_cohort_year"],
+        manufacture_year=row["manufacture_year"],
+        model_year=row["model_year"],
     )

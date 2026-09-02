@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
@@ -55,6 +55,14 @@ def observations(
     measure: Measure | None = None,
     mapping_status: MappingStatus | None = None,
     search: Annotated[str | None, Query(max_length=100)] = None,
+    observation_year: Annotated[int | None, Query(ge=1900, le=2200)] = None,
+    year_semantics: Literal[
+        "observation_year",
+        "registration_cohort_year",
+        "manufacture_year",
+        "model_year",
+    ]
+    | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> EvidenceObservationPageResponse | JSONResponse:
@@ -68,6 +76,8 @@ def observations(
             measure=measure.value if measure else None,
             mapping_status=mapping_status.value if mapping_status else None,
             search=search,
+            observation_year=observation_year,
+            year_semantics=year_semantics,
             page=page,
             page_size=page_size,
         )

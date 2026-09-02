@@ -54,6 +54,8 @@ class StaticEvidenceService:
                     quarantined_record_count=0,
                     observation_count=2,
                     total_value=Decimal("15"),
+                    what_it_proves="Counts newly registered vehicles for the release period.",
+                    limitations="Registration year does not prove model year.",
                 ),
             ),
             mapping_status_counts={"rejected": 1, "unresolved": 2},
@@ -86,6 +88,10 @@ class StaticEvidenceService:
                     validation_flags=(),
                     confidence_total=70,
                     confidence_reasons=("Official source; identity unresolved.",),
+                    observation_year=2024,
+                    registration_cohort_year=1914,
+                    manufacture_year=None,
+                    model_year=None,
                 ),
             ),
             total=1,
@@ -115,6 +121,8 @@ def test_evidence_summary_serializes_candidate_provenance(tmp_path: Path) -> Non
     assert body["mapping_status_counts"] == {"rejected": 1, "unresolved": 2}
     assert body["releases"][0]["total_value"] == "15"
     assert body["releases"][0]["publisher"] == "EEA publisher"
+    assert body["releases"][0]["what_it_proves"]
+    assert body["releases"][0]["limitations"]
 
 
 def test_evidence_observations_pass_bounded_filters(tmp_path: Path) -> None:
@@ -128,6 +136,8 @@ def test_evidence_observations_pass_bounded_filters(tmp_path: Path) -> None:
                 "measure": "new_registrations",
                 "mapping_status": "unresolved",
                 "search": "golf",
+                "observation_year": 2024,
+                "year_semantics": "registration_cohort_year",
                 "page": 2,
                 "page_size": 10,
             },
@@ -140,10 +150,14 @@ def test_evidence_observations_pass_bounded_filters(tmp_path: Path) -> None:
         measure="new_registrations",
         mapping_status="unresolved",
         search="golf",
+        observation_year=2024,
+        year_semantics="registration_cohort_year",
         page=2,
         page_size=10,
     )
     assert response.json()["items"][0]["original_model"] == "Golf"
+    assert response.json()["items"][0]["observation_year"] == 2024
+    assert response.json()["items"][0]["registration_cohort_year"] == 1914
 
 
 def test_missing_candidate_returns_typed_unavailable_without_fixture_fallback(

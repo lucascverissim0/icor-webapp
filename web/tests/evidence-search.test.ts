@@ -7,16 +7,19 @@ describe('parseEvidenceSearch', () => {
   it('keeps bounded review filters and normalizes the page', () => {
     expect(parseEvidenceSearch({
       releaseId: 'uk-release', geography: 'United Kingdom', measure: 'new_registrations',
-      mappingStatus: 'unresolved', search: 'acme', page: '2',
+      mappingStatus: 'unresolved', observationYear: '2024',
+      yearSemantics: 'registration_cohort_year', search: 'acme', page: '2',
     })).toEqual({
       releaseId: 'uk-release', geography: 'United Kingdom', measure: 'new_registrations',
-      mappingStatus: 'unresolved', search: 'acme', page: 2,
+      mappingStatus: 'unresolved', observationYear: 2024,
+      yearSemantics: 'registration_cohort_year', search: 'acme', page: 2,
     })
   })
 
   it('drops invalid, overlong, and non-positive values', () => {
     expect(parseEvidenceSearch({
       releaseId: 'x'.repeat(81), measure: 'forecast', mappingStatus: 'canonical',
+      observationYear: 'future', yearSemantics: 'build_year',
       search: 'x'.repeat(101), page: -3,
     })).toEqual({ page: 1 })
   })

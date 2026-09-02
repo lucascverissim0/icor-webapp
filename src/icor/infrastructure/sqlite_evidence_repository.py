@@ -342,14 +342,35 @@ class SQLiteEvidenceRepository:
                     WHERE o.release_id = ? GROUP BY flags.value ORDER BY flags.value)""",
                     (release_id,),
                 ).fetchone()[0]
+                geographies = connection.execute(
+                    """SELECT COALESCE(json_group_array(geography), '[]')
+                    FROM (SELECT DISTINCT geography FROM observation
+                    WHERE release_id = ? ORDER BY geography)""",
+                    (release_id,),
+                ).fetchone()[0]
+                measures = connection.execute(
+                    """SELECT COALESCE(json_group_array(measure), '[]')
+                    FROM (SELECT DISTINCT measure FROM observation
+                    WHERE release_id = ? ORDER BY measure)""",
+                    (release_id,),
+                ).fetchone()[0]
+                observation_years = connection.execute(
+                    """SELECT COALESCE(json_group_array(year), '[]')
+                    FROM (SELECT DISTINCT CAST(SUBSTR(period_end, 1, 4) AS INTEGER) year
+                    FROM observation WHERE release_id = ? ORDER BY year)""",
+                    (release_id,),
+                ).fetchone()[0]
                 connection.execute(
-                    "INSERT INTO evidence_release_summary VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO evidence_release_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         release_id,
                         summary["observation_count"],
                         summary["total_value"],
                         mapping_counts,
                         flag_counts,
+                        geographies,
+                        measures,
+                        observation_years,
                     ),
                 )
             option_queries = {
@@ -824,7 +845,9 @@ class SQLiteEvidenceRepository:
                     release_id TEXT PRIMARY KEY REFERENCES source_release(release_id),
                     observation_count INTEGER NOT NULL, total_value TEXT NOT NULL,
                     mapping_status_counts TEXT NOT NULL,
-                    validation_flag_counts TEXT NOT NULL
+                    validation_flag_counts TEXT NOT NULL,
+                    geographies TEXT NOT NULL, measures TEXT NOT NULL,
+                    observation_years TEXT NOT NULL
                 );
                 CREATE TABLE planner_option (
                     option_kind TEXT NOT NULL, option_value TEXT NOT NULL,
@@ -841,6 +864,17 @@ class SQLiteEvidenceRepository:
                     release_id, geography, measure, mapping_status, period_end,
                     observation_id
                 );
+                CREATE INDEX observation_year_filter_idx
+                ON observation (
+                    period_end, release_id, geography, measure, mapping_status,
+                    observation_id
+                );
+                CREATE INDEX observation_registration_cohort_idx
+                ON observation (registration_cohort_year, observation_id);
+                CREATE INDEX observation_manufacture_year_idx
+                ON observation (manufacture_year, observation_id);
+                CREATE INDEX observation_model_year_idx
+                ON observation (model_year, observation_id);
                 CREATE INDEX canonical_vehicle_search_idx
                 ON canonical_vehicle (
                     make COLLATE NOCASE, model COLLATE NOCASE, model_year, market

@@ -159,23 +159,23 @@ Run focused Python and Vitest suites plus an `EXPLAIN QUERY PLAN` test that asse
 **Interfaces:**
 - Produces: source-catalog summaries from `evidence_release_summary` and bounded `EvidenceObservationPage` filters including observation year and year semantics.
 
-- [ ] **Step 1: Write failing catalog and year-semantics tests**
+- [x] **Step 1: Write failing catalog and year-semantics tests**
 
 Assert the default response explains each source's measure and coverage without scanning observations. Assert a 2024 stock observation with first-use 1914 renders observation year 2024, first-registration year 1914, and never the label `1914 registrations`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run evidence application/API/frontend tests and confirm the current raw-table-first behavior fails.
 
-- [ ] **Step 3: Implement bounded evidence queries**
+- [x] **Step 3: Implement bounded evidence queries**
 
 Read catalog metrics from the projection table. Add indexed filters and stable pagination for raw rows. Select only response columns and perform no unfiltered observation aggregate during a request.
 
-- [ ] **Step 4: Implement source-catalog UI**
+- [x] **Step 4: Implement source-catalog UI**
 
 Render plain-language source cards first. Put raw observations behind an explicit drill-down and spell out Observation year, First registration, Manufacture year, and Model year. Preserve vintage evidence and surface validation flags.
 
-- [ ] **Step 5: Verify Task 4 and commit**
+- [x] **Step 5: Verify Task 4 and commit**
 
 Run focused Python/Vitest tests and query-plan checks; commit with `feat: make source evidence understandable and bounded`.
 

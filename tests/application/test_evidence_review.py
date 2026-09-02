@@ -61,6 +61,7 @@ def _observation(
     value: int,
     *,
     status: MappingStatus = MappingStatus.UNRESOLVED,
+    registration_cohort_year: int | None = None,
 ) -> Observation:
     return Observation(
         observation_id=identifier,
@@ -91,6 +92,7 @@ def _observation(
         evidence_confidence=EvidenceConfidence(
             25, 10, 25, 0, 10, ("Official source; identity unresolved.",)
         ),
+        registration_cohort_year=registration_cohort_year,
     )
 
 
@@ -115,9 +117,11 @@ def candidate(tmp_path: Path) -> Path:
                 "(not reported)",
                 5,
                 status=MappingStatus.REJECTED,
+                registration_cohort_year=1914,
             ),
         )
     )
+    repository.rebuild_query_projections()
     manifest = SnapshotManifest(
         snapshot_id="snapshot-review",
         status=SnapshotStatus.CANDIDATE,
@@ -134,8 +138,20 @@ def candidate(tmp_path: Path) -> Path:
     return candidate_path
 
 
-def test_summary_reconciles_releases_and_mapping_statuses(candidate: Path) -> None:
-    summary = EvidenceReviewService.from_candidate(candidate).summary()
+def test_summary_reconciles_releases_without_scanning_observations(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = EvidenceReviewService.from_candidate(candidate)
+    statements: list[str] = []
+    connect = service._connect
+
+    def traced_connection():  # type: ignore[no-untyped-def]
+        connection = connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(service, "_connect", traced_connection)
+    summary = service.summary()
 
     assert summary.snapshot_id == "snapshot-review"
     assert summary.observation_count == 3
@@ -147,6 +163,9 @@ def test_summary_reconciles_releases_and_mapping_statuses(candidate: Path) -> No
         ("eea-final", 2, Decimal("15")),
     ]
     assert summary.mapping_status_counts == {"rejected": 1, "unresolved": 2}
+    assert summary.releases[0].what_it_proves
+    assert summary.releases[0].limitations
+    assert not any(" observation " in f" {statement.casefold()} " for statement in statements)
 
 
 def test_observations_filter_and_paginate_deterministically(candidate: Path) -> None:
@@ -162,6 +181,39 @@ def test_observations_filter_and_paginate_deterministically(candidate: Path) -> 
     assert page.items[0].original_make == "Volkswagen"
     assert page.items[0].mapping_status == "unresolved"
     assert page.items[0].confidence_total == 70
+    assert page.items[0].observation_year == 2024
+
+
+def test_vintage_stock_keeps_observation_and_first_registration_years_distinct(
+    candidate: Path,
+) -> None:
+    page = EvidenceReviewService.from_candidate(candidate).list_observations(
+        EvidenceObservationQuery(
+            observation_year=2024,
+            year_semantics="registration_cohort_year",
+            page_size=10,
+        )
+    )
+
+    vintage = next(row for row in page.items if row.observation_id == "obs-dft-other")
+    assert vintage.observation_year == 2024
+    assert vintage.registration_cohort_year == 1914
+    assert vintage.manufacture_year is None
+    assert vintage.model_year is None
+
+
+def test_observation_year_filter_uses_the_bounded_evidence_index(candidate: Path) -> None:
+    service = EvidenceReviewService.from_candidate(candidate)
+    with service._connect() as connection:
+        plan = connection.execute(
+            """EXPLAIN QUERY PLAN SELECT observation_id FROM observation
+            WHERE period_end BETWEEN ? AND ?
+            ORDER BY release_id, geography, original_make, original_model,
+            period_end, observation_id LIMIT 25""",
+            ("2024-01-01", "2024-12-31"),
+        ).fetchall()
+
+    assert any("observation_year_filter_idx" in row["detail"] for row in plan)
 
 
 @pytest.mark.parametrize(

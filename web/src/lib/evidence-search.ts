@@ -8,6 +8,9 @@ const MAPPING_STATUSES = [
   'exact_identifier', 'curated_alias', 'normalized_label', 'reviewed_probable',
   'ambiguous', 'rejected', 'unresolved',
 ] as const
+const YEAR_SEMANTICS = [
+  'observation_year', 'registration_cohort_year', 'manufacture_year', 'model_year',
+] as const
 
 function bounded(value: unknown, maximum: number): string | undefined {
   return typeof value === 'string' && value.length > 0 && value.length <= maximum
@@ -26,6 +29,14 @@ export function parseEvidenceSearch(raw: Record<string, unknown>): EvidenceSearc
     raw.mappingStatus as (typeof MAPPING_STATUSES)[number],
   ) ? raw.mappingStatus as EvidenceSearch['mappingStatus'] : undefined
   const parsedPage = Number(raw.page)
+  const parsedObservationYear = Number(raw.observationYear)
+  const observationYear = Number.isInteger(parsedObservationYear) &&
+    parsedObservationYear >= 1900 && parsedObservationYear <= 2200
+    ? parsedObservationYear
+    : undefined
+  const yearSemantics = YEAR_SEMANTICS.includes(
+    raw.yearSemantics as (typeof YEAR_SEMANTICS)[number],
+  ) ? raw.yearSemantics as EvidenceSearch['yearSemantics'] : undefined
   const page = Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1
   return {
     ...(releaseId && { releaseId }),
@@ -33,6 +44,8 @@ export function parseEvidenceSearch(raw: Record<string, unknown>): EvidenceSearc
     ...(measure && { measure }),
     ...(mappingStatus && { mappingStatus }),
     ...(search && { search }),
+    ...(observationYear && { observationYear }),
+    ...(yearSemantics && { yearSemantics }),
     page,
   }
 }

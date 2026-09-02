@@ -327,6 +327,17 @@
             "title": "Geography",
             "type": "string"
           },
+          "manufacture_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manufacture Year"
+          },
           "mapping_status": {
             "title": "Mapping Status",
             "type": "string"
@@ -335,9 +346,24 @@
             "title": "Measure",
             "type": "string"
           },
+          "model_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Year"
+          },
           "observation_id": {
             "title": "Observation Id",
             "type": "string"
+          },
+          "observation_year": {
+            "title": "Observation Year",
+            "type": "integer"
           },
           "original_make": {
             "title": "Original Make",
@@ -391,6 +417,17 @@
             "title": "Publication Status",
             "type": "string"
           },
+          "registration_cohort_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registration Cohort Year"
+          },
           "release_id": {
             "title": "Release Id",
             "type": "string"
@@ -439,7 +476,11 @@
           "transformation_notes",
           "validation_flags",
           "confidence_total",
-          "confidence_reasons"
+          "confidence_reasons",
+          "observation_year",
+          "registration_cohort_year",
+          "manufacture_year",
+          "model_year"
         ],
         "title": "EvidenceObservationResponse",
         "type": "object"
@@ -469,6 +510,11 @@
             "title": "Geography",
             "type": "string"
           },
+          "limitations": {
+            "default": "",
+            "title": "Limitations",
+            "type": "string"
+          },
           "measure": {
             "title": "Measure",
             "type": "string"
@@ -476,6 +522,11 @@
           "observation_count": {
             "title": "Observation Count",
             "type": "integer"
+          },
+          "publication_status": {
+            "default": "final",
+            "title": "Publication Status",
+            "type": "string"
           },
           "published_at": {
             "format": "date-time",
@@ -517,6 +568,16 @@
           "total_value": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Total Value",
+            "type": "string"
+          },
+          "validation_warning_count": {
+            "default": 0,
+            "title": "Validation Warning Count",
+            "type": "integer"
+          },
+          "what_it_proves": {
+            "default": "",
+            "title": "What It Proves",
             "type": "string"
           }
         },
@@ -2240,6 +2301,46 @@
                 }
               ],
               "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "observation_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2200,
+                  "minimum": 1900,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Year"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year_semantics",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "observation_year",
+                    "registration_cohort_year",
+                    "manufacture_year",
+                    "model_year"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year Semantics"
             }
           },
           {
