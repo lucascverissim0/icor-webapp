@@ -20,6 +20,7 @@ from icor.preview.bootstrap import (
 
 EXPECTED_SOURCE_KEYS = (
     *(f"eea-{year}-final" for year in range(2010, 2025)),
+    "eea-2025-provisional",
     "kba-fz10-2024",
     "uk-veh0160-gb",
     "uk-veh0120-gb",
@@ -28,12 +29,12 @@ EXPECTED_SOURCE_KEYS = (
 )
 
 
-def test_default_plan_has_exactly_the_approved_twenty_releases() -> None:
+def test_default_plan_has_exactly_the_approved_twenty_one_releases() -> None:
     plan = default_plan()
 
     assert tuple(source.source_key for source in plan.sources) == EXPECTED_SOURCE_KEYS
-    assert len(plan.release_ids) == 20
-    assert len(set(plan.release_ids)) == 20
+    assert len(plan.release_ids) == 21
+    assert len(set(plan.release_ids)) == 21
     assert plan.release_ids[0] == "eea-co2cars-2010-final-v2-r1"
     assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20260713"
     assert plan.build_as_of == BUILD_AS_OF == "2026-08-27T12:00:00+00:00"
@@ -276,6 +277,7 @@ def test_all_historical_sources_use_the_reviewed_adapter(tmp_path: Path) -> None
         for source in plan.sources
         if source.source_key != "eea-2024-final"
         and source.source_key.startswith("eea-")
+        and source.source_key.endswith("-final")
     }
     runner = RecordingRunner()
     coordinator = BootstrapCoordinator(
@@ -297,6 +299,30 @@ def test_all_historical_sources_use_the_reviewed_adapter(tmp_path: Path) -> None
     ]
     assert all("acquire_eea_history.py" in command[1] for command in adapter_commands)
     assert all("--artifact" in command for command in runner.commands[1::2])
+
+
+def test_2025_provisional_uses_its_bounded_aggregate_adapter(tmp_path: Path) -> None:
+    plan = default_plan()
+    release_id = next(
+        source.release_id
+        for source in plan.sources
+        if source.source_key == "eea-2025-provisional"
+    )
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=tmp_path,
+        evidence_root=tmp_path / "evidence",
+        runner=runner,
+        release_is_valid=lambda value: value != release_id,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+
+    coordinator.acquire(plan)
+
+    assert "acquire_eea_2025_provisional.py" in runner.commands[0][1]
+    assert "--year" not in runner.commands[0]
 
 def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) -> None:
     runner = RecordingRunner()
@@ -323,7 +349,7 @@ def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) 
     promote_index = next(index for index, value in enumerate(joined) if " promote " in f" {value} ")
     assert build_index < report_index < promote_index
     build = runner.commands[build_index]
-    assert build.count("--release") == 20
+    assert build.count("--release") == 21
     assert build[build.index("--build-as-of") + 1] == BUILD_AS_OF
     assert build[build.index("--deterministic-seed") + 1] == str(DETERMINISTIC_SEED)
     assert runner.commands[-2:] == [("npm", "ci"), ("npm", "run", "build")]
@@ -416,7 +442,7 @@ def test_prepare_reuses_exact_active_snapshot_below_build_capacity(
 
     assert bootstrap_script.main() == 0
     assert json.loads(capsys.readouterr().out) == {
-        "release_count": 20,
+            "release_count": 21,
         "reused": True,
         "snapshot_id": "snapshot-active",
         "start_command": "python scripts/run_codespaces_preview.py",

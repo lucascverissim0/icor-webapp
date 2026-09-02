@@ -9,6 +9,7 @@ from icor.evidence.acquisition import OFFICIAL_SOURCES, build_manifest, validate
 def test_catalog_contains_only_reviewed_https_sources():
     expected = {
         "eea-2024-final",
+        "eea-2025-provisional",
         "kba-fz10-2024",
         "uk-veh0160-gb",
         "uk-veh0120-gb",
@@ -53,6 +54,16 @@ def test_eea_2024_uses_verified_versioned_blob_without_revising_release() -> Non
     assert source.artifact_bytes == 138_252_239
     assert source.sha256 == ("122dab33e931ea04d3ddb4bb2691dae85dc0da14428fc17873d3fb1f648b7b67")
     validate_source_url(source, source.url)
+
+
+def test_eea_2025_uses_replay_verified_provisional_aggregate() -> None:
+    source = OFFICIAL_SOURCES["eea-2025-provisional"]
+
+    assert source.publication_status.value == "provisional"
+    assert source.release_id == "eea-co2cars-2025-provisional-v31-r1"
+    assert source.raw_count == 10_833_597
+    assert source.artifact_bytes == 1_237_363
+    assert source.sha256 == "46f4cbb5408d48797269b783bbb560968b2bb98c54569240df1734b21fcf0eea"
 
 
 def test_source_url_rejects_changed_host_or_path():

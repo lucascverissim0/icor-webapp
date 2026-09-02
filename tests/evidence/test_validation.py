@@ -575,6 +575,41 @@ def test_snapshot_clean_report_can_promote(
     assert report.can_promote is True
 
 
+def test_snapshot_rejects_impossible_future_observation_year(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    _corrupt(
+        repository,
+        "UPDATE observation SET period_start = ?, period_end = ? WHERE observation_id = ?",
+        ("2027-01-01", "2027-12-31", "observation-eea-eu-2024-1"),
+    )
+
+    report = SnapshotValidator().validate(repository, _snapshot(repository))
+
+    assert "snapshot.observation_year_future" in {
+        finding.code for finding in report.findings
+    }
+
+
+def test_snapshot_allows_historic_vintage_when_observation_semantics_are_explicit(
+    repository: SQLiteEvidenceRepository,
+    evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],
+) -> None:
+    _seed(repository, evidence_records)
+    _corrupt(
+        repository,
+        "UPDATE observation SET measure = 'active_fleet', registration_cohort_year = ?, "
+        "manufacture_year = ?, model_year = NULL WHERE observation_id = ?",
+        (1914, 1914, "observation-eea-eu-2024-1"),
+    )
+
+    report = SnapshotValidator().validate(repository, _snapshot(repository))
+
+    assert not any("year" in finding.code for finding in report.findings)
+
+
 def test_generation_enabled_snapshot_requires_one_assignment_per_usable_observation(
     repository: SQLiteEvidenceRepository,
     evidence_records: tuple[ReleaseManifest, CanonicalVehicle, Observation, PublishedValue],

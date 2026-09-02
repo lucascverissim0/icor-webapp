@@ -259,23 +259,23 @@ Run focused tests and production-sized timing; commit with `perf: rank opportuni
 **Interfaces:**
 - Adds pinned EEA 2025 provisional release and validation checks for year relationships, status leakage, overlaps, and count drift.
 
-- [ ] **Step 1: Write failing source and validation tests**
+- [x] **Step 1: Write failing source and validation tests**
 
 Assert 2025 provisional records retain provisional status, are superseded by a final release when present, and never enter final-only queries. Assert impossible future years fail while plausible 1914 vintage stock remains valid with explicit semantics.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run focused EEA acquisition/source/validation tests.
 
-- [ ] **Step 3: Pin and ingest EEA 2025 provisional**
+- [x] **Step 3: Pin and ingest EEA 2025 provisional**
 
 Add the official manifest URL, publication timestamp, checksum, coverage, status, and table mapping. Keep the artifact immutable and fail closed on checksum/schema drift.
 
-- [ ] **Step 4: Implement quality gates**
+- [x] **Step 4: Implement quality gates**
 
 Validate year relationships, source overlap/dependency groups, observed-versus-estimated separation, generic/missing labels, and accepted/rejected/quarantined count drift. Emit inspectable audit results into the snapshot.
 
-- [ ] **Step 5: Verify Task 7 and commit**
+- [x] **Step 5: Verify Task 7 and commit**
 
 Run focused and clean-room integration tests; commit with `feat: add latest provisional evidence and quality gates`.
 

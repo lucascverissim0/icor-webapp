@@ -43,7 +43,6 @@ ANNUAL_AGGREGATE_SCHEMA = (
     "Registrations",
     "SourceRows",
 )
-EXPECTED_MEMBER = "co2cars_2024fv30.csv"
 EXPECTED_SCHEMA = (
     "ID",
     "MS",
@@ -95,7 +94,7 @@ _OBSERVATION_BATCH_SIZE = 2_000
 
 
 class EEAAnnualAggregateLoader:
-    """Load deterministic official SQL aggregates for one finalized EEA year."""
+    """Load deterministic official SQL/viewer aggregates for one EEA year."""
 
     def load(
         self,
@@ -111,21 +110,27 @@ class EEAAnnualAggregateLoader:
         repository: SQLiteEvidenceRepository,
     ) -> None:
         manifest = release.manifest
-        match = fullmatch(r"eea-co2cars-(20\d{2})-final-(v\d+)(?:-r1)?", manifest.release_id)
+        match = fullmatch(
+            r"eea-co2cars-(20\d{2})-(final|provisional)-(v\d+)(?:-r1)?",
+            manifest.release_id,
+        )
         if match is None:
             raise ValueError("EEA annual aggregate release ID is unsupported")
-        year, version = int(match.group(1)), match.group(2)
+        year, status_name, version = int(match.group(1)), match.group(2), match.group(3)
+        publication_status = PublicationStatus(status_name)
         if manifest.parser_name != ANNUAL_AGGREGATE_PARSER_NAME:
             raise ValueError("EEA annual aggregate parser name is unsupported")
-        if manifest.publication_status is not PublicationStatus.FINAL:
-            raise ValueError("EEA annual aggregate release must have final status")
+        if manifest.publication_status is not publication_status:
+            raise ValueError("EEA annual aggregate release status is inconsistent")
         if manifest.coverage_start != date(year, 1, 1) or manifest.coverage_end != date(
             year, 12, 31
         ):
             raise ValueError("EEA annual aggregate must cover its release calendar year")
 
         raw_count = accepted_count = rejected_count = 0
-        for _, source_rows, _, key in self._validated_rows(release.artifact_path, year, version):
+        for _, source_rows, _, key in self._validated_rows(
+            release.artifact_path, year, version, publication_status
+        ):
             raw_count += source_rows
             if any(normalize_vehicle_label(value) is None for value in key[:3]):
                 rejected_count += source_rows
@@ -142,11 +147,14 @@ class EEAAnnualAggregateLoader:
 
         with tempfile.TemporaryDirectory(prefix="eea-annual-model-") as temporary:
             aggregate_path = Path(temporary) / "aggregate.sqlite3"
-            self._aggregate_models(release.artifact_path, year, version, aggregate_path)
+            self._aggregate_models(
+                release.artifact_path, year, version, publication_status, aggregate_path
+            )
             self._write_annual_observations(release, year, aggregate_path, repository)
 
     def _aggregate_models(
-        self, artifact_path: Path, year: int, version: str, database_path: Path
+        self, artifact_path: Path, year: int, version: str,
+        publication_status: PublicationStatus, database_path: Path
     ) -> None:
         with closing(sqlite3.connect(database_path)) as connection:
             connection.execute(
@@ -165,7 +173,7 @@ class EEAAnnualAggregateLoader:
             registrations = registrations + excluded.registrations"""
             batch: list[tuple[object, ...]] = []
             for group_number, source_rows, registrations, key in self._validated_rows(
-                artifact_path, year, version
+                artifact_path, year, version, publication_status
             ):
                 if any(normalize_vehicle_label(value) is None for value in key[:3]):
                     continue
@@ -223,7 +231,7 @@ class EEAAnnualAggregateLoader:
                         measure=Measure.NEW_REGISTRATIONS,
                         value=Decimal(row["registrations"]),
                         unit="vehicles",
-                        publication_status=PublicationStatus.FINAL,
+                        publication_status=release.manifest.publication_status,
                         original_make=make,
                         original_model=model,
                         original_model_year=None,
@@ -238,14 +246,16 @@ class EEAAnnualAggregateLoader:
                         canonical_vehicle_id=None,
                         mapping_status=MappingStatus.UNRESOLVED,
                         transformation_notes=(
-                            "Canonical aggregate exported from the official EEA Discodata SQL API.",
+                            "Canonical aggregate exported from the official EEA data API.",
                             f"Contributing source rows: {row['source_rows']}.",
                             f"Contributing technical-key groups: {row['technical_groups']}.",
                             "Snapshot observation aggregated on Year, MS, Mk, and Cn; "
                             "the immutable artifact retains TAN, T, Va, Ve, and Ft detail.",
                         ),
                         validation_flags=(),
-                        evidence_confidence=_unresolved_confidence(),
+                        evidence_confidence=_unresolved_confidence(
+                            release.manifest.publication_status
+                        ),
                         registration_cohort_year=year,
                         manufacture_year=None,
                         model_year=None,
@@ -258,14 +268,18 @@ class EEAAnnualAggregateLoader:
             repository.add_observations(batch)
 
     def _validated_rows(
-        self, artifact_path: Path, year: int, version: str
+        self, artifact_path: Path, year: int, version: str,
+        publication_status: PublicationStatus
     ) -> Iterator[tuple[int, int, int, tuple[str, ...]]]:
         with artifact_path.open(encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream, delimiter=";")
             if tuple(reader.fieldnames or ()) != ANNUAL_AGGREGATE_SCHEMA:
                 raise ValueError("EEA annual aggregate CSV schema is unsupported")
             for group_number, row in enumerate(reader, start=1):
-                self._validate_annual_row(row, year=year, version=version)
+                self._validate_annual_row(
+                    row, year=year, version=version,
+                    publication_status=publication_status
+                )
                 source_rows = _parse_nonnegative_integer(row["SourceRows"], "source rows")
                 if source_rows == 0:
                     raise ValueError("EEA annual aggregate source rows must be positive")
@@ -277,10 +291,12 @@ class EEAAnnualAggregateLoader:
 
     @staticmethod
     def _validate_annual_row(
-        row: dict[str, str | None], *, year: int, version: str
+        row: dict[str, str | None], *, year: int, version: str,
+        publication_status: PublicationStatus
     ) -> None:
-        if row.get("Status") != "F":
-            raise ValueError("EEA annual aggregate row does not have final status")
+        expected = "F" if publication_status is PublicationStatus.FINAL else "P"
+        if row.get("Status") != expected:
+            raise ValueError("EEA annual aggregate row status is unexpected")
         if row.get("Year") != str(year):
             raise ValueError("EEA annual aggregate row is outside its release year")
         if row.get("Version_file") != version:
@@ -308,24 +324,41 @@ class EEAPassengerCarLoader:
         manifest = release.manifest
         if manifest.parser_name != PARSER_NAME:
             raise ValueError("EEA release parser name is unsupported")
-        if manifest.publication_status is not PublicationStatus.FINAL:
-            raise ValueError("EEA release must have final status")
-        if manifest.coverage_start != date(2024, 1, 1) or manifest.coverage_end != date(
-            2024, 12, 31
+        match = fullmatch(
+            r"eea-co2cars-(20\d{2})-(final|provisional)-(v\d+)(?:-r1)?",
+            manifest.release_id,
+        )
+        if match is None:
+            raise ValueError("EEA release ID is unsupported")
+        year, status_name, version = int(match.group(1)), match.group(2), match.group(3)
+        publication_status = PublicationStatus(status_name)
+        if manifest.publication_status is not publication_status:
+            raise ValueError("EEA release publication status is inconsistent")
+        if manifest.coverage_start != date(year, 1, 1) or manifest.coverage_end != date(
+            year, 12, 31
         ):
-            raise ValueError("EEA release must cover calendar year 2024")
+            raise ValueError(f"EEA release must cover calendar year {year}")
+        marker = "f" if publication_status is PublicationStatus.FINAL else "p"
+        expected_member = f"co2cars_{year}{marker}{version}.csv"
 
         try:
             with ZipFile(release.artifact_path) as archive:
                 members = archive.infolist()
-                if len(members) != 1 or members[0].filename.casefold() != EXPECTED_MEMBER:
+                if len(members) != 1 or members[0].filename.casefold() != expected_member:
                     raise ValueError("EEA archive member is unexpected")
                 member = members[0]
                 if member.is_dir() or member.flag_bits & 0x1:
                     raise ValueError("EEA archive member is unsupported")
                 with tempfile.TemporaryDirectory(prefix="eea-aggregate-") as temporary:
                     aggregate_path = Path(temporary) / "aggregate.sqlite3"
-                    counts = self._aggregate(archive, member.filename, aggregate_path)
+                    counts = self._aggregate(
+                        archive,
+                        member.filename,
+                        aggregate_path,
+                        year=year,
+                        publication_status=publication_status,
+                        version=version,
+                    )
                     if (*counts, 0) != (
                         manifest.raw_record_count,
                         manifest.accepted_record_count,
@@ -333,12 +366,21 @@ class EEAPassengerCarLoader:
                         manifest.quarantined_record_count,
                     ):
                         raise ValueError("EEA parser counts do not match manifest")
-                    self._write_observations(release, aggregate_path, repository)
+                    self._write_observations(
+                        release, aggregate_path, repository, year=year
+                    )
         except BadZipFile as error:
             raise ValueError("EEA artifact is not a valid ZIP archive") from error
 
     def _aggregate(
-        self, archive: ZipFile, member: str, database_path: Path
+        self,
+        archive: ZipFile,
+        member: str,
+        database_path: Path,
+        *,
+        year: int,
+        publication_status: PublicationStatus,
+        version: str,
     ) -> tuple[int, int, int]:
         with closing(sqlite3.connect(database_path)) as connection:
             connection.execute(
@@ -368,7 +410,12 @@ class EEAPassengerCarLoader:
                     raise ValueError("EEA CSV schema is unsupported")
                 for row_number, row in enumerate(reader, start=2):
                     raw_count += 1
-                    self._validate_row(row)
+                    self._validate_row(
+                        row,
+                        year=year,
+                        publication_status=publication_status,
+                        version=version,
+                    )
                     key = tuple((row[column] or "").strip() for column in _GROUP_COLUMNS)
                     if any(normalize_vehicle_label(value) is None for value in key[:3]):
                         rejected_count += 1
@@ -384,13 +431,20 @@ class EEAPassengerCarLoader:
             return raw_count, accepted_count, rejected_count
 
     @staticmethod
-    def _validate_row(row: dict[str, str | None]) -> None:
-        if row.get("Status") != "F":
-            raise ValueError("EEA row does not have final status")
-        if row.get("Year") != "2024":
-            raise ValueError("EEA row is outside 2024")
-        if row.get("Version_file") != "v30":
-            raise ValueError("EEA row version is not v30")
+    def _validate_row(
+        row: dict[str, str | None],
+        *,
+        year: int,
+        publication_status: PublicationStatus,
+        version: str,
+    ) -> None:
+        expected_status = "F" if publication_status is PublicationStatus.FINAL else "P"
+        if row.get("Status") != expected_status:
+            raise ValueError(f"EEA row does not have {publication_status.value} status")
+        if row.get("Year") != str(year):
+            raise ValueError(f"EEA row is outside {year}")
+        if row.get("Version_file") != version:
+            raise ValueError(f"EEA row version is not {version}")
         if row.get("R") != "1":
             raise ValueError("EEA registration weight must equal one")
 
@@ -399,6 +453,8 @@ class EEAPassengerCarLoader:
         release: StoredRelease,
         database_path: Path,
         repository: SQLiteEvidenceRepository,
+        *,
+        year: int,
     ) -> None:
         batch: list[Observation] = []
         with closing(sqlite3.connect(database_path)) as connection:
@@ -433,13 +489,13 @@ class EEAPassengerCarLoader:
                         ),
                         geography=country,
                         geography_version=release.manifest.geography_version,
-                        period_start=date(2024, 1, 1),
-                        period_end=date(2024, 12, 31),
+                        period_start=date(year, 1, 1),
+                        period_end=date(year, 12, 31),
                         period_precision=PeriodPrecision.YEAR,
                         measure=Measure.NEW_REGISTRATIONS,
                         value=Decimal(int(row["registrations"])),
                         unit="vehicles",
-                        publication_status=PublicationStatus.FINAL,
+                        publication_status=release.manifest.publication_status,
                         original_make=make,
                         original_model=model,
                         original_model_year=None,
@@ -454,13 +510,16 @@ class EEAPassengerCarLoader:
                         canonical_vehicle_id=None,
                         mapping_status=MappingStatus.UNRESOLVED,
                         transformation_notes=(
-                            "Aggregated finalized registration rows on MS, Mk, Cn, "
+                            f"Aggregated {release.manifest.publication_status.value} "
+                            "registration rows on MS, Mk, Cn, "
                             "TAN, T, Va, Ve, and Ft.",
                             f"Contributing raw rows: {row['registrations']}.",
                         ),
                         validation_flags=(),
-                        evidence_confidence=_unresolved_confidence(),
-                        registration_cohort_year=2024,
+                        evidence_confidence=_unresolved_confidence(
+                            release.manifest.publication_status
+                        ),
+                        registration_cohort_year=year,
                         manufacture_year=None,
                         model_year=None,
                     )
@@ -472,15 +531,18 @@ class EEAPassengerCarLoader:
             repository.add_observations(batch)
 
 
-def _unresolved_confidence() -> EvidenceConfidence:
+def _unresolved_confidence(
+    publication_status: PublicationStatus = PublicationStatus.FINAL,
+) -> EvidenceConfidence:
     return EvidenceConfidence(
         authority=25,
-        publication_status=10,
+        publication_status=(10 if publication_status is PublicationStatus.FINAL else 5),
         coverage=25,
         identity=0,
         independent_agreement=10,
         reasons=(
-            "Official finalized EEA/DG CLIMA administrative registration evidence.",
+            f"Official {publication_status.value} EEA/DG CLIMA administrative "
+            "registration evidence.",
             "Canonical model-year identity is unresolved; excluded from model-level publication.",
             "Agreement component is neutral until dependency-aware overlap is evaluated.",
         ),

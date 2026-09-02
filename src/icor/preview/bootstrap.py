@@ -22,6 +22,7 @@ MINIMUM_FREE_BYTES = 20 * 1024**3
 REQUIRED_UV_VERSION = "0.11.3"
 SOURCE_KEYS = (
     *(f"eea-{year}-final" for year in range(2010, 2025)),
+    "eea-2025-provisional",
     "kba-fz10-2024",
     "uk-veh0160-gb",
     "uk-veh0120-gb",
@@ -166,15 +167,17 @@ class BootstrapCoordinator:
                     downloads_root
                     / f"{source.source_key}{official.suffix}"
                 )
+                script = (
+                    "acquire_eea_2025_provisional.py"
+                    if source.source_key == "eea-2025-provisional"
+                    else "acquire_eea_history.py"
+                )
+                year_args = () if source.source_key == "eea-2025-provisional" else (
+                    "--year", str(official.coverage_start.year)
+                )
                 self._checked(
-                    (
-                        *self.python_command,
-                        str(self.repository_root / "scripts" / "acquire_eea_history.py"),
-                        "--destination",
-                        str(artifact),
-                        "--year",
-                        str(official.coverage_start.year),
-                    ),
+                    (*self.python_command, str(self.repository_root / "scripts" / script),
+                     "--destination", str(artifact), *year_args),
                     label="official EEA history acquisition",
                 )
             artifact_args = () if artifact is None else ("--artifact", str(artifact))

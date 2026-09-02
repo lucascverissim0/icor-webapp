@@ -175,6 +175,7 @@ def _database_findings(
     manifest: SnapshotManifest,
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
+    findings.extend(_evidence_quality_findings(connection, manifest))
     for row in connection.execute(
         """SELECT published_value.value_id
         FROM published_value
@@ -303,6 +304,77 @@ def _database_findings(
         )
     if not manifest.versions.generation_registry.endswith("-v0"):
         findings.extend(_generation_planning_findings(connection, manifest))
+    return findings
+
+
+def _evidence_quality_findings(
+    connection: sqlite3.Connection, manifest: SnapshotManifest
+) -> list[ValidationFinding]:
+    """Audit temporal semantics and source bookkeeping without rewriting evidence."""
+
+    findings: list[ValidationFinding] = []
+    latest_date = date(manifest.built_at.year, 12, 31).isoformat()
+    for row in connection.execute(
+        """SELECT observation_id FROM observation
+        WHERE period_start > ? OR period_end > ?
+        ORDER BY observation_id LIMIT 100""",
+        (latest_date, latest_date),
+    ):
+        findings.append(
+            _error(
+                "snapshot.observation_year_future",
+                "Observation period is later than the snapshot build year.",
+                row["observation_id"],
+            )
+        )
+    for row in connection.execute(
+        """SELECT observation_id FROM observation
+        WHERE (registration_cohort_year IS NOT NULL
+            AND registration_cohort_year > CAST(SUBSTR(period_end, 1, 4) AS INTEGER))
+        OR (manufacture_year IS NOT NULL
+            AND manufacture_year > CAST(SUBSTR(period_end, 1, 4) AS INTEGER))
+        OR (model_year IS NOT NULL
+            AND model_year > CAST(SUBSTR(period_end, 1, 4) AS INTEGER) + 1)
+        ORDER BY observation_id LIMIT 100"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.year_relationship_invalid",
+                "Evidence year semantics contradict the observation period.",
+                row["observation_id"],
+            )
+        )
+    for row in connection.execute(
+        """SELECT release_id FROM source_release
+        WHERE raw_record_count != accepted_record_count
+            + rejected_record_count + quarantined_record_count
+        ORDER BY release_id LIMIT 100"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.release_count_drift",
+                "Stored release record counts no longer reconcile.",
+                row["release_id"],
+            )
+        )
+    generic_labels = ("unknown", "other", "not specified", "n/a")
+    placeholders = ", ".join("?" for _ in generic_labels)
+    for row in connection.execute(
+        f"""SELECT observation_id FROM observation
+        WHERE normalized_make IS NULL OR normalized_model IS NULL
+        OR LOWER(TRIM(normalized_make)) IN ({placeholders})
+        OR LOWER(TRIM(normalized_model)) IN ({placeholders})
+        ORDER BY observation_id LIMIT 100""",
+        (*generic_labels, *generic_labels),
+    ):
+        findings.append(
+            ValidationFinding(
+                code="snapshot.generic_vehicle_label",
+                severity=Severity.WARNING,
+                message="Observation has a missing or generic vehicle label.",
+                record_id=_safe_record_id(row["observation_id"]),
+            )
+        )
     return findings
 
 

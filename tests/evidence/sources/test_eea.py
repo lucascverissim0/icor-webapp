@@ -87,8 +87,16 @@ def _row(*, identifier: str, country: str, make: str, model: str, variant: str) 
     return row
 
 
-def _stored_release(tmp_path: Path, rows: list[dict[str, str]]) -> StoredRelease:
-    csv_path = tmp_path / "co2cars_2024fv30.csv"
+def _stored_release(
+    tmp_path: Path,
+    rows: list[dict[str, str]],
+    *,
+    year: int = 2024,
+    status: PublicationStatus = PublicationStatus.FINAL,
+    version: str = "v30",
+) -> StoredRelease:
+    marker = "f" if status is PublicationStatus.FINAL else "p"
+    csv_path = tmp_path / f"co2cars_{year}{marker}{version}.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, HEADERS, delimiter=";", lineterminator="\n")
         writer.writeheader()
@@ -97,19 +105,19 @@ def _stored_release(tmp_path: Path, rows: list[dict[str, str]]) -> StoredRelease
     with ZipFile(artifact, "w", ZIP_DEFLATED) as archive:
         archive.write(csv_path, csv_path.name)
     manifest = ReleaseManifest(
-        release_id="eea-co2cars-2024-final-v30",
+        release_id=f"eea-co2cars-{year}-{status.value}-{version}",
         source_id="eea-co2cars",
         publisher="European Environment Agency / DG CLIMA",
         source_url="https://discodata.eea.europa.eu/download/CO2Emission/latest/co2cars_2024Fv30",
         retrieved_at=datetime(2026, 8, 27, tzinfo=UTC),
         published_at=datetime(2025, 10, 31, tzinfo=UTC),
-        coverage_start=date(2024, 1, 1),
-        coverage_end=date(2024, 12, 31),
+        coverage_start=date(year, 1, 1),
+        coverage_end=date(year, 12, 31),
         geography="EEA reporting countries",
         geography_version="eea-2024-v1",
         measure=Measure.NEW_REGISTRATIONS,
         unit="vehicles",
-        publication_status=PublicationStatus.FINAL,
+        publication_status=status,
         dependency_group="national-registration-authorities-2024",
         terms_url="https://creativecommons.org/licenses/by/4.0/",
         permitted_local_use="CC BY 4.0 with DG CLIMA attribution",
@@ -158,6 +166,27 @@ def test_loader_aggregates_only_identical_documented_vehicle_keys(tmp_path: Path
     assert all(row.canonical_vehicle_id is None for row in observations)
     assert all(row.normalized_model_year is None for row in observations)
     assert {row.registration_cohort_year for row in observations} == {2024}
+
+
+def test_loader_preserves_2025_provisional_status(tmp_path: Path) -> None:
+    row = _row(identifier="1", country="DE", make="VW", model="GOLF", variant="A")
+    row.update(Year="2025", Status="P", Version_file="v31")
+    release = _stored_release(
+        tmp_path,
+        [row],
+        year=2025,
+        status=PublicationStatus.PROVISIONAL,
+        version="v31",
+    )
+    repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
+    repository.add_release(release.manifest)
+
+    EEAPassengerCarLoader().load((release,), repository)
+
+    observation = repository.list_observations()[0]
+    assert observation.publication_status is PublicationStatus.PROVISIONAL
+    assert observation.period_start == date(2025, 1, 1)
+    assert observation.registration_cohort_year == 2025
 
 
 def test_loader_rejects_unidentifiable_rows_and_reconciles_manifest(tmp_path: Path) -> None:

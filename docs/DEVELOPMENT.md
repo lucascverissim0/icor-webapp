@@ -299,7 +299,7 @@ uv run python scripts/run_codespaces_preview.py --check
 uv run python scripts/run_codespaces_preview.py
 ```
 
-The idempotent prepare command acquires the exact 20 pinned official releases into
+The idempotent prepare command acquires the exact 21 pinned official releases into
 `/workspaces/.icor/evidence/releases`, builds with timestamp
 `2026-08-27T12:00:00+00:00` and seed `20260827`, runs completeness before atomic
 promotion, and compiles `web/dist`. A restart verifies and reuses valid releases and

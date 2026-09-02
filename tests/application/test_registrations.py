@@ -40,6 +40,7 @@ def _release(
     geography: str,
     count: int,
     year: int = 2024,
+    status: PublicationStatus = PublicationStatus.FINAL,
 ) -> ReleaseManifest:
     return ReleaseManifest(
         release_id=release_id,
@@ -54,7 +55,7 @@ def _release(
         geography_version="official-2024-v1",
         measure=Measure.NEW_REGISTRATIONS,
         unit="vehicles",
-        publication_status=PublicationStatus.FINAL,
+        publication_status=status,
         dependency_group="national-registers",
         terms_url="https://example.test/terms",
         permitted_local_use="Attribution required.",
@@ -79,6 +80,7 @@ def _observation(
     model: str,
     value: str,
     year: int = 2024,
+    status: PublicationStatus = PublicationStatus.FINAL,
 ) -> Observation:
     return Observation(
         observation_id=observation_id,
@@ -92,7 +94,7 @@ def _observation(
         measure=Measure.NEW_REGISTRATIONS,
         value=Decimal(value),
         unit="vehicles",
-        publication_status=PublicationStatus.FINAL,
+        publication_status=status,
         original_make=make,
         original_model=model,
         original_model_year=None,
@@ -136,9 +138,18 @@ def mapped_candidate(tmp_path: Path) -> Path:
         "uk-dft-veh0160-2025-final-v1", "uk-dft-veh0160",
         "uk_dft_veh0160_csv_v1", "GB", 1, year=2025,
     )
+    provisional = _release(
+        "eea-co2cars-2024-provisional-v29",
+        "eea-co2-monitoring",
+        "eea_co2_cars_zip_v1",
+        "EEA reporting countries",
+        1,
+        status=PublicationStatus.PROVISIONAL,
+    )
     repository.add_release(eea)
     repository.add_release(kba)
     repository.add_release(dft)
+    repository.add_release(provisional)
     attributing = IdentityAttributingRepository(
         repository,
         ExactNormalizedIdentityResolver(),
@@ -159,6 +170,15 @@ def mapped_candidate(tmp_path: Path) -> Path:
                 "obs-dft-gb-alpha", dft.release_id, "GB", "Example Motors", "Alpha", "7",
                 year=2025,
             ),
+            _observation(
+                "obs-eea-de-alpha-provisional",
+                provisional.release_id,
+                "DE",
+                "Example Motors",
+                "Alpha",
+                "777",
+                status=PublicationStatus.PROVISIONAL,
+            ),
         )
     )
     repository.rebuild_query_projections()
@@ -171,7 +191,9 @@ def mapped_candidate(tmp_path: Path) -> Path:
         status=SnapshotStatus.CANDIDATE,
         built_at=BUILD_AS_OF,
         deterministic_seed=20260827,
-        release_ids=tuple(sorted((eea.release_id, kba.release_id, dft.release_id))),
+        release_ids=tuple(
+            sorted((eea.release_id, kba.release_id, dft.release_id, provisional.release_id))
+        ),
         versions=SnapshotVersions(
             source_registry="official-sources-v1",
             identity_registry="exact-normalized-model-family-v1",
@@ -183,7 +205,7 @@ def mapped_candidate(tmp_path: Path) -> Path:
             forecast_method="not-applied-v1",
         ),
         database_sha256=sha256_file(database),
-        observation_count=6,
+        observation_count=7,
         published_value_count=0,
         warnings=(),
     )
@@ -209,6 +231,17 @@ def test_eu27_ranking_sums_only_final_eea_member_observations(
     assert page.items[0].source_ids == ("eea-co2-monitoring",)
     assert page.items[0].input_observation_count == 2
     assert page.items[0].evidence_confidence == 79
+
+
+def test_final_registration_scope_supersedes_provisional_release(
+    mapped_candidate: Path,
+) -> None:
+    page = RegistrationService.from_candidate(mapped_candidate).ranking(
+        RegistrationQuery(geography="EU27", year=2024)
+    )
+
+    assert page.total_registrations == Decimal("20")
+    assert all(row.publication_status == "final" for row in page.items)
 
 
 def test_eu27_ranking_excludes_kba_and_non_member_rows(mapped_candidate: Path) -> None:
@@ -299,7 +332,9 @@ def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> 
     assert summary.years == tuple(range(2000, 2026))
     assert [(x.geography, x.year, x.status, x.evidence_kind) for x in summary.availability] == [
         ('DE', 2024, 'final', 'observed'),
+        ('DE', 2024, 'provisional', 'observed'),
         ('EU27', 2024, 'final', 'observed'),
+        ('EU27', 2024, 'provisional', 'observed'),
         ('FR', 2024, 'final', 'observed'),
         ('GB', 2025, 'final', 'observed'),
         ('NO', 2024, 'final', 'observed'),

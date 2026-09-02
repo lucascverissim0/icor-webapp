@@ -58,13 +58,19 @@ def main() -> int:
                     evidence_root=args.evidence_root,
                 )
         if args.check:
-            payload: dict[str, object] = {"release_count": 20, "state": "ready"}
+            payload: dict[str, object] = {
+                "release_count": len(plan.release_ids),
+                "state": "ready",
+            }
         else:
             if not args.prepare:
                 coordinator = _coordinator(args.repository_root, args.evidence_root)
             if args.acquire:
                 coordinator.acquire(plan)
-                payload = {"release_count": 20, "state": "acquired"}
+                payload = {
+                    "release_count": len(plan.release_ids),
+                    "state": "acquired",
+                }
             elif args.build:
                 snapshot_id = coordinator.build(plan)
                 coordinator.validate_candidate(plan, snapshot_id)

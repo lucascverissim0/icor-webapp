@@ -43,10 +43,37 @@ class OfficialSource:
     rejected_count: int
     quarantined_count: int = 0
     direct_download: bool = True
+    publication_status: PublicationStatus = PublicationStatus.FINAL
 
 
 _UK_TERMS = "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/"
 OFFICIAL_SOURCES = {
+    "eea-2025-provisional": OfficialSource(
+        key="eea-2025-provisional",
+        release_id="eea-co2cars-2025-provisional-v31-r1",
+        source_id="eea-co2-monitoring",
+        publisher="European Environment Agency / European Commission DG CLIMA",
+        url="https://co2cars.apps.eea.europa.eu/tools/api",
+        published_at=datetime(2026, 6, 25, tzinfo=UTC),
+        coverage_start=date(2025, 1, 1),
+        coverage_end=date(2025, 12, 31),
+        geography="EEA reporting countries",
+        geography_version="EEA CO2 monitoring 2025 provisional v31",
+        measure=Measure.NEW_REGISTRATIONS,
+        dependency_group="european-passenger-car-registrations-2025",
+        terms_url="https://creativecommons.org/licenses/by/4.0/",
+        permitted_local_use="Reuse permitted with attribution under CC BY 4.0.",
+        parser_name="eea_co2_cars_annual_aggregate_csv_v1",
+        expected_schema="EEA 2025 provisional v31 canonical model aggregate export",
+        suffix=".csv",
+        artifact_bytes=1_237_363,
+        sha256="46f4cbb5408d48797269b783bbb560968b2bb98c54569240df1734b21fcf0eea",
+        raw_count=10_833_597,
+        accepted_count=10_832_693,
+        rejected_count=904,
+        direct_download=False,
+        publication_status=PublicationStatus.PROVISIONAL,
+    ),
     "eea-2024-final": OfficialSource(
         key="eea-2024-final",
         release_id="eea-co2cars-2024-final-v30-r1",
@@ -281,7 +308,7 @@ def build_manifest(
         geography_version=source.geography_version,
         measure=source.measure,
         unit="vehicles",
-        publication_status=PublicationStatus.FINAL,
+        publication_status=source.publication_status,
         dependency_group=source.dependency_group,
         terms_url=source.terms_url,
         permitted_local_use=source.permitted_local_use,
