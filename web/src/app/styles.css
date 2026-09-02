@@ -1491,6 +1491,31 @@ a {
   margin: 0.15rem 0;
 }
 
+.registration-table details {
+  margin-top: 0.65rem;
+  color: var(--ink-muted);
+}
+
+.registration-table summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.registration-table details ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.registration-table details li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+}
+
 .primary-action:disabled,
 .coverage-manager button:disabled {
   cursor: not-allowed;

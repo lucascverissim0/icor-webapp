@@ -53,7 +53,11 @@ def summary(request: Request) -> RegistrationSummaryResponse | JSONResponse:
 @router.get(
     "/ranking",
     response_model=RegistrationPageResponse,
-    responses={422: {"model": ProblemResponse}, 503: {"model": ProblemResponse}},
+    responses={
+        404: {"model": ProblemResponse},
+        422: {"model": ProblemResponse},
+        503: {"model": ProblemResponse},
+    },
 )
 def ranking(
     request: Request,
@@ -76,6 +80,13 @@ def ranking(
                 page_size=page_size,
             )
         )
-    except RegistrationUnavailableError:
+    except RegistrationUnavailableError as error:
+        if error.code == 'scope_unavailable':
+            problem = ProblemResponse(
+                code=error.code,
+                message='The selected registration scope is unavailable.',
+                correlation_id=request.state.correlation_id,
+            )
+            return JSONResponse(status_code=404, content=problem.model_dump(mode='json'))
         return _unavailable(request)
     return RegistrationPageResponse.model_validate(result)

@@ -23,6 +23,12 @@ function number(value: number | string): string {
   return Number(value).toLocaleString('en-US')
 }
 
+function layerPriority(layer: { status: string; evidence_kind: string }): number {
+  const publication = layer.status === 'final' ? 0 : layer.status === 'provisional' ? 2 : 4
+  const evidence = layer.evidence_kind === 'observed' ? 0 : 1
+  return publication + evidence
+}
+
 function Unavailable({ error, retry }: { error: Error; retry: () => void }) {
   const correlation = error instanceof ApiProblem ? error.correlationId : null
   return (
@@ -59,9 +65,14 @@ export function RegistrationsWorkbench({
     queryKey: ['registrations', 'summary'],
     queryFn: () => apiClient.registrationSummary(),
   })
+  const selectedLayer = summary.data?.availability
+    .filter((item) => item.geography === query.geography && item.year === query.year)
+    .sort((left, right) => layerPriority(left) - layerPriority(right))[0]
+  const scopeAvailable = selectedLayer !== undefined
   const ranking = useQuery({
     queryKey: ['registrations', 'ranking', query],
     queryFn: () => apiClient.registrationRanking(query),
+    enabled: summary.isSuccess && scopeAvailable,
   })
 
   if (summary.isError) {
@@ -81,10 +92,10 @@ export function RegistrationsWorkbench({
       <header className="registrations-hero">
         <div>
           <p className="eyebrow">European passenger-car evidence</p>
-          <h2>Official {query.year} registrations</h2>
-          <p>Ranked make and model families derived from finalized EEA member-state records.</p>
+          <h2>{selectedLayer?.evidence_kind === 'estimated' ? 'Estimated' : 'Official'} {query.year} registrations</h2>
+          <p>Ranked make and model families with the evidence layer and source lineage kept visible.</p>
         </div>
-        <span className="official-pill"><ShieldCheck aria-hidden="true" size={17} /> Official source</span>
+        <span className="official-pill"><ShieldCheck aria-hidden="true" size={17} /> {selectedLayer ? `${selectedLayer.status} ${selectedLayer.evidence_kind}` : 'Scope unavailable'}</span>
       </header>
 
       <section className="registration-boundary" aria-label="Registration interpretation boundary">
@@ -113,7 +124,12 @@ export function RegistrationsWorkbench({
         <form className="registration-search" onSubmit={applySearch}>
           {summary.data && <div className="registration-scope">
             <label>Geography<select value={query.geography} onChange={(event) => updateSearch({ ...routeSearch, geography: event.target.value, page: 1 })}>{summary.data.geographies.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-            <label>Registration year<select value={query.year} onChange={(event) => updateSearch({ ...routeSearch, year: Number(event.target.value), page: 1 })}>{summary.data.years.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+            <label>Registration year<select value={query.year} onChange={(event) => updateSearch({ ...routeSearch, year: Number(event.target.value), page: 1 })}>{summary.data.years.map((value) => {
+              const available = summary.data.availability.some(
+                (item) => item.geography === query.geography && item.year === value,
+              )
+              return <option key={value} value={value}>{value}{available ? '' : ` — unavailable for ${query.geography}`}</option>
+            })}</select></label>
           </div>}
           <label htmlFor="registration-search">Search make or model</label>
           <div>
@@ -131,7 +147,13 @@ export function RegistrationsWorkbench({
           </div>
         </form>
 
-        {ranking.isPending && <div aria-busy="true" className="registration-state">Loading official ranking…</div>}
+        {summary.data && !scopeAvailable && (
+          <div className="registration-state">
+            <h3>No official model-family data for this scope</h3>
+            <p>{query.geography} {query.year} is unavailable, not zero. Choose a year labelled as available.</p>
+          </div>
+        )}
+        {scopeAvailable && ranking.isPending && <div aria-busy="true" className="registration-state">Loading official ranking…</div>}
         {ranking.data && ranking.data.items.length === 0 && (
           <div className="registration-state"><h3>No matching make or model</h3><p>Clear the search to return to the complete ranking.</p></div>
         )}
@@ -144,8 +166,19 @@ export function RegistrationsWorkbench({
                 <tbody>{ranking.data.items.map((row) => (
                   <tr key={row.vehicle_id}>
                     <td data-label="Rank"><strong>#{row.rank}</strong></td>
-                    <td data-label="Make and model"><strong>{row.make}</strong><span>{row.model}</span><small>Model year unavailable</small></td>
-                    <td data-label={`${query.year} registrations`}><strong>{number(row.registrations)}</strong><span>Derived observed total</span></td>
+                    <td data-label="Make and model">
+                      <strong>{row.make}</strong><span>{row.model}</span><small>Model year unavailable</small>
+                      {row.label_breakdown.length > 0 && <details>
+                        <summary>Official source labels</summary>
+                        <ul>{row.label_breakdown.map((label) => (
+                          <li key={`${label.source_make}:${label.source_model}`}>
+                            <span>{label.source_make} {label.source_model}</span>
+                            <strong>{number(label.registrations)} registrations</strong>
+                          </li>
+                        ))}</ul>
+                      </details>}
+                    </td>
+                    <td data-label={`${query.year} registrations`}><strong>{number(row.registrations)}</strong><span>{row.publication_status[0].toUpperCase() + row.publication_status.slice(1)} {row.evidence_kind}</span></td>
                     <td data-label="Evidence"><strong>{row.evidence_confidence}/100</strong><span>{number(row.input_observation_count)} source groups</span></td>
                   </tr>
                 ))}</tbody>

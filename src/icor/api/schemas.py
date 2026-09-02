@@ -316,6 +316,13 @@ class EvidenceObservationPageResponse(ApiModel):
     pages: int
 
 
+class RegistrationAvailabilityResponse(ApiModel):
+    geography: str
+    year: int
+    status: str
+    evidence_kind: str
+
+
 class RegistrationSummaryResponse(ApiModel):
     snapshot_id: str
     status: str
@@ -328,7 +335,17 @@ class RegistrationSummaryResponse(ApiModel):
     model_count: int
     model_year_available: bool
     release_ids: tuple[str, ...]
+    availability: tuple[RegistrationAvailabilityResponse, ...] = ()
     versions: SnapshotVersionsResponse | None = None
+
+
+class RegistrationLabelBreakdownResponse(ApiModel):
+    source_make: str
+    source_model: str
+    registrations: Decimal
+    input_observation_count: int
+    release_ids: tuple[str, ...]
+    source_ids: tuple[str, ...]
 
 
 class RegistrationRowResponse(ApiModel):
@@ -343,6 +360,9 @@ class RegistrationRowResponse(ApiModel):
     input_observation_count: int
     release_ids: tuple[str, ...]
     source_ids: tuple[str, ...]
+    publication_status: str = 'final'
+    evidence_kind: str = 'observed'
+    label_breakdown: tuple[RegistrationLabelBreakdownResponse, ...] = ()
 
 
 class RegistrationPageResponse(ApiModel):

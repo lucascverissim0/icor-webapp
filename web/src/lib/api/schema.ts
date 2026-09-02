@@ -765,6 +765,32 @@ export interface components {
              */
             updated_at: string;
         };
+        /** RegistrationAvailabilityResponse */
+        RegistrationAvailabilityResponse: {
+            /** Evidence Kind */
+            evidence_kind: string;
+            /** Geography */
+            geography: string;
+            /** Status */
+            status: string;
+            /** Year */
+            year: number;
+        };
+        /** RegistrationLabelBreakdownResponse */
+        RegistrationLabelBreakdownResponse: {
+            /** Input Observation Count */
+            input_observation_count: number;
+            /** Registrations */
+            registrations: string;
+            /** Release Ids */
+            release_ids: string[];
+            /** Source Ids */
+            source_ids: string[];
+            /** Source Make */
+            source_make: string;
+            /** Source Model */
+            source_model: string;
+        };
         /** RegistrationPageResponse */
         RegistrationPageResponse: {
             /** Items */
@@ -786,14 +812,29 @@ export interface components {
         RegistrationRowResponse: {
             /** Evidence Confidence */
             evidence_confidence: number;
+            /**
+             * Evidence Kind
+             * @default observed
+             */
+            evidence_kind: string;
             /** Input Observation Count */
             input_observation_count: number;
+            /**
+             * Label Breakdown
+             * @default []
+             */
+            label_breakdown: components["schemas"]["RegistrationLabelBreakdownResponse"][];
             /** Make */
             make: string;
             /** Model */
             model: string;
             /** Model Year */
             model_year: null;
+            /**
+             * Publication Status
+             * @default final
+             */
+            publication_status: string;
             /** Rank */
             rank: number;
             /** Registrations */
@@ -809,6 +850,11 @@ export interface components {
         };
         /** RegistrationSummaryResponse */
         RegistrationSummaryResponse: {
+            /**
+             * Availability
+             * @default []
+             */
+            availability: components["schemas"]["RegistrationAvailabilityResponse"][];
             /**
              * Built At
              * Format: date-time
@@ -1650,6 +1696,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegistrationPageResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
                 };
             };
             /** @description Unprocessable Entity */

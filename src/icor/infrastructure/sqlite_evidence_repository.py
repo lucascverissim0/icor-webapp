@@ -51,6 +51,11 @@ class ImmutableEvidenceError(RuntimeError):
 
 
 _SCHEMA_VERSION = 5
+_EU27_CODES = (
+    'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR',
+    'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO',
+    'SE', 'SI', 'SK',
+)
 _SQLITE_MULTI_CHARACTER_OPERATORS = (
     "->>",
     "!=",
@@ -308,6 +313,9 @@ class SQLiteEvidenceRepository:
                     o.original_make, o.original_model""",
                 parameters,
             )
+            self._add_eu27_registration_projections(
+                connection, confidence, publishable, parameters
+            )
             for release_id in (
                 row["release_id"]
                 for row in connection.execute(
@@ -373,6 +381,78 @@ class SQLiteEvidenceRepository:
                     "SELECT COUNT(*) FROM planner_option"
                 ).fetchone()[0],
             }
+
+    @staticmethod
+    def _add_eu27_family(
+        connection: sqlite3.Connection,
+        confidence: str,
+        publishable: str,
+        members: str,
+        parameters: tuple[str, ...],
+    ) -> None:
+        connection.execute(
+            f'''INSERT INTO registration_family_aggregate
+            SELECT 'EU27', CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                o.publication_status, 'observed', v.vehicle_id, v.make, v.model,
+                CAST(SUM(CAST(o.value AS NUMERIC)) AS TEXT), MIN({confidence}),
+                COUNT(o.observation_id), json_group_array(DISTINCT o.release_id),
+                json_group_array(DISTINCT r.source_id)
+            FROM observation o
+            JOIN source_release r ON r.release_id = o.release_id
+            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+            WHERE r.source_id = ? AND o.geography IN ({members})
+                AND o.measure = 'new_registrations' AND o.unit = 'vehicles'
+                AND o.canonical_vehicle_id IS NOT NULL
+                AND o.mapping_status NOT IN ({publishable})
+                AND SUBSTR(o.period_start, 1, 4) = SUBSTR(o.period_end, 1, 4)
+            GROUP BY CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                o.publication_status, v.vehicle_id, v.make, v.model''',
+            parameters,
+        )
+
+    @staticmethod
+    def _add_eu27_labels(
+        connection: sqlite3.Connection,
+        publishable: str,
+        members: str,
+        parameters: tuple[str, ...],
+    ) -> None:
+        connection.execute(
+            f'''INSERT INTO registration_label_aggregate
+            SELECT 'EU27', CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                o.publication_status, 'observed', v.vehicle_id,
+                o.original_make, o.original_model,
+                CAST(SUM(CAST(o.value AS NUMERIC)) AS TEXT),
+                COUNT(o.observation_id), json_group_array(DISTINCT o.release_id),
+                json_group_array(DISTINCT r.source_id)
+            FROM observation o
+            JOIN source_release r ON r.release_id = o.release_id
+            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+            WHERE r.source_id = ? AND o.geography IN ({members})
+                AND o.measure = 'new_registrations' AND o.unit = 'vehicles'
+                AND o.canonical_vehicle_id IS NOT NULL
+                AND o.mapping_status NOT IN ({publishable})
+                AND SUBSTR(o.period_start, 1, 4) = SUBSTR(o.period_end, 1, 4)
+            GROUP BY CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                o.publication_status, v.vehicle_id,
+                o.original_make, o.original_model''',
+            parameters,
+        )
+
+    @classmethod
+    def _add_eu27_registration_projections(
+        cls,
+        connection: sqlite3.Connection,
+        confidence: str,
+        publishable: str,
+        parameters: tuple[str, ...],
+    ) -> None:
+        members = ', '.join('?' for _ in _EU27_CODES)
+        query_parameters = ('eea-co2-monitoring', *_EU27_CODES, *parameters)
+        cls._add_eu27_family(
+            connection, confidence, publishable, members, query_parameters
+        )
+        cls._add_eu27_labels(connection, publishable, members, query_parameters)
 
     def _prepare_writable_schema(self) -> None:
         existing = self.path.exists() and self.path.stat().st_size > 0

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -15,15 +17,17 @@ from icor.infrastructure.snapshot_store import SnapshotStore
 
 _EEA_SOURCE_ID = "eea-co2-monitoring"
 _IDENTITY_REGISTRY = "exact-normalized-model-family-v1"
-_EU27_EEA_CODES = (
-    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "EL", "ES", "FI", "FR",
-    "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO",
-    "SE", "SI", "SK",
-)
 
 
 class RegistrationUnavailableError(RuntimeError):
     """A verified canonical registration snapshot is unavailable."""
+
+    code = 'registration_data_unavailable'
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +54,16 @@ class RegistrationQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class RegistrationLabelBreakdown:
+    source_make: str
+    source_model: str
+    registrations: Decimal
+    input_observation_count: int
+    release_ids: tuple[str, ...]
+    source_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RegistrationRow:
     rank: int
     vehicle_id: str
@@ -62,6 +76,9 @@ class RegistrationRow:
     input_observation_count: int
     release_ids: tuple[str, ...]
     source_ids: tuple[str, ...]
+    publication_status: str = 'final'
+    evidence_kind: str = 'observed'
+    label_breakdown: tuple[RegistrationLabelBreakdown, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +90,14 @@ class RegistrationPage:
     page_size: int
     pages: int
     snapshot_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RegistrationAvailability:
+    geography: str
+    year: int
+    status: str
+    evidence_kind: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +113,7 @@ class RegistrationSummary:
     model_count: int
     model_year_available: bool
     release_ids: tuple[str, ...]
+    availability: tuple[RegistrationAvailability, ...] = ()
     versions: SnapshotVersions | None = None
 
 
@@ -124,12 +150,18 @@ class RegistrationService:
 
     def summary(self) -> RegistrationSummary:
         with self._connect() as connection:
-            years, geographies = self._scope(connection)
+            availability = self._availability(connection)
+            years, geographies = self._projection_scope(connection)
             if not years:
                 raise RegistrationUnavailableError(
                     "canonical registration data is unavailable"
                 )
-            latest_year = max(years)
+            eu27_years = [item.year for item in availability if item.geography == 'EU27']
+            if not eu27_years:
+                raise RegistrationUnavailableError(
+                    'canonical registration data is unavailable'
+                )
+            latest_year = max(eu27_years)
             total, total_registrations = self._totals(
                 connection, "EU27", latest_year, search=None
             )
@@ -158,18 +190,25 @@ class RegistrationService:
             model_count=total,
             model_year_available=False,
             release_ids=release_ids,
+            availability=availability,
             versions=self.manifest.versions,
         )
 
     def ranking(self, query: RegistrationQuery) -> RegistrationPage:
         query.validate()
         search = query.search.strip() if query.search and query.search.strip() else None
-        grouped_sql, parameters = self._grouped_query(
+        grouped_sql, parameters = self._projected_query(
             query.geography, query.year, search
         )
         offset = (query.page - 1) * query.page_size
+        breakdowns: dict[str, tuple[RegistrationLabelBreakdown, ...]] = {}
         with self._connect() as connection:
-            years, geographies = self._scope(connection)
+            years, geographies = self._projection_scope(connection)
+            if not self._has_scope(connection, query.geography, query.year):
+                raise RegistrationUnavailableError(
+                    'requested registration scope is unavailable',
+                    code='scope_unavailable',
+                )
             if query.year not in years or (
                 query.geography != "EU27" and query.geography not in geographies
             ):
@@ -197,7 +236,10 @@ class RegistrationService:
                 total, total_registrations = self._totals(
                     connection, query.geography, query.year, search
                 )
-        items = tuple(_registration_row(row) for row in rows)
+            breakdowns = self._label_breakdowns(connection, query, rows)
+        items = tuple(
+            _registration_row(row, breakdowns.get(row['vehicle_id'], ())) for row in rows
+        )
         pages = (total + query.page_size - 1) // query.page_size if total else 0
         return RegistrationPage(
             items=items,
@@ -209,6 +251,28 @@ class RegistrationService:
             snapshot_id=self.manifest.snapshot_id,
         )
 
+    def _label_breakdowns(
+        self,
+        connection: sqlite3.Connection,
+        query: RegistrationQuery,
+        families: list[sqlite3.Row],
+    ) -> dict[str, tuple[RegistrationLabelBreakdown, ...]]:
+        if not families:
+            return {}
+        placeholders = ', '.join('?' for _ in families)
+        first = families[0]
+        rows = connection.execute(
+            f'''SELECT * FROM registration_label_aggregate
+            WHERE geography = ? AND year = ? AND publication_status = ?
+            AND evidence_kind = ? AND family_vehicle_id IN ({placeholders})
+            ORDER BY family_vehicle_id, LOWER(source_make), LOWER(source_model)''',
+            (
+                query.geography, query.year, first['publication_status'],
+                first['evidence_kind'], *(row['vehicle_id'] for row in families),
+            ),
+        )
+        return _group_label_rows(rows)
+
     def _totals(
         self,
         connection: sqlite3.Connection,
@@ -216,7 +280,7 @@ class RegistrationService:
         year: int,
         search: str | None,
     ) -> tuple[int, Decimal]:
-        grouped_sql, parameters = self._grouped_query(geography, year, search)
+        grouped_sql, parameters = self._projected_query(geography, year, search)
         row = connection.execute(
             f"""WITH grouped AS ({grouped_sql})
             SELECT COUNT(*) AS model_count,
@@ -225,91 +289,69 @@ class RegistrationService:
         ).fetchone()
         return int(row["model_count"]), Decimal(str(row["total_registrations"]))
 
-    def _grouped_query(
+    def _projected_query(
         self, geography: str, year: int, search: str | None
     ) -> tuple[str, tuple[object, ...]]:
-        country_codes = _EU27_EEA_CODES if geography == "EU27" else (geography,)
-        country_placeholders = ", ".join("?" for _ in country_codes)
-        confidence = """CASE
-            WHEN o.confidence_applied_cap IS NOT NULL AND o.confidence_applied_cap < (
-                o.confidence_authority + o.confidence_publication_status +
-                o.confidence_coverage + o.confidence_identity +
-                o.confidence_independent_agreement
-            ) THEN o.confidence_applied_cap
-            ELSE o.confidence_authority + o.confidence_publication_status +
-                o.confidence_coverage + o.confidence_identity +
-                o.confidence_independent_agreement END"""
-        observation_clauses = [
-            "o.release_id IN (SELECT release_id FROM source_release "
-            "WHERE source_id = ? AND publication_status = 'final')",
-            "o.publication_status = 'final'",
-            "o.measure = 'new_registrations'",
-            "o.unit = 'vehicles'",
-            "o.period_start = ?",
-            "o.period_end = ?",
-            "o.mapping_status = 'normalized_label'",
-            f"o.geography IN ({country_placeholders})",
-        ]
-        vehicle_clauses = ["v.model_year IS NULL"]
-        parameters: list[object] = [
-            _EEA_SOURCE_ID,
-            _EEA_SOURCE_ID,
-            f"{year:04d}-01-01",
-            f"{year:04d}-12-31",
-            *country_codes,
-        ]
-        if search is not None:
-            for token in _search_tokens(search):
-                escaped = _escape_like(token)
-                vehicle_clauses.append(
-                    "(LOWER(v.make) LIKE ? ESCAPE '\\' OR "
-                    "LOWER(v.model) LIKE ? ESCAPE '\\')"
-                )
-                parameters.extend((f"%{escaped}%", f"%{escaped}%"))
-        return (
-            f"""SELECT v.vehicle_id, v.make, v.model, grouped.registrations,
-            grouped.evidence_confidence, grouped.input_observation_count,
-            grouped.release_ids, ? AS source_ids
-            FROM (
-                SELECT o.canonical_vehicle_id,
-                SUM(CAST(o.value AS NUMERIC)) AS registrations,
-                MIN({confidence}) AS evidence_confidence,
-                COUNT(o.observation_id) AS input_observation_count,
-                GROUP_CONCAT(DISTINCT o.release_id) AS release_ids
-                FROM observation o
-                WHERE {' AND '.join(observation_clauses)}
-                GROUP BY o.canonical_vehicle_id
-            ) AS grouped
-            JOIN canonical_vehicle v
-                ON v.vehicle_id = grouped.canonical_vehicle_id
-            WHERE {' AND '.join(vehicle_clauses)}""",
-            tuple(parameters),
+        clauses = ['f.geography = ?', 'f.year = ?']
+        parameters: list[object] = [geography, year]
+        for token in _search_tokens(search or '') if search else ():
+            escaped = _escape_like(token)
+            clauses.append(
+                '(LOWER(f.make) LIKE ? ESCAPE \'\\\' OR LOWER(f.model) LIKE ? ESCAPE \'\\\')'
+            )
+            parameters.extend((f'%{escaped}%', f'%{escaped}%'))
+        return self._projection_sql(' AND '.join(clauses)), tuple(parameters)
+
+    @staticmethod
+    def _projection_sql(clauses: str) -> str:
+        return f'''SELECT f.family_vehicle_id AS vehicle_id, f.make, f.model,
+            CAST(f.registrations AS NUMERIC) AS registrations,
+            f.evidence_confidence, f.input_observation_count,
+            f.release_ids, f.source_ids, f.publication_status, f.evidence_kind
+        FROM registration_family_aggregate f
+        WHERE {clauses}
+        AND (f.publication_status, f.evidence_kind) = (
+            SELECT x.publication_status, x.evidence_kind
+            FROM registration_family_aggregate x
+            WHERE x.geography = f.geography AND x.year = f.year
+            ORDER BY CASE x.publication_status
+                WHEN 'final' THEN 0 WHEN 'provisional' THEN 1 ELSE 2 END,
+                CASE x.evidence_kind WHEN 'observed' THEN 0 ELSE 1 END
+            LIMIT 1
+        )'''
+
+    @staticmethod
+    def _has_scope(connection: sqlite3.Connection, geography: str, year: int) -> bool:
+        return connection.execute(
+            'SELECT 1 FROM registration_family_aggregate WHERE geography = ? AND year = ? LIMIT 1',
+            (geography, year),
+        ).fetchone() is not None
+
+    def _availability(
+        self, connection: sqlite3.Connection
+    ) -> tuple[RegistrationAvailability, ...]:
+        rows = connection.execute(
+            '''SELECT DISTINCT geography, year, publication_status, evidence_kind
+            FROM registration_family_aggregate
+            ORDER BY geography, year, publication_status, evidence_kind'''
+        )
+        return tuple(
+            RegistrationAvailability(
+                row['geography'], row['year'], row['publication_status'], row['evidence_kind']
+            )
+            for row in rows
         )
 
-    def _scope(
+    def _projection_scope(
         self, connection: sqlite3.Connection
     ) -> tuple[tuple[int, ...], tuple[str, ...]]:
-        years = tuple(
-            int(row["year"])
-            for row in connection.execute(
-                """SELECT DISTINCT CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER) AS year
-                FROM observation o JOIN source_release r ON r.release_id = o.release_id
-                WHERE r.source_id = ? AND r.publication_status = 'final'
-                AND o.measure = 'new_registrations' ORDER BY year""",
-                (_EEA_SOURCE_ID,),
-            )
-        )
-        geographies = tuple(
-            row["geography"]
-            for row in connection.execute(
-                """SELECT DISTINCT o.geography FROM observation o
-                JOIN source_release r ON r.release_id = o.release_id
-                WHERE r.source_id = ? AND r.publication_status = 'final'
-                AND o.measure = 'new_registrations' ORDER BY o.geography""",
-                (_EEA_SOURCE_ID,),
-            )
-        )
-        return years, geographies
+        availability = self._availability(connection)
+        if not availability:
+            return (), ()
+        latest = max(item.year for item in availability)
+        years = tuple(range(2000, latest + 1))
+        countries = sorted({item.geography for item in availability} - {'EU27'})
+        return years, tuple(countries)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
@@ -322,7 +364,28 @@ class RegistrationService:
         return connection
 
 
-def _registration_row(row: sqlite3.Row) -> RegistrationRow:
+def _group_label_rows(
+    rows: Iterable[sqlite3.Row],
+) -> dict[str, tuple[RegistrationLabelBreakdown, ...]]:
+    grouped: dict[str, list[RegistrationLabelBreakdown]] = {}
+    for row in rows:
+        grouped.setdefault(row['family_vehicle_id'], []).append(
+            RegistrationLabelBreakdown(
+                source_make=row['source_make'],
+                source_model=row['source_model'],
+                registrations=Decimal(str(row['registrations'])),
+                input_observation_count=row['input_observation_count'],
+                release_ids=_split_group(row['release_ids']),
+                source_ids=_split_group(row['source_ids']),
+            )
+        )
+    return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _registration_row(
+    row: sqlite3.Row,
+    labels: tuple[RegistrationLabelBreakdown, ...] = (),
+) -> RegistrationRow:
     return RegistrationRow(
         rank=row["rank"],
         vehicle_id=row["vehicle_id"],
@@ -335,11 +398,15 @@ def _registration_row(row: sqlite3.Row) -> RegistrationRow:
         input_observation_count=row["input_observation_count"],
         release_ids=_split_group(row["release_ids"]),
         source_ids=_split_group(row["source_ids"]),
+        publication_status=row['publication_status'],
+        evidence_kind=row['evidence_kind'],
+        label_breakdown=labels,
     )
 
 
 def _split_group(value: str) -> tuple[str, ...]:
-    return tuple(sorted(value.split(",")))
+    parsed = json.loads(value)
+    return tuple(sorted(parsed if isinstance(parsed, list) else value.split(",")))
 
 
 def _search_tokens(value: str) -> tuple[str, ...]:

@@ -1521,6 +1521,81 @@
         "title": "ProductionCoverageResponse",
         "type": "object"
       },
+      "RegistrationAvailabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_kind": {
+            "title": "Evidence Kind",
+            "type": "string"
+          },
+          "geography": {
+            "title": "Geography",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "geography",
+          "year",
+          "status",
+          "evidence_kind"
+        ],
+        "title": "RegistrationAvailabilityResponse",
+        "type": "object"
+      },
+      "RegistrationLabelBreakdownResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "input_observation_count": {
+            "title": "Input Observation Count",
+            "type": "integer"
+          },
+          "registrations": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Registrations",
+            "type": "string"
+          },
+          "release_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Release Ids",
+            "type": "array"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "source_make": {
+            "title": "Source Make",
+            "type": "string"
+          },
+          "source_model": {
+            "title": "Source Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_make",
+          "source_model",
+          "registrations",
+          "input_observation_count",
+          "release_ids",
+          "source_ids"
+        ],
+        "title": "RegistrationLabelBreakdownResponse",
+        "type": "object"
+      },
       "RegistrationPageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1576,9 +1651,22 @@
             "title": "Evidence Confidence",
             "type": "integer"
           },
+          "evidence_kind": {
+            "default": "observed",
+            "title": "Evidence Kind",
+            "type": "string"
+          },
           "input_observation_count": {
             "title": "Input Observation Count",
             "type": "integer"
+          },
+          "label_breakdown": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RegistrationLabelBreakdownResponse"
+            },
+            "title": "Label Breakdown",
+            "type": "array"
           },
           "make": {
             "title": "Make",
@@ -1591,6 +1679,11 @@
           "model_year": {
             "title": "Model Year",
             "type": "null"
+          },
+          "publication_status": {
+            "default": "final",
+            "title": "Publication Status",
+            "type": "string"
           },
           "rank": {
             "title": "Rank",
@@ -1643,6 +1736,14 @@
       "RegistrationSummaryResponse": {
         "additionalProperties": false,
         "properties": {
+          "availability": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RegistrationAvailabilityResponse"
+            },
+            "title": "Availability",
+            "type": "array"
+          },
           "built_at": {
             "format": "date-time",
             "title": "Built At",
@@ -3123,6 +3224,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "422": {
             "content": {

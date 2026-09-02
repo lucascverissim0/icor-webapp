@@ -72,6 +72,7 @@ def test_registration_summary_serializes_real_snapshot_scope() -> None:
     response = client.get("/api/v1/registrations/summary")
 
     assert response.status_code == 200
+    assert response.json()['availability'] == []
     assert response.json() == {
         "snapshot_id": "snapshot-real-2024",
         "status": "candidate",
@@ -84,6 +85,7 @@ def test_registration_summary_serializes_real_snapshot_scope() -> None:
         "model_count": 1,
         "model_year_available": False,
         "release_ids": ["eea-co2cars-2024-final-v30-r1"],
+        "availability": [],
     }
 
 
@@ -120,7 +122,20 @@ def test_registration_ranking_passes_bounded_filters() -> None:
         "input_observation_count": 2,
         "release_ids": ["eea-co2cars-2024-final-v30-r1"],
         "source_ids": ["eea-co2-monitoring"],
+        "publication_status": "final",
+        "evidence_kind": "observed",
+        "label_breakdown": [],
     }
+
+
+def test_registration_row_serializes_family_lineage() -> None:
+    response = TestClient(create_app(registration_service=StubRegistrationService())).get(
+        '/api/v1/registrations/ranking'
+    )
+    item = response.json()['items'][0]
+    assert item['publication_status'] == 'final'
+    assert item['evidence_kind'] == 'observed'
+    assert item['label_breakdown'] == []
 
 
 def test_registration_routes_fail_closed_without_real_snapshot(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -134,6 +149,19 @@ def test_registration_routes_fail_closed_without_real_snapshot(monkeypatch) -> N
     assert response.status_code == 503
     assert response.json()["code"] == "registration_data_unavailable"
     assert "demo" not in response.json()["message"].casefold()
+
+
+def test_unavailable_registration_scope_has_a_distinct_safe_problem() -> None:
+    class Service(StubRegistrationService):
+        def ranking(self, query: RegistrationQuery) -> RegistrationPage:
+            from icor.application.registrations import RegistrationUnavailableError
+            raise RegistrationUnavailableError('scope unavailable', code='scope_unavailable')
+
+    response = TestClient(create_app(registration_service=Service())).get(
+        '/api/v1/registrations/ranking', params={'geography': 'EU27', 'year': 2000}
+    )
+    assert response.status_code == 404
+    assert response.json()['code'] == 'scope_unavailable'
 
 
 def test_registration_query_validation_is_typed_and_bounded() -> None:

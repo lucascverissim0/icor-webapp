@@ -14,7 +14,9 @@ const summary = {
   snapshot_id: 'snapshot-real-2024', status: 'candidate',
   built_at: '2026-08-27T12:00:00Z', database_sha256: 'a'.repeat(64),
   identity_registry: 'exact-normalized-model-family-v1',
-  geographies: ['EU27'], years: [2024], total_registrations: '15000000',
+  geographies: ['EU27'], years: Array.from({ length: 25 }, (_, i) => 2000 + i),
+  availability: [{ geography: 'EU27', year: 2024, status: 'final', evidence_kind: 'observed' }],
+  total_registrations: '15000000',
   model_count: 2, model_year_available: false,
   release_ids: ['eea-co2cars-2024-final-v30-r1'],
 }
@@ -25,6 +27,13 @@ const ranking = {
     model_year: null, registrations: '1500000', status: 'derived_observed',
     evidence_confidence: 79, input_observation_count: 27,
     release_ids: ['eea-co2cars-2024-final-v30-r1'], source_ids: ['eea-co2-monitoring'],
+    publication_status: 'final', evidence_kind: 'observed',
+    label_breakdown: [{
+      source_make: 'Example Motors', source_model: 'Alpha', registrations: '1500000',
+      input_observation_count: 27,
+      release_ids: ['eea-co2cars-2024-final-v30-r1'],
+      source_ids: ['eea-co2-monitoring'],
+    }],
   }],
   total: 2, total_registrations: '15000000', page: 1, page_size: 25, pages: 2,
   snapshot_id: 'snapshot-real-2024',
@@ -37,10 +46,10 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-function successFetcher() {
+function successFetcher(summaryBody = summary) {
   return vi.fn<typeof fetch>().mockImplementation((input) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    if (url.endsWith('/api/v1/registrations/summary')) return Promise.resolve(json(summary))
+    if (url.endsWith('/api/v1/registrations/summary')) return Promise.resolve(json(summaryBody))
     if (url.includes('/api/v1/registrations/ranking')) return Promise.resolve(json(ranking))
     throw new Error(`Unhandled URL: ${url}`)
   })
@@ -98,6 +107,34 @@ describe('RegistrationsWorkbench', () => {
     )
   })
 
+  it('labels the evidence layer and explains unavailable timeline years', async () => {
+    const user = userEvent.setup()
+    renderRegistrations(successFetcher())
+
+    await screen.findByText('Example Motors')
+    expect(screen.getByText('Final observed')).toBeVisible()
+    await user.click(screen.getByText('Official source labels'))
+    expect(screen.getByText('1,500,000 registrations')).toBeVisible()
+    expect(
+      screen.getByRole('option', { name: '2000 — unavailable for EU27' }),
+    ).toBeVisible()
+  })
+
+  it('shows the same preferred evidence layer that the ranking endpoint selects', async () => {
+    renderRegistrations(successFetcher({
+      ...summary,
+      availability: [
+        { geography: 'EU27', year: 2024, status: 'final', evidence_kind: 'estimated' },
+        { geography: 'EU27', year: 2024, status: 'provisional', evidence_kind: 'observed' },
+        { geography: 'EU27', year: 2024, status: 'final', evidence_kind: 'observed' },
+      ],
+    }))
+
+    await screen.findByText('Example Motors')
+    expect(screen.getByText('final observed')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Official 2024 registrations' })).toBeVisible()
+  })
+
   it('preserves geography and year when a multiword search is submitted', async () => {
     const user = userEvent.setup()
     const onSearchChange = vi.fn<(next: RegistrationSearch) => void>()
@@ -107,7 +144,7 @@ describe('RegistrationsWorkbench', () => {
       onSearchChange,
     )
 
-    await screen.findByText('Example Motors')
+    await screen.findByRole('heading', { name: 'Official 2023 registrations' })
     await user.type(
       screen.getByRole('searchbox', { name: 'Search make or model' }),
       'Volkswagen Golf',

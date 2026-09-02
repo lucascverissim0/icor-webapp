@@ -39,6 +39,7 @@ def _release(
     parser_name: str,
     geography: str,
     count: int,
+    year: int = 2024,
 ) -> ReleaseManifest:
     return ReleaseManifest(
         release_id=release_id,
@@ -47,8 +48,8 @@ def _release(
         source_url="https://example.test/source",
         retrieved_at=BUILD_AS_OF,
         published_at=datetime(2026, 6, 25, tzinfo=UTC),
-        coverage_start=date(2024, 1, 1),
-        coverage_end=date(2024, 12, 31),
+        coverage_start=date(year, 1, 1),
+        coverage_end=date(year, 12, 31),
         geography=geography,
         geography_version="official-2024-v1",
         measure=Measure.NEW_REGISTRATIONS,
@@ -77,6 +78,7 @@ def _observation(
     make: str,
     model: str,
     value: str,
+    year: int = 2024,
 ) -> Observation:
     return Observation(
         observation_id=observation_id,
@@ -84,8 +86,8 @@ def _observation(
         original_row_locator=f"row:{observation_id}",
         geography=geography,
         geography_version="official-2024-v1",
-        period_start=date(2024, 1, 1),
-        period_end=date(2024, 12, 31),
+        period_start=date(year, 1, 1),
+        period_end=date(year, 12, 31),
         period_precision=PeriodPrecision.YEAR,
         measure=Measure.NEW_REGISTRATIONS,
         value=Decimal(value),
@@ -130,8 +132,13 @@ def mapped_candidate(tmp_path: Path) -> Path:
         "DE",
         1,
     )
+    dft = _release(
+        "uk-dft-veh0160-2025-final-v1", "uk-dft-veh0160",
+        "uk_dft_veh0160_csv_v1", "GB", 1, year=2025,
+    )
     repository.add_release(eea)
     repository.add_release(kba)
+    repository.add_release(dft)
     attributing = IdentityAttributingRepository(
         repository,
         ExactNormalizedIdentityResolver(),
@@ -148,8 +155,13 @@ def mapped_candidate(tmp_path: Path) -> Path:
             _observation(
                 "obs-kba-de-alpha", kba.release_id, "DE", "Example Motors", "Alpha", "999"
             ),
+            _observation(
+                "obs-dft-gb-alpha", dft.release_id, "GB", "Example Motors", "Alpha", "7",
+                year=2025,
+            ),
         )
     )
+    repository.rebuild_query_projections()
     with sqlite3.connect(database) as connection:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         connection.execute("PRAGMA journal_mode = DELETE")
@@ -159,7 +171,7 @@ def mapped_candidate(tmp_path: Path) -> Path:
         status=SnapshotStatus.CANDIDATE,
         built_at=BUILD_AS_OF,
         deterministic_seed=20260827,
-        release_ids=tuple(sorted((eea.release_id, kba.release_id))),
+        release_ids=tuple(sorted((eea.release_id, kba.release_id, dft.release_id))),
         versions=SnapshotVersions(
             source_registry="official-sources-v1",
             identity_registry="exact-normalized-model-family-v1",
@@ -171,7 +183,7 @@ def mapped_candidate(tmp_path: Path) -> Path:
             forecast_method="not-applied-v1",
         ),
         database_sha256=sha256_file(database),
-        observation_count=5,
+        observation_count=6,
         published_value_count=0,
         warnings=(),
     )
@@ -209,6 +221,14 @@ def test_eu27_ranking_excludes_kba_and_non_member_rows(mapped_candidate: Path) -
 
 
 def test_ranking_is_stable_paginated_and_searchable(mapped_candidate: Path) -> None:
+    alpha = RegistrationService.from_candidate(mapped_candidate).ranking(
+        RegistrationQuery()
+    ).items[0]
+    assert alpha.label_breakdown[0].source_make == 'Example Motors'
+    assert alpha.label_breakdown[0].registrations == Decimal('15')
+    assert alpha.publication_status == 'final'
+    assert alpha.evidence_kind == 'observed'
+
     service = RegistrationService.from_candidate(mapped_candidate)
 
     first = service.ranking(RegistrationQuery(page=1, page_size=1))
@@ -239,18 +259,17 @@ def test_search_matches_normalized_tokens_across_make_and_model(
     ]
 
 
-def test_ranking_aggregates_observations_before_vehicle_lookup(
+def test_ranking_uses_the_indexed_family_projection(
     mapped_candidate: Path,
 ) -> None:
     service = RegistrationService.from_candidate(mapped_candidate)
 
-    sql, _ = service._grouped_query("EU27", 2024, None)
+    sql, parameters = service._projected_query("EU27", 2024, None)
+    with service._connect() as connection:
+        plan = connection.execute(f"EXPLAIN QUERY PLAN {sql}", parameters).fetchall()
 
-    assert "JOIN identity_mapping" not in sql
-    assert sql.index("GROUP BY o.canonical_vehicle_id") < sql.index(
-        "JOIN canonical_vehicle"
-    )
-    assert "o.mapping_status = 'normalized_label'" in sql
+    assert " observation " not in f" {sql.casefold()} "
+    assert any("registration_family_scope_idx" in row["detail"] for row in plan)
 
 
 def test_populated_ranking_uses_one_read_connection(mapped_candidate: Path) -> None:
@@ -276,8 +295,15 @@ def test_summary_exposes_snapshot_and_truthful_scope(mapped_candidate: Path) -> 
 
     assert summary.snapshot_id == mapped_candidate.name
     assert summary.status == "candidate"
-    assert summary.geographies == ("EU27", "DE", "FR", "NO")
-    assert summary.years == (2024,)
+    assert summary.geographies == ("EU27", "DE", "FR", "GB", "NO")
+    assert summary.years == tuple(range(2000, 2026))
+    assert [(x.geography, x.year, x.status, x.evidence_kind) for x in summary.availability] == [
+        ('DE', 2024, 'final', 'observed'),
+        ('EU27', 2024, 'final', 'observed'),
+        ('FR', 2024, 'final', 'observed'),
+        ('GB', 2025, 'final', 'observed'),
+        ('NO', 2024, 'final', 'observed'),
+    ]
     assert summary.total_registrations == Decimal("20")
     assert summary.model_count == 2
     assert summary.model_year_available is False
@@ -310,6 +336,14 @@ def test_ranking_rejects_scope_absent_from_snapshot(
 
     with pytest.raises(RegistrationUnavailableError, match="scope is unavailable"):
         service.ranking(query)
+
+
+def test_eu27_2000_is_unavailable_instead_of_zero(mapped_candidate: Path) -> None:
+    with pytest.raises(RegistrationUnavailableError) as captured:
+        RegistrationService.from_candidate(mapped_candidate).ranking(
+            RegistrationQuery(geography='EU27', year=2000)
+        )
+    assert captured.value.code == 'scope_unavailable'
 
 
 def test_candidate_checksum_tampering_is_typed_unavailable(mapped_candidate: Path) -> None:

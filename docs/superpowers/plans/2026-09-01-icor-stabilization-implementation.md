@@ -126,23 +126,23 @@ Run focused repository/build tests, Ruff, and `git diff --check`. Commit with `f
 - Produces: `RegistrationAvailability(year, geography, status, evidence_kind)` and `RegistrationLabelBreakdown` on family rows.
 - Registration summary exposes the inclusive 2000-to-latest selector range plus scope-aware availability; missing is distinct from zero.
 
-- [ ] **Step 1: Write failing behavior tests**
+- [x] **Step 1: Write failing behavior tests**
 
 Assert a Golf-family row totals its official labels, exposes their breakdown, separates final/provisional/estimated values, and returns `scope_unavailable` for unsupported EU27 2000 rather than zero. Assert UK availability can differ from EU27.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run focused registration application/API/frontend tests and confirm failures are missing fields/behavior.
 
-- [ ] **Step 3: Query aggregate projections**
+- [x] **Step 3: Query aggregate projections**
 
 Replace observation-table ranking and summary scans with indexed aggregate-table count/page queries. Return only one requested page and its pre-aggregated totals. Add a label-breakdown detail query scoped to one family row.
 
-- [ ] **Step 4: Render family results and availability**
+- [x] **Step 4: Render family results and availability**
 
 Show one family total, expandable official labels, Final/Provisional/Estimated badge, source lineage, and unavailable-year explanation. Populate years 2000 through latest while disabling or explaining unavailable scope combinations.
 
-- [ ] **Step 5: Verify Task 3 and commit**
+- [x] **Step 5: Verify Task 3 and commit**
 
 Run focused Python and Vitest suites plus an `EXPLAIN QUERY PLAN` test that asserts aggregate indexes are used. Commit with `feat: serve family registration aggregates`.
 
