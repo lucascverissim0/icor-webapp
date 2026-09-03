@@ -42,36 +42,60 @@ class SnapshotOpportunityRepository:
         self._strategy = strategy
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
+        self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
 
     def search(self, query: OpportunityQuery) -> OpportunityPage:
-        cte, parameters = self._scored_cte(query)
         offset = (query.page - 1) * query.page_size
         with self._connect() as connection:
-            summary = connection.execute(
-                f"""{cte}
-                SELECT COUNT(*) total, COALESCE(SUM(base_units), 0) base_units,
-                    COALESCE(SUM(exact_units), 0) exact_units,
-                    COALESCE(SUM(CASE WHEN demand_percentile >= 0.75
-                        THEN uncovered_units ELSE 0 END), 0) high_uncovered
-                FROM scored""",
-                parameters,
-            ).fetchone()
+            has_coverage = bool(
+                connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM coverage_db.production_coverage)"
+                ).fetchone()[0]
+            )
+            if not has_coverage:
+                cached = self._uncovered_cache.get(query)
+                if cached is not None:
+                    return cached
+            cte, parameters = self._scored_cte(
+                query, include_coverage=has_coverage
+            )
             rows = connection.execute(
                 f"""{cte}
-                SELECT * FROM scored
+                SELECT *, COUNT(*) OVER () summary_total,
+                    SUM(base_units) OVER () summary_base_units,
+                    SUM(exact_units) OVER () summary_exact_units,
+                    SUM(CASE WHEN demand_percentile >= 0.75
+                        THEN uncovered_units ELSE 0 END) OVER () summary_high_uncovered
+                FROM scored
                 ORDER BY total_points DESC, base_units DESC, brand, model, model_year
                 LIMIT ? OFFSET ?""",
                 (*parameters, query.page_size, offset),
             ).fetchall()
+            if rows:
+                summary = rows[0]
+            else:
+                summary = connection.execute(
+                    f"""{cte}
+                    SELECT COUNT(*) summary_total,
+                        COALESCE(SUM(base_units), 0) summary_base_units,
+                        COALESCE(SUM(exact_units), 0) summary_exact_units,
+                        COALESCE(SUM(CASE WHEN demand_percentile >= 0.75
+                            THEN uncovered_units ELSE 0 END), 0)
+                            summary_high_uncovered
+                    FROM scored""",
+                    parameters,
+                ).fetchone()
             warnings = self._integrity_warnings(connection)
         items = tuple(self._row(row, query.group_by) for row in rows)
-        total = int(summary["total"])
-        return OpportunityPage(
+        total = int(summary["summary_total"])
+        result = OpportunityPage(
             items=items,
             summary=OpportunitySummary(
-                base_units=int(summary["base_units"]),
-                exact_covered_base_units=int(summary["exact_units"]),
-                high_demand_uncovered_base_units=int(summary["high_uncovered"]),
+                base_units=int(summary["summary_base_units"]),
+                exact_covered_base_units=int(summary["summary_exact_units"]),
+                high_demand_uncovered_base_units=int(
+                    summary["summary_high_uncovered"]
+                ),
             ),
             strategy_name=self._strategy.name,
             strategy_version=self._strategy.version,
@@ -83,6 +107,11 @@ class SnapshotOpportunityRepository:
             page_size=query.page_size,
             pages=ceil(total / query.page_size),
         )
+        if not has_coverage:
+            if len(self._uncovered_cache) >= 128:
+                self._uncovered_cache.pop(next(iter(self._uncovered_cache)))
+            self._uncovered_cache[query] = result
+        return result
 
     def drill_down(
         self,
@@ -187,7 +216,7 @@ class SnapshotOpportunityRepository:
         }
 
     def _scored_cte(
-        self, query: OpportunityQuery
+        self, query: OpportunityQuery, *, include_coverage: bool = True
     ) -> tuple[str, tuple[object, ...]]:
         clauses: list[str] = []
         parameters: list[object] = []
@@ -210,21 +239,19 @@ class SnapshotOpportunityRepository:
         if query.group_by is OpportunityGroupBy.MODEL_YEAR:
             group_columns.append("model_year")
         groups = ", ".join(group_columns)
-        cte = f"""WITH base_atoms AS (
-            SELECT o.opportunity_id, v.make brand, v.model,
-                MIN(c.registration_cohort_year) model_year,
-                CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER) downside_units,
-                CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER) base_units,
-                CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER) upside_units
-            FROM opportunity_estimate o
-            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
-            JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
-            JOIN cohort_estimate c ON c.cohort_id = i.cohort_id
-            WHERE {where}
-            GROUP BY o.opportunity_id
-        ), atoms AS (
-            SELECT base_atoms.*,
-                CASE
+        needs_model_year = (
+            include_coverage or query.group_by is OpportunityGroupBy.MODEL_YEAR
+        )
+        model_year = "c.registration_cohort_year" if needs_model_year else "NULL"
+        lineage_joins = (
+            """JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
+                AND i.input_position = 0
+            JOIN cohort_estimate c ON c.cohort_id = i.cohort_id"""
+            if needs_model_year
+            else ""
+        )
+        coverage_status = (
+            """CASE
                     WHEN EXISTS (
                         SELECT 1 FROM coverage_db.production_coverage pc
                         WHERE pc.match_type = 'exact_configuration'
@@ -239,7 +266,22 @@ class SnapshotOpportunityRepository:
                         AND pc.model_year = base_atoms.model_year
                     ) THEN 'fallback_only'
                     ELSE 'uncovered'
-                END coverage_status
+                END"""
+            if include_coverage
+            else "'uncovered'"
+        )
+        cte = f"""WITH base_atoms AS MATERIALIZED (
+            SELECT o.opportunity_id, v.make brand, v.model,
+                {model_year} model_year,
+                CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER) downside_units,
+                CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER) base_units,
+                CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER) upside_units
+            FROM opportunity_estimate o
+            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+            {lineage_joins}
+            WHERE {where}
+        ), atoms AS (
+            SELECT base_atoms.*, {coverage_status} coverage_status
             FROM base_atoms
         ), grouped AS (
             SELECT brand, {model} model, {year} model_year,

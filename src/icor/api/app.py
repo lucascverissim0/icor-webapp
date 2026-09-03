@@ -74,7 +74,16 @@ def create_app(
     selected_repository = repository
     snapshot_manifest = None
     snapshot_ledger = None
-    if selected_repository is None:
+    has_explicit_service_override = any(
+        service is not None
+        for service in (
+            evidence_service,
+            registration_service,
+            completeness_service,
+            ml_export_service,
+        )
+    )
+    if selected_repository is None and not has_explicit_service_override:
         root = snapshot_root or Path(
             os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT", DEFAULT_EVIDENCE_ROOT)
         )

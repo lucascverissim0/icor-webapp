@@ -190,7 +190,8 @@ def test_cors_allows_only_the_configured_local_web_origin(client: TestClient) ->
 
 def test_openapi_is_versioned_and_documents_problem_responses(tmp_path: Path) -> None:
     schema = create_app(
-        coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3")
+        coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        snapshot_root=tmp_path / "missing-snapshot",
     ).openapi()
 
     assert schema["openapi"].startswith("3.1.")

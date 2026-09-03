@@ -149,6 +149,9 @@ class EvidenceReviewService:
         self.candidate_path = candidate_path
         self.database_path = candidate_path / "evidence.sqlite3"
         self.manifest = load_snapshot_manifest(candidate_path / "snapshot.json")
+        self._observation_total_cache: dict[
+            tuple[str, tuple[object, ...]], int
+        ] = {}
 
     @classmethod
     def from_snapshot(
@@ -158,6 +161,7 @@ class EvidenceReviewService:
         service.candidate_path = Path(database_path).parent
         service.database_path = Path(database_path)
         service.manifest = manifest
+        service._observation_total_cache = {}
         return service
 
     @classmethod
@@ -297,21 +301,38 @@ class EvidenceReviewService:
             parameters.extend((f"%{escaped}%", f"%{escaped}%"))
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         offset = (query.page - 1) * query.page_size
+        query_parameters = tuple(parameters)
+        order_by = (
+            "observation_id"
+            if query.search and query.search.strip()
+            else "release_id, geography, original_make, original_model, period_end, observation_id"
+        )
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT {_OBSERVATION_RESPONSE_COLUMNS} FROM observation{where}
+                ORDER BY {order_by} LIMIT ? OFFSET ?""",
+                (*query_parameters, query.page_size, offset),
+            ).fetchall()
+        total = self._observation_total(where, query_parameters)
+        items = tuple(_observation_row(row) for row in rows)
+        pages = (total + query.page_size - 1) // query.page_size if total else 0
+        return EvidenceObservationPage(items, total, query.page, query.page_size, pages)
+
+    def _observation_total(self, where: str, parameters: tuple[object, ...]) -> int:
+        key = where, parameters
+        cached = self._observation_total_cache.get(key)
+        if cached is not None:
+            return cached
         with self._connect() as connection:
             total = int(
                 connection.execute(
                     f"SELECT COUNT(*) FROM observation{where}", parameters
                 ).fetchone()[0]
             )
-            rows = connection.execute(
-                f"""SELECT {_OBSERVATION_RESPONSE_COLUMNS} FROM observation{where}
-                ORDER BY release_id, geography, original_make, original_model,
-                period_end, observation_id LIMIT ? OFFSET ?""",
-                (*parameters, query.page_size, offset),
-            ).fetchall()
-        items = tuple(_observation_row(row) for row in rows)
-        pages = (total + query.page_size - 1) // query.page_size if total else 0
-        return EvidenceObservationPage(items, total, query.page, query.page_size, pages)
+        if len(self._observation_total_cache) >= 256:
+            self._observation_total_cache.pop(next(iter(self._observation_total_cache)))
+        self._observation_total_cache[key] = total
+        return total
 
 
 def _escape_like(value: str) -> str:

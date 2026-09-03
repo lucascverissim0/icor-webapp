@@ -106,6 +106,7 @@ def _client(tmp_path: Path, service: StaticEvidenceService | None) -> TestClient
         create_app(
             coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
             evidence_service=service,
+            snapshot_root=tmp_path / "missing-snapshot",
         )
     )
 

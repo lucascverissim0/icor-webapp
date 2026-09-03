@@ -26,3 +26,19 @@ def test_missing_active_snapshot_fails_closed() -> None:
 
     assert response.status_code == 503
     assert response.json()["code"] == "planning_snapshot_unavailable"
+
+
+def test_explicit_service_override_does_not_compose_the_active_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_snapshot_open(self):  # type: ignore[no-untyped-def]
+        raise AssertionError("explicit service injection must remain isolated")
+
+    monkeypatch.setattr(
+        app_module.SnapshotStore, "open_active_snapshot", unexpected_snapshot_open
+    )
+
+    app = create_app(completeness_service=object())
+
+    assert app.state.snapshot_manifest is None
+    assert app.state.planner_service is None

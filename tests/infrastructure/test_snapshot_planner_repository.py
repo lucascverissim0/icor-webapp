@@ -270,6 +270,48 @@ def test_interactive_sqlite_methods_reject_an_unbounded_projection(
     assert sqlite_repository.get("opportunity-golf") is not None
 
 
+def test_sqlite_search_aggregates_opportunities_before_loading_page_lineage(
+    sqlite_repository: SnapshotPlannerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[str] = []
+    connect = sqlite_repository._connect
+
+    def traced_connection(path: Path):  # type: ignore[no-untyped-def]
+        connection = connect(path)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite_repository, "_connect", traced_connection)
+
+    page = sqlite_repository.search(PlannerQuery(page=1, page_size=1))
+
+    assert len(page.items) == 1
+    summary = next(statement for statement in statements if "candidate_count" in statement)
+    assert "opportunity_input" not in summary
+    paged = next(statement for statement in statements if "first_cohort_year" in statement)
+    assert paged.index("LIMIT 1 OFFSET 0") < paged.index("FROM opportunity_input")
+
+
+def test_sqlite_search_reuses_a_bounded_immutable_page(
+    sqlite_repository: SnapshotPlannerRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    search = sqlite_repository._search_sqlite
+
+    def counted_search(path: Path, query: PlannerQuery):
+        nonlocal calls
+        calls += 1
+        return search(path, query)
+
+    monkeypatch.setattr(sqlite_repository, "_search_sqlite", counted_search)
+    query = PlannerQuery(page=1, page_size=1)
+
+    assert sqlite_repository.search(query) == sqlite_repository.search(query)
+    assert calls == 1
+
+
 def test_sqlite_opportunity_ranking_and_drill_down_are_bounded(
     sqlite_repository: SnapshotPlannerRepository,
     tmp_path: Path,
@@ -304,3 +346,49 @@ def test_sqlite_opportunity_ranking_and_drill_down_are_bounded(
     rows = repository.drill_down(page.items[0].group_id, query, 1, 1)
     assert len(rows) == 1
     assert calls == [1]
+
+
+def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    statements: list[str] = []
+    connect = repository._connect
+
+    def traced_connection():  # type: ignore[no-untyped-def]
+        connection = connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(repository, "_connect", traced_connection)
+
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND, page=1, page_size=1)
+    )
+    repeated = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND, page=1, page_size=1)
+    )
+
+    assert len(page.items) == 1
+    assert repeated == page
+    scored = [statement for statement in statements if "WITH base_atoms" in statement]
+    assert len(scored) == 1
+    assert "GROUP BY o.opportunity_id" not in scored[0]
+    assert "summary_total" in scored[0]
+    base_atoms = scored[0].split("), atoms AS", 1)[0]
+    assert "opportunity_input" not in base_atoms
+
+    model_year_cte, unused = repository._scored_cte(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=1
+        ),
+        include_coverage=False,
+    )
+    assert "i.input_position = 0" in model_year_cte
+    assert "GROUP BY o.opportunity_id" not in model_year_cte

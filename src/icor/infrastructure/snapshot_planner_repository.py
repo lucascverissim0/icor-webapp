@@ -40,6 +40,7 @@ class SnapshotPlannerRepository:
         self.versions: SnapshotVersions = manifest.versions
         self._records: tuple[PlanningConfiguration, ...] | None = None
         self._source_cache: tuple[SourceSummary, ...] | None = None
+        self._search_cache: dict[PlannerQuery, PlannerPage] = {}
 
     def list_all(self) -> tuple[PlanningConfiguration, ...]:
         if self._records is None:
@@ -117,7 +118,14 @@ class SnapshotPlannerRepository:
         path = getattr(self._ledger, "path", None)
         if not isinstance(path, Path):
             return filter_sort_paginate(self._project_objects(), query)
-        return self._search_sqlite(path, query)
+        cached = self._search_cache.get(query)
+        if cached is not None:
+            return cached
+        result = self._search_sqlite(path, query)
+        if len(self._search_cache) >= 128:
+            self._search_cache.pop(next(iter(self._search_cache)))
+        self._search_cache[query] = result
+        return result
 
     def _project(self) -> tuple[PlanningConfiguration, ...]:
         path = getattr(self._ledger, "path", None)
@@ -156,24 +164,23 @@ class SnapshotPlannerRepository:
             query_parameters = (
                 parameters if limit is None else (*parameters, limit, offset)
             )
+            outer_order = (
+                order_by.replace("opportunity.", "")
+                .replace("generation.", "")
+                .replace("vehicle.", "")
+            )
             rows = connection.execute(
-                f"""SELECT opportunity.*, generation.display_name,
-                generation.start_month, generation.end_month,
-                generation.identity_kind, generation.body_style,
-                generation.facelift, generation.confidence_reasons,
-                generation.evidence_ids, vehicle.make, vehicle.model,
-                MIN(cohort.registration_cohort_year) AS first_cohort_year
-                FROM opportunity_estimate opportunity
-                JOIN generation_entry generation
-                    ON generation.generation_id = opportunity.generation_id
-                JOIN canonical_vehicle vehicle
-                    ON vehicle.vehicle_id = opportunity.canonical_vehicle_id
-                JOIN opportunity_input input
-                    ON input.opportunity_id = opportunity.opportunity_id
-                JOIN cohort_estimate cohort ON cohort.cohort_id = input.cohort_id
-                WHERE {where}
-                GROUP BY opportunity.opportunity_id
-                ORDER BY {order_by}{suffix}""",
+                f"""WITH page AS MATERIALIZED (
+                    {self._base_sql(where)}
+                    ORDER BY {order_by}{suffix}
+                )
+                SELECT page.*, (
+                    SELECT MIN(cohort.registration_cohort_year)
+                    FROM opportunity_input input
+                    JOIN cohort_estimate cohort ON cohort.cohort_id = input.cohort_id
+                    WHERE input.opportunity_id = page.opportunity_id
+                ) AS first_cohort_year
+                FROM page ORDER BY {outer_order}""",
                 query_parameters,
             ).fetchall()
         records = []
@@ -316,18 +323,13 @@ class SnapshotPlannerRepository:
             generation.start_month, generation.end_month,
             generation.identity_kind, generation.body_style,
             generation.facelift, generation.confidence_reasons,
-            generation.evidence_ids, vehicle.make, vehicle.model,
-            MIN(cohort.registration_cohort_year) AS first_cohort_year
+            generation.evidence_ids, vehicle.make, vehicle.model
             FROM opportunity_estimate opportunity
             JOIN generation_entry generation
                 ON generation.generation_id = opportunity.generation_id
             JOIN canonical_vehicle vehicle
                 ON vehicle.vehicle_id = opportunity.canonical_vehicle_id
-            JOIN opportunity_input input
-                ON input.opportunity_id = opportunity.opportunity_id
-            JOIN cohort_estimate cohort ON cohort.cohort_id = input.cohort_id
-            WHERE {where}
-            GROUP BY opportunity.opportunity_id"""
+            WHERE {where}"""
 
     @staticmethod
     def _connect(path: Path) -> sqlite3.Connection:

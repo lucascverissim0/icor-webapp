@@ -184,6 +184,45 @@ def test_observations_filter_and_paginate_deterministically(candidate: Path) -> 
     assert page.items[0].observation_year == 2024
 
 
+def test_repeated_observation_search_reuses_the_immutable_total(
+    candidate: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = EvidenceReviewService.from_candidate(candidate)
+    statements: list[str] = []
+    connect = service._connect
+
+    def traced_connection():  # type: ignore[no-untyped-def]
+        connection = connect()
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(service, "_connect", traced_connection)
+
+    first = service.list_observations(EvidenceObservationQuery(search="golf"))
+    second = service.list_observations(EvidenceObservationQuery(search="golf"))
+    missing = service.list_observations(EvidenceObservationQuery(search="not present"))
+    repeated_missing = service.list_observations(
+        EvidenceObservationQuery(search="not present")
+    )
+
+    assert first == second
+    assert missing == repeated_missing
+    assert missing.total == 0
+    count_queries = [
+        statement
+        for statement in statements
+        if "SELECT COUNT(*) FROM observation" in statement
+    ]
+    assert len(count_queries) == 2
+    search_queries = [
+        statement
+        for statement in statements
+        if "SELECT observation_id" in statement and "LIKE" in statement
+    ]
+    assert search_queries
+    assert all("ORDER BY observation_id" in statement for statement in search_queries)
+
+
 def test_vintage_stock_keeps_observation_and_first_registration_years_distinct(
     candidate: Path,
 ) -> None:

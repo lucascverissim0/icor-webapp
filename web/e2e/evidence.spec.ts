@@ -16,7 +16,6 @@ const axePath = fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', imp
 const usesRealCandidate = Boolean(process.env.ICOR_E2E_EVIDENCE_CANDIDATE)
 const expectedObservationCount = usesRealCandidate ? '542,455' : '3'
 const expectedReleaseCount = usesRealCandidate ? 4 : 1
-const expectedZeroMetrics = usesRealCandidate ? 2 : 3
 
 test.describe.configure({ timeout: 90_000 })
 
@@ -33,10 +32,11 @@ test('reviews the sealed official candidate without forecast claims', async ({ p
   await expect(page.getByText(/exact normalized model-family identity/i)).toBeVisible()
   await expect(page.getByText(/registration year is not model year/i)).toBeVisible()
   await expect(page.getByText(/candidate does not feed forecasts/i)).toBeVisible()
-  await expect(page.getByRole('definition').filter({ hasText: /^0$/ })).toHaveCount(
-    expectedZeroMetrics,
-  )
+  await expect(
+    page.locator('.evidence-metrics').getByRole('definition').filter({ hasText: /^0$/ }),
+  ).toHaveCount(2)
 
+  await page.getByRole('button', { name: 'Browse raw observations' }).click()
   await page.getByRole('searchbox', { name: 'Search source labels' }).fill('ALFA ROMEO')
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect.poll(() => page.evaluate(
