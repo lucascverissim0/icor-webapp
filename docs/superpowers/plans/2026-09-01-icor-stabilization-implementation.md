@@ -288,22 +288,29 @@ Run focused and clean-room integration tests; commit with `feat: add latest prov
 **Interfaces:**
 - Produces one verified candidate snapshot, atomic promotion record, measured endpoint report, and durable handoff.
 
-- [ ] **Step 1: Run complete local gates**
+- [x] **Step 1: Run complete local gates**
 
 Run lock check, maintained Ruff, full pytest, Vitest, TypeScript, ESLint, production Vite build, OpenAPI compatibility, dependency audits, Playwright, and `git diff --check`. Record exact counts and failures.
 
-- [ ] **Step 2: Build and validate a candidate**
+- [x] **Step 2: Build and validate a candidate**
 
 Use the documented clean-room build with all pinned releases. Validate schema 5, checksums, quality audit, release membership, Golf 2024 family total/breakdown, timeline availability, and planner/opportunity totals.
 
-- [ ] **Step 3: Measure performance**
+- [x] **Step 3: Measure performance**
 
 Measure cold readiness and warm p95 for representative Registration, Evidence, Planner, and Opportunity requests. Do not promote if any endpoint deserializes an unbounded set or misses its target without a documented, approved revision.
 
-- [ ] **Step 4: Promote atomically and run live checks**
+- [x] **Step 4: Promote atomically and run live checks**
 
 Promote only the verified candidate, restart the authenticated private Codespaces preview, exercise all four workflows and logout, verify anonymous 401 behavior, and reopen the app for Lucas.
 
-- [ ] **Step 5: Update durable handoff and commit**
+- [x] **Step 5: Update durable handoff and commit**
 
 Record exact commit, snapshot ID/SHA, releases, test counts, timings, live URL/state, rollback snapshot, and remaining owner actions. Commit with `docs: hand off stabilized ICOR preview`.
+
+Execution note (2026-09-03): the candidate was promoted and exercised through the
+authenticated production preview composition on localhost, including all application
+routes, APIs, security boundaries, and logout. The Codespaces-only runner correctly
+rejects this Windows host, so no remote Codespaces process was restarted and no public
+port was opened. The durable handoff records the exact restart boundary rather than
+claiming a remote deployment that this environment cannot perform.

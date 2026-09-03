@@ -2244,3 +2244,71 @@ schema version 4, then a missing rebuild method, then empty candidate projection
 verification reported 77 passed and one documented Windows symlink-privilege skip across
 the full repository and snapshot-build files; Ruff and `git diff --check` passed. A reversed
 input build remained byte-identical.
+
+## 2026-09-03 ICOR stabilization completed and active snapshot verified
+
+All eight stabilization tasks are complete on
+development/windshield-demand-platform. The implementation commits are f4bddd6,
+8369df6, 8708e3b, 06bbb99, 768fad8, 2c2ef01, c52927f, and 164956c.
+The last commit adds bounded and cached Evidence, Planner, and Opportunity reads,
+preserves live coverage invalidation, fixes the Evidence browser workflow, and prevents
+explicit test/service injection from silently composing the 11 GB active snapshot.
+Protected main was not changed. The unrelated local AGENTS.md edit remains unstaged.
+
+The atomically promoted active snapshot is
+snapshot-fcb3cdb004a4b7c4042b, database SHA-256
+9733d748a239a34184edce41c23df073ea0fb2fea034b7e60aead89e6fe7de65,
+manifest SHA-256 79f8b4d6fcd404219b9cfbe666819752c531c109a68389c1f32f246cca45ccf6,
+schema 5, build-as-of 2026-08-27T12:00:00+00:00, and deterministic seed
+20260827. It contains 1,555,677 observations, zero published values, 21 releases,
+and 100 non-blocking snapshot.generic_vehicle_label warnings. The exact releases are
+EEA CO2 cars 2010-2024 final revisions v2 through v30, EEA 2025 provisional v31,
+KBA FZ10 2024-12 v3, and UK DfT VEH0120 GB, VEH0124 AM/NZ, and VEH0160 GB 2025.
+The final supported status command reported this snapshot active, and the final
+supported verify command independently matched its SHA, all 21 release IDs,
+manifest/repository observation counts, zero published-value counts, and state
+verified.
+
+Independent semantic checks reported 1,377,325 assigned observations, 1,780,398
+cohorts, 617 completeness records, 85,306 estimated generations, 85,306 generation
+entries, 945,232 evidence-only records, 609,963 forecastable records, 111,600
+opportunities, and 1,134,350 rejected source records. Sourced generations remain zero
+and are labelled accordingly. EU27 Golf 2024 final totals 61,900 and its label
+breakdown sums exactly to 61,900 from eea-co2cars-2024-final-v30-r1. EU27 exposes
+2010-2025 with 2024 final and 2025 provisional; unsupported EU27 2000 and UK annual
+registration queries return unavailable rather than misleading zeroes.
+
+Production-sized timings in seconds were: Registration cold 0.156 and warm p95 0.127;
+Evidence summary cold 0.014 and warm p95 0.006; Evidence rows cold 2.613 and warm p95
+0.018; Planner options cold/warm p95 0.046/0.045; Planner configurations cold 4.106
+and warm p95 0.008; Opportunity brand cold/warm p95 1.285/0.006, model
+2.019/0.006, and model-year 6.072/0.027. All interactive warm targets pass. The
+model-year first uncached request remains the documented cold-path ceiling; subsequent
+immutable reads are bounded and cached, while every Opportunity request checks live
+coverage existence before using an uncovered cache.
+
+Final local verification after all code changes: 582 backend tests passed, 14
+documented Windows/real-snapshot tests skipped, and four known characterization tests
+XFAILed in 60.82 seconds; maintained Ruff and git diff --check passed. Frontend
+verification passed 68 Vitest tests across 14 files, TypeScript, ESLint, the Vite
+production build (1,955 modules), OpenAPI regeneration/compatibility, and all 20
+Playwright workflows in 44.7 seconds. uv lock --check, pip-audit, and npm audit
+passed with no known vulnerabilities; only the unpublished local Python package was
+not auditable on PyPI.
+
+The authenticated production preview composition was exercised locally against the
+verified active database and compiled assets. Health returned 200; anonymous
+application/API requests returned 401; login returned 303 with Secure, HttpOnly,
+SameSite=strict, Path=/ cookies; authenticated Registrations, Evidence, Planner,
+Opportunities, and Completeness pages/APIs returned 200; logout expired the cookie and
+subsequent API access returned 401. The Codespaces runner correctly rejected the
+current Windows host, so the private Codespaces preview was not restarted and no
+public port or server remains running. A future authorized Codespaces restart must
+transfer/rebuild this exact active snapshot and use the documented private runner; do
+not describe the older remote preview as serving this snapshot.
+
+The former physical snapshot snapshot-2f13ba3f0cd083c7eea8 remains retained, but its
+old active state was incompatible with schema 5 and resolved unavailable before this
+promotion; treat it as a physical recovery artifact, not an application-ready rollback.
+The branch and these commits remain local and were not pushed or merged. No further
+product-code work is pending in this stabilization plan.
