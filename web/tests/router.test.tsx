@@ -72,14 +72,14 @@ describe('planner router', () => {
     })
   })
 
-  it('opens official registrations by default with bounded URL state', async () => {
-    const history = createMemoryHistory({ initialEntries: ['/?search=Alpha&page=2'] })
+  it('opens model-year opportunities by default with bounded URL state', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/?groupBy=model_year&page=2'] })
     const router = createPlannerRouter(history)
     await router.load()
 
-    expect(router.state.location.pathname).toBe('/registrations')
+    expect(router.state.location.pathname).toBe('/opportunities')
     expect(router.state.location.search).toEqual({
-      geography: 'EU27', year: 2024, search: 'Alpha', page: 2,
+      groupBy: 'model_year', page: 2,
     })
   })
 })

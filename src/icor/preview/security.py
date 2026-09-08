@@ -55,3 +55,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/auth/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+
+class ClientReleaseMiddleware(BaseHTTPMiddleware):
+    """Deny internal and mutable surfaces in the verified client preview."""
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        path = request.url.path
+        if path in {"/healthz", "/auth/login", "/auth/logout"}:
+            return await call_next(request)
+        if request.method not in {"GET", "HEAD"}:
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        if path in {"/", "/opportunities", "/planner", "/api/health"}:
+            return await call_next(request)
+        if path.startswith("/assets/"):
+            return await call_next(request)
+        if path.startswith("/api/v1/opportunities"):
+            return await call_next(request)
+        if path.startswith("/api/v1/vehicle-forecasts"):
+            return await call_next(request)
+        if path == "/api/v1/registrations/summary":
+            return await call_next(request)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)

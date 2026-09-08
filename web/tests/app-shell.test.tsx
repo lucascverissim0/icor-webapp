@@ -8,16 +8,19 @@ import { RouteErrorFallback } from '../src/app/ErrorBoundary'
 
 
 describe('AppShell', () => {
-  it('leads with official evidence and generation planning navigation', () => {
+  it('leads with windshield forecasts and decision-first navigation', () => {
     render(
       <AppShell>
         <h2>Planner content</h2>
       </AppShell>,
     )
 
-    expect(screen.getByText('Official evidence')).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'Vehicle evidence and planning' })).toBeVisible()
-    expect(screen.getAllByText('Planning').length).toBeGreaterThan(0)
+    expect(screen.getByText('Forecast workspace')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Windshield replacement forecasts' })).toBeVisible()
+    const logos = screen.getAllByRole('img', { name: 'ICOR — automatically perfect' })
+    expect(logos).toHaveLength(2)
+    expect(logos[0]).toHaveAttribute('src', expect.stringContaining('icor-logo-white'))
+    expect(screen.getAllByText('Decision tools').length).toBeGreaterThan(0)
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Mobile primary' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open navigation' })).toBeVisible()
@@ -33,7 +36,7 @@ describe('AppShell', () => {
       'href',
       '#app-content',
     )
-    for (const link of screen.getAllByRole('link', { name: 'Generation planner' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Model search' })) {
       expect(link).toHaveAttribute('href', '/planner')
     }
     for (const link of screen.getAllByRole('link', { name: 'Opportunities' })) {
@@ -48,6 +51,18 @@ describe('AppShell', () => {
     for (const link of screen.getAllByRole('link', { name: 'Completeness' })) {
       expect(link).toHaveAttribute('href', '/completeness')
     }
+  })
+
+  it('shows only client-safe decision tools in verified release mode', () => {
+    render(<AppShell clientRelease>Planner content</AppShell>)
+
+    expect(screen.getAllByRole('link', { name: 'Opportunities' })).not.toHaveLength(0)
+    expect(screen.getAllByRole('link', { name: 'Model search' })).not.toHaveLength(0)
+    expect(screen.queryByRole('link', { name: 'Official registrations' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Source evidence' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Completeness' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'ML export' })).not.toBeInTheDocument()
+    expect(screen.getByText('Verified client preview')).toBeVisible()
   })
 
   it('labels the mobile disclosure according to its current action', async () => {
@@ -70,7 +85,7 @@ describe('AppShell', () => {
       </AppShell>,
     )
 
-    expect(screen.getByText('Official evidence')).toBeVisible()
+    expect(screen.getByText('Forecast workspace')).toBeVisible()
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Mobile primary' })).toBeInTheDocument()
     expect(screen.getByText('This view could not be opened')).toBeVisible()

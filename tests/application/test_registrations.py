@@ -227,7 +227,12 @@ def test_eu27_ranking_sums_only_final_eea_member_observations(
     assert page.items[0].registrations == Decimal("15")
     assert page.items[0].rank == 1
     assert page.items[0].status == "derived_observed"
-    assert page.items[0].model_year is None
+    assert page.items[0].model_year == 2024
+    assert page.items[0].model_year_basis == "registration_year_proxy"
+    assert page.items[0].generation_name is None
+    assert page.items[0].generation_basis == "registration_year_proxy"
+    assert page.items[0].generation_confidence == "low"
+    assert page.items[0].generation_source_url is None
     assert page.items[0].source_ids == ("eea-co2-monitoring",)
     assert page.items[0].input_observation_count == 2
     assert page.items[0].evidence_confidence == 79

@@ -24,7 +24,10 @@ const summary = {
 const ranking = {
   items: [{
     rank: 1, vehicle_id: 'vehicle-example-alpha', make: 'Example Motors', model: 'Alpha',
-    model_year: null, registrations: '1500000', status: 'derived_observed',
+    model_year: 2024, model_year_basis: 'registration_year_proxy',
+    generation_name: null, generation_basis: 'registration_year_proxy',
+    generation_confidence: 'low', generation_source_url: null,
+    registrations: '1500000', status: 'derived_observed',
     evidence_confidence: 79, input_observation_count: 27,
     release_ids: ['eea-co2cars-2024-final-v30-r1'], source_ids: ['eea-co2-monitoring'],
     publication_status: 'final', evidence_kind: 'observed',
@@ -73,18 +76,49 @@ function renderRegistrations(
 }
 
 describe('RegistrationsWorkbench', () => {
-  it('presents official registration evidence without inventing model year or demand', async () => {
+  it('presents registration year as an explicit generation proxy without claiming a sourced model year', async () => {
     renderRegistrations(successFetcher())
 
     expect(await screen.findByText('Example Motors')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Official 2024 registrations' })).toBeVisible()
     expect(screen.getByText('15,000,000')).toBeVisible()
     expect(screen.getByText('1,500,000')).toBeVisible()
-    expect(screen.getByText('Model year unavailable')).toBeVisible()
-    expect(screen.getByText(/registration year is not model year/i)).toBeVisible()
-    expect(screen.getByText(/windshield fitment and replacement forecasts are not inferred/i)).toBeVisible()
+    expect(screen.getByText('2024 generation-year proxy')).toBeVisible()
+    expect(screen.getByText(/generation evidence stays explicit/i)).toBeVisible()
+    expect(screen.getByText(/manufacturer model year remains unavailable/i)).toBeVisible()
     expect(screen.getByRole('link', { name: 'Inspect source evidence' })).toHaveAttribute('href', '/evidence')
     expect(screen.queryByText(/demonstration forecast/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a reviewed manufacturer generation when one is available', async () => {
+    const golfRanking = {
+      ...ranking,
+      items: [{
+        ...ranking.items[0],
+        vehicle_id: 'vehicle-volkswagen-golf',
+        make: 'Volkswagen',
+        model: 'Golf',
+        generation_name: 'Golf Mk8',
+        generation_basis: 'manufacturer_generation_window',
+        generation_confidence: 'high',
+        generation_source_url: 'https://www.volkswagen-newsroom.com/en/history',
+      }],
+    }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.endsWith('/api/v1/registrations/summary')) return Promise.resolve(json(summary))
+      if (url.includes('/api/v1/registrations/ranking')) return Promise.resolve(json(golfRanking))
+      throw new Error(`Unhandled URL: ${url}`)
+    })
+
+    renderRegistrations(fetcher)
+
+    expect(await screen.findByText('Golf Mk8')).toBeVisible()
+    expect(screen.getByText('Manufacturer-confirmed generation')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Generation source' })).toHaveAttribute(
+      'href',
+      'https://www.volkswagen-newsroom.com/en/history',
+    )
   })
 
   it('sends URL-ready search and page changes through its state boundary', async () => {

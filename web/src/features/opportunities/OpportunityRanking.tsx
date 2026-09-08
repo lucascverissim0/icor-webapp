@@ -20,7 +20,7 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
     <section aria-labelledby="ranking-title" className="opportunity-ranking">
       <div className="ranking-heading">
         <div><p className="eyebrow">Ranked decision set</p><h2 id="ranking-title">Replacement opportunities</h2></div>
-        <p>Score = 80% relative demand + 20% production readiness</p>
+        <p>Score = up to 80 points for forecast demand + up to 20 points for ICOR readiness</p>
       </div>
       <ol className="opportunity-list">
         {rows.map((row, index) => {
@@ -30,7 +30,11 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
               <span className="opportunity-rank" aria-label={`Rank ${index + 1}`}>{index + 1}</span>
               <div className="opportunity-card__body">
                 <div className="opportunity-card__heading">
-                  <div><h3>{label(row)}</h3><p>{row.contributing_configuration_count} contributing configurations</p></div>
+                  <div>
+                    <h3>{label(row)}</h3>
+                    <p className="generation-name">{row.generation_name ?? 'Generation not yet verified'}</p>
+                    <p>{row.contributing_configuration_count} contributing configurations</p>
+                  </div>
                   <span className={`coverage-status coverage-status--${row.coverage_status}`}>{row.coverage_status.replaceAll('_', ' ')}</span>
                 </div>
                 <div className="opportunity-demand">
@@ -42,9 +46,14 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
                   <span>Fallback {format(row.fallback_covered_base_units)}</span>
                   <span>Uncovered {format(row.uncovered_base_units)}</span>
                 </div>
+                {row.icor_worked_base_units > 0 && (
+                  <p className="icor-experience">ICOR has worked on this vehicle-year · {format(row.icor_worked_base_units)} forecast replacements receive partial readiness credit</p>
+                )}
                 <div className="opportunity-score">
                   <strong aria-describedby={descriptionId}>Score {row.score.total_points.toFixed(1)}</strong>
                   <span id={descriptionId}>{row.score.demand_points.toFixed(0)} points from relative demand and {row.score.readiness_points.toFixed(1)} points from production readiness.</span>
+                  <span>Demand contribution: {row.score.demand_points.toFixed(1)} of 80 points ({Math.round(row.score.demand_percentile * 100)}th percentile).</span>
+                  <span>Readiness contribution: {row.score.readiness_points.toFixed(1)} of 20 points. Exact configuration coverage receives full weight; vehicle-year or legacy worked-model coverage receives half weight.</span>
                 </div>
                 <button aria-expanded={selectedGroup === row.group_id} onClick={() => onSelect(row.group_id)} type="button">View {label(row)} details</button>
               </div>

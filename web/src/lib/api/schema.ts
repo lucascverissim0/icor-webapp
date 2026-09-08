@@ -244,6 +244,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicle-forecasts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Vehicle Forecast */
+        get: operations["vehicle_forecast_api_v1_vehicle_forecasts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vehicle-forecasts/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Vehicle Forecast Options */
+        get: operations["vehicle_forecast_options_api_v1_vehicle_forecasts_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -521,6 +555,21 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** GenerationOptionResponse */
+        GenerationOptionResponse: {
+            /** Basis */
+            basis: string;
+            /** Confidence */
+            confidence: string;
+            /** End Year */
+            end_year: number | null;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Start Year */
+            start_year: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -540,6 +589,21 @@ export interface components {
          * @enum {string}
          */
         MappingStatus: "exact_identifier" | "curated_alias" | "normalized_label" | "reviewed_probable" | "ambiguous" | "rejected" | "unresolved";
+        /** MarketVehicleForecastResponse */
+        MarketVehicleForecastResponse: {
+            active_fleet: components["schemas"]["DemandRangeResponse"] | null;
+            /** Availability */
+            availability: string;
+            /** Code */
+            code: string;
+            /** Cohort Count */
+            cohort_count: number;
+            /** Name */
+            name: string;
+            /** Registration Cohort Units */
+            registration_cohort_units: number | null;
+            replacements: components["schemas"]["DemandRangeResponse"] | null;
+        };
         /**
          * Measure
          * @enum {string}
@@ -609,10 +673,16 @@ export interface components {
             exact_covered_base_units: number;
             /** Fallback Covered Base Units */
             fallback_covered_base_units: number;
+            /** Generation Basis */
+            generation_basis: string | null;
+            /** Generation Name */
+            generation_name: string | null;
             /** Group By */
             group_by: string;
             /** Group Id */
             group_id: string;
+            /** Icor Worked Base Units */
+            icor_worked_base_units: number;
             /** Model */
             model: string | null;
             /** Model Year */
@@ -853,6 +923,14 @@ export interface components {
              * @default observed
              */
             evidence_kind: string;
+            /** Generation Basis */
+            generation_basis: string;
+            /** Generation Confidence */
+            generation_confidence: string;
+            /** Generation Name */
+            generation_name: string | null;
+            /** Generation Source Url */
+            generation_source_url: string | null;
             /** Input Observation Count */
             input_observation_count: number;
             /**
@@ -865,7 +943,9 @@ export interface components {
             /** Model */
             model: string;
             /** Model Year */
-            model_year: null;
+            model_year: number;
+            /** Model Year Basis */
+            model_year_basis: string;
             /**
              * Publication Status
              * @default final
@@ -986,6 +1066,67 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VehicleForecastOptionsResponse */
+        VehicleForecastOptionsResponse: {
+            /** Generations */
+            generations: components["schemas"]["GenerationOptionResponse"][];
+            /** Horizons */
+            horizons: number[];
+            /** Vehicles */
+            vehicles: components["schemas"]["VehicleOptionResponse"][];
+            /** Years */
+            years: number[];
+        };
+        /** VehicleForecastResponse */
+        VehicleForecastResponse: {
+            /** Brand */
+            brand: string;
+            /** Calibration Status */
+            calibration_status: string;
+            /** Data Version */
+            data_version: string;
+            /** Excluded Ambiguous Years */
+            excluded_ambiguous_years: number[];
+            /** Excluded Forecast Cohort Years */
+            excluded_forecast_cohort_years: number[];
+            /** Generation Basis */
+            generation_basis: string;
+            /** Generation Confidence */
+            generation_confidence: string;
+            /** Generation End Year */
+            generation_end_year: number | null;
+            /** Generation Key */
+            generation_key: string;
+            /** Generation Name */
+            generation_name: string;
+            /** Generation Source Url */
+            generation_source_url: string | null;
+            /** Generation Start Year */
+            generation_start_year: number;
+            /** Hazard Method */
+            hazard_method: string;
+            /** Horizon */
+            horizon: number;
+            /** Included Cohort Years */
+            included_cohort_years: number[];
+            /** Markets */
+            markets: components["schemas"]["MarketVehicleForecastResponse"][];
+            /** Model */
+            model: string;
+            /** Selected Year */
+            selected_year: number | null;
+            /** Survival Method */
+            survival_method: string;
+            /** Uncertainty Method */
+            uncertainty_method: string;
+        };
+        /** VehicleOptionResponse */
+        VehicleOptionResponse: {
+            /** Brand */
+            brand: string;
+            /** Model */
+            model: string;
         };
     };
     responses: never;
@@ -1785,6 +1926,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegistrationSummaryResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    vehicle_forecast_api_v1_vehicle_forecasts_get: {
+        parameters: {
+            query: {
+                brand: string;
+                model: string;
+                horizon: number;
+                year?: number | null;
+                generation?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleForecastResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    vehicle_forecast_options_api_v1_vehicle_forecasts_options_get: {
+        parameters: {
+            query?: {
+                search?: string | null;
+                brand?: string | null;
+                model?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleForecastOptionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Service Unavailable */

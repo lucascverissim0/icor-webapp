@@ -163,6 +163,8 @@ describe('PlannerWorkbench', () => {
     expect(screen.getAllByText('980–1,510 units')).not.toHaveLength(0)
     expect(screen.getAllByText('Demonstration')).not.toHaveLength(0)
     expect(screen.getAllByText('Identity confidence: Medium')).not.toHaveLength(0)
+    expect(screen.getByRole('heading', { name: 'Search vehicle forecasts' })).toBeVisible()
+    expect(screen.getByText(/find a brand, model, and generation/i)).toBeVisible()
   })
 
   it('keeps filters while retrying a server error', async () => {

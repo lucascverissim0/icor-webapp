@@ -20,6 +20,7 @@ from icor.api.opportunities import router as opportunity_router
 from icor.api.planner import router as planner_router
 from icor.api.registrations import router as registration_router
 from icor.api.schemas import FieldError, ProblemResponse
+from icor.api.vehicle_forecasts import router as vehicle_forecast_router
 from icor.application.completeness import CompletenessQueryService
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
 from icor.application.evidence_review import EvidenceReviewService
@@ -28,9 +29,13 @@ from icor.application.opportunities import OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandReadinessV1
 from icor.application.registrations import RegistrationService
+from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
 from icor.infrastructure.snapshot_store import SnapshotStore, SnapshotUnavailableError
+from icor.infrastructure.snapshot_vehicle_forecast_repository import (
+    SnapshotVehicleForecastRepository,
+)
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 LOGGER = logging.getLogger(__name__)
@@ -65,6 +70,8 @@ def create_app(
     ml_export_service=None,
     export_token: str | None = None,
     snapshot_root: Path | None = None,
+    vehicle_forecast_service=None,
+    client_release: bool = False,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
@@ -81,24 +88,20 @@ def create_app(
             registration_service,
             completeness_service,
             ml_export_service,
+            vehicle_forecast_service,
         )
     )
     if selected_repository is None and not has_explicit_service_override:
-        root = snapshot_root or Path(
-            os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT", DEFAULT_EVIDENCE_ROOT)
-        )
+        root = snapshot_root or Path(os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT", DEFAULT_EVIDENCE_ROOT))
         try:
             snapshot_manifest, snapshot_ledger = SnapshotStore(root).open_active_snapshot()
-            if (
-                snapshot_manifest.versions.generation_registry.endswith("-v0")
-                or snapshot_manifest.versions.generation_resolver.endswith("-v0")
-            ):
+            if snapshot_manifest.versions.generation_registry.endswith(
+                "-v0"
+            ) or snapshot_manifest.versions.generation_resolver.endswith("-v0"):
                 raise SnapshotUnavailableError(
                     "active snapshot does not contain generation planning data"
                 )
-            selected_repository = SnapshotPlannerRepository(
-                snapshot_ledger, snapshot_manifest
-            )
+            selected_repository = SnapshotPlannerRepository(snapshot_ledger, snapshot_manifest)
         except SnapshotUnavailableError as error:
             snapshot_manifest = None
             snapshot_ledger = None
@@ -122,6 +125,10 @@ def create_app(
                 selected_repository,
                 selected_coverage_repository,
                 DemandReadinessV1(),
+                worked_models=IcorWorkedModelCatalog.from_path(
+                    ROOT / "data" / "icor_supported_models.txt"
+                ),
+                verified_only=client_release,
             )
         )
     elif selected_repository is not None:
@@ -144,10 +151,19 @@ def create_app(
         registration_service = RegistrationService(snapshot_ledger.path, snapshot_manifest)
     app.state.snapshot_manifest = snapshot_manifest
     app.state.snapshot_repository = snapshot_ledger
-    if completeness_service is None and snapshot_manifest is not None:
-        completeness_service = CompletenessQueryService(
-            snapshot_ledger, snapshot_manifest
+    if (
+        vehicle_forecast_service is None
+        and snapshot_manifest is not None
+        and snapshot_ledger is not None
+    ):
+        vehicle_forecast_service = SnapshotVehicleForecastRepository(
+            snapshot_ledger.path,
+            snapshot_manifest.snapshot_id,
+            verified_only=client_release,
         )
+    app.state.vehicle_forecast_service = vehicle_forecast_service
+    if completeness_service is None and snapshot_manifest is not None:
+        completeness_service = CompletenessQueryService(snapshot_ledger, snapshot_manifest)
     if ml_export_service is None and snapshot_manifest is not None:
         ml_export_service = MLExportService(snapshot_ledger, snapshot_manifest.snapshot_id)
     configured_export_token = export_token or os.getenv("ICOR_EXPORT_TOKEN")
@@ -158,6 +174,7 @@ def create_app(
     app.state.export_token = configured_export_token
     app.state.evidence_service = evidence_service
     app.state.registration_service = registration_service
+    app.state.client_release = client_release
 
     @app.middleware("http")
     async def correlation_id(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -205,6 +222,7 @@ def create_app(
     )
     app.include_router(planner_router)
     app.include_router(opportunity_router)
+    app.include_router(vehicle_forecast_router)
     app.include_router(evidence_router)
     app.include_router(registration_router)
     app.include_router(completeness_router)

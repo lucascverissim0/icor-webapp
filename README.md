@@ -14,6 +14,10 @@ Development is local-first and isolated from the currently deployed application.
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, audit, test, and local-app
 commands.
 
+The narrow authenticated Volkswagen Golf pilot for external review is documented in
+[docs/CLIENT_RELEASE.md](docs/CLIENT_RELEASE.md). It is a verified-generation client
+preview, not a production deployment or a validated fitment forecast.
+
 ## Local web app
 
 The React/FastAPI app serves one verified active snapshot across registrations,

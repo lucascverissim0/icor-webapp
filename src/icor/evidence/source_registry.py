@@ -32,7 +32,7 @@ OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     survival_method="constant-annual-retention-v1",
     hazard_method="age-band-geography-hazard-v1",
     forecast_method="rolling-origin-simple-candidates-v1",
-    generation_registry="generation-registry-v1",
+    generation_registry="public-generation-registry-v1",
     generation_resolver="generation-resolver-v1",
 )
 

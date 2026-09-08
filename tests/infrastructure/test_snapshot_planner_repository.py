@@ -10,6 +10,7 @@ import pytest
 
 from icor.application.opportunities import OpportunityGroupBy, OpportunityQuery
 from icor.application.ranking import DemandReadinessV1
+from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
 from icor.domain.planner import PlannerQuery
@@ -143,7 +144,9 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
                 p10 TEXT, p50 TEXT, p90 TEXT, active_fleet_p50 TEXT,
                 confidence TEXT, assumption_ids TEXT, reason_codes TEXT
             );
-            CREATE TABLE opportunity_input (opportunity_id TEXT, cohort_id TEXT);
+            CREATE TABLE opportunity_input (
+                opportunity_id TEXT, cohort_id TEXT, input_position INTEGER DEFAULT 0
+            );
             CREATE TABLE planner_option (
                 option_kind TEXT, option_value TEXT, sort_key TEXT
             );
@@ -180,7 +183,7 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
                 ),
             )
             connection.execute(
-                "INSERT INTO opportunity_input VALUES (?, ?)",
+                "INSERT INTO opportunity_input (opportunity_id, cohort_id) VALUES (?, ?)",
                 (opportunity_id, cohort_id),
             )
         connection.executemany(
@@ -346,6 +349,53 @@ def test_sqlite_opportunity_ranking_and_drill_down_are_bounded(
     rows = repository.drill_down(page.items[0].group_id, query, 1, 1)
     assert len(rows) == 1
     assert calls == [1]
+
+
+def test_sqlite_opportunity_exposes_reviewed_generation_and_legacy_icor_readiness(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    worked = tmp_path / "worked.txt"
+    worked.write_text('{\n  "vw golf": {2020: "G8"}\n}\n', encoding="utf-8")
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+        worked_models=IcorWorkedModelCatalog.from_path(worked),
+    )
+
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=10)
+    )
+    golf = next(row for row in page.items if row.model == "Golf")
+
+    assert golf.model_year == 2020
+    assert golf.generation_name == "Golf Mk8"
+    assert golf.generation_basis == "manufacturer_generation_window"
+    assert golf.icor_worked_base_units == 13
+    assert golf.fallback_covered_base_units == 13
+    assert golf.score.readiness_points == 10
+
+
+def test_verified_only_opportunities_exclude_unreviewed_models(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+        verified_only=True,
+    )
+
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=10)
+    )
+
+    assert page.total == 1
+    assert [(row.brand, row.model, row.generation_name) for row in page.items] == [
+        ("Volkswagen", "Golf", "Golf Mk8")
+    ]
 
 
 def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(

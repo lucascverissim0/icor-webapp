@@ -19,6 +19,8 @@ type EvidenceMappingStatus = components['schemas']['MappingStatus']
 type RegistrationSummary = components['schemas']['RegistrationSummaryResponse']
 type RegistrationPage = components['schemas']['RegistrationPageResponse']
 type CompletenessReport = components['schemas']['CompletenessResponse']
+type VehicleForecastOptions = components['schemas']['VehicleForecastOptionsResponse']
+type VehicleForecast = components['schemas']['VehicleForecastResponse']
 type ApiQuery = NonNullable<
   operations['configurations_api_v1_planner_configurations_get']['parameters']['query']
 >
@@ -64,6 +66,20 @@ export interface RegistrationRankingQuery {
   search?: RegistrationApiQuery['search']
   page?: RegistrationApiQuery['page']
   pageSize?: RegistrationApiQuery['page_size']
+}
+
+export interface VehicleForecastOptionsQuery {
+  search?: string
+  brand?: string
+  model?: string
+}
+
+export interface VehicleForecastQuery {
+  brand: string
+  model: string
+  horizon: number
+  year?: number
+  generation?: string
 }
 
 export class ApiProblem extends Error {
@@ -129,6 +145,26 @@ export class PlannerApiClient {
 
   async options(): Promise<PlannerOptions> {
     return this.request<PlannerOptions>('/api/v1/planner/options')
+  }
+
+  async vehicleForecastOptions(query: VehicleForecastOptionsQuery): Promise<VehicleForecastOptions> {
+    const parameters = new URLSearchParams()
+    if (query.search) parameters.set('search', query.search)
+    if (query.brand) parameters.set('brand', query.brand)
+    if (query.model) parameters.set('model', query.model)
+    const suffix = parameters.size > 0 ? `?${parameters.toString()}` : ''
+    return this.request<VehicleForecastOptions>(`/api/v1/vehicle-forecasts/options${suffix}`)
+  }
+
+  async vehicleForecast(query: VehicleForecastQuery): Promise<VehicleForecast> {
+    const parameters = new URLSearchParams({
+      brand: query.brand,
+      model: query.model,
+      horizon: String(query.horizon),
+    })
+    if (query.year !== undefined) parameters.set('year', String(query.year))
+    if (query.generation) parameters.set('generation', query.generation)
+    return this.request<VehicleForecast>(`/api/v1/vehicle-forecasts?${parameters.toString()}`)
   }
 
   async configurations(

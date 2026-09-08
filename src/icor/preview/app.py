@@ -16,12 +16,14 @@ from icor.preview.auth import LoginThrottle, PreviewAuthenticator, SessionCodec
 from icor.preview.config import ConfigurationError, PreviewSettings
 from icor.preview.security import (
     SESSION_COOKIE,
+    ClientReleaseMiddleware,
     PreviewSecurityMiddleware,
     SecurityHeadersMiddleware,
 )
 from icor.preview.static import resolve_asset
 
 DEFAULT_ASSET_ROOT = ROOT / "web" / "dist"
+ASSET_ROOT_VARIABLE = "ICOR_PREVIEW_ASSET_ROOT"
 MAX_LOGIN_BODY_BYTES = 8_192
 LOGIN_FORM = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -38,20 +40,41 @@ def create_preview_app(
     *,
     asset_root: Path | None = None,
     snapshot_root: Path | None = None,
+    client_release: bool | None = None,
 ) -> FastAPI:
     """Build the fail-closed Codespaces composition from validated runtime state."""
     selected_settings = settings or PreviewSettings.from_environment(os.environ)
     selected_snapshot_root = snapshot_root or Path(
         os.environ.get("ICOR_EVIDENCE_ACTIVE_ROOT", str(DEFAULT_EVIDENCE_ROOT))
     )
-    core = create_app(snapshot_root=selected_snapshot_root)
+    selected_client_release = (
+        _client_release_from_environment()
+        if client_release is None
+        else client_release
+    )
+    core = create_app(
+        snapshot_root=selected_snapshot_root,
+        client_release=selected_client_release,
+    )
     if getattr(core.state, "snapshot_manifest", None) is None:
         raise ConfigurationError("preview active snapshot is unavailable")
-    return _compose(core, selected_settings, asset_root or DEFAULT_ASSET_ROOT)
+    selected_asset_root = asset_root or Path(
+        os.environ.get(ASSET_ROOT_VARIABLE, str(DEFAULT_ASSET_ROOT))
+    )
+    return _compose(
+        core,
+        selected_settings,
+        selected_asset_root,
+        client_release=selected_client_release,
+    )
 
 
 def _compose(
-    app: FastAPI, settings: PreviewSettings, asset_root: Path
+    app: FastAPI,
+    settings: PreviewSettings,
+    asset_root: Path,
+    *,
+    client_release: bool = False,
 ) -> FastAPI:
     try:
         resolved_assets = asset_root.resolve(strict=True)
@@ -153,8 +176,17 @@ def _compose(
 
     app.state.preview_settings = settings
     app.add_middleware(PreviewSecurityMiddleware, session_codec=session_codec)
+    if client_release:
+        app.add_middleware(ClientReleaseMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     return app
+
+
+def _client_release_from_environment() -> bool:
+    value = os.environ.get("ICOR_CLIENT_RELEASE_MODE", "").strip().casefold()
+    if value not in {"", "verified"}:
+        raise ConfigurationError("client release mode is invalid")
+    return value == "verified"
 
 
 def _single(fields: dict[str, list[str]], name: str) -> str:

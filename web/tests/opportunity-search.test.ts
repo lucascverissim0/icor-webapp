@@ -10,7 +10,7 @@ describe('opportunity URL state', () => {
   it('normalizes an invalid grouping and reports the rejected key', () => {
     const parsed = parseOpportunitySearch({ groupBy: 'profit' })
 
-    expect(parsed.value.groupBy).toBe('brand')
+    expect(parsed.value.groupBy).toBe('model_year')
     expect(parsed.invalidKeys).toEqual(['groupBy'])
   })
 

@@ -1,56 +1,31 @@
 import { expect, test } from '@playwright/test'
 
 
-test('filters, selects, deep-links, and restores planner state', async ({ page }) => {
+test('searches a model year and forecasts every requested market', async ({ page }) => {
   await page.goto('/planner')
-  await expect(page.getByRole('checkbox', { name: 'France' })).toBeVisible()
+  await page.getByRole('searchbox', { name: 'Search brand or model' }).fill('Golf')
+  await page.getByRole('button', { name: 'Search vehicles' }).click()
+  await expect(page.getByRole('combobox', { name: 'Brand' })).toHaveValue('Volkswagen')
+  await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('Golf')
+  await page.getByRole('combobox', { name: 'Model year' }).selectOption('2020')
+  await page.getByRole('button', { name: 'Calculate forecast' }).click()
 
-  await page.getByRole('checkbox', { name: 'France' }).focus()
-  await page.keyboard.press('Space')
-  await page.getByRole('button', { name: 'Apply filters' }).focus()
-  await page.keyboard.press('Enter')
-  expect(decodeURIComponent(page.url())).toContain('market=["FR"]')
-
-  await page.getByRole('button', { name: /View details/ }).first().focus()
-  await page.keyboard.press('Enter')
-  await expect(page.getByText('Generation opportunity detail')).toBeVisible()
-  expect(decodeURIComponent(page.url())).toContain('market=["FR"]')
-
-  await page.goBack()
-  await expect(page.getByRole('checkbox', { name: 'France' })).toBeChecked()
-
-  await page.goForward()
-  await expect(page.getByText('Generation opportunity detail')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Volkswagen Golf · Golf Mk8' })).toBeVisible()
+  for (const market of ['Europe (EU27)', 'Belgium', 'France', 'Spain', 'The Netherlands', 'United Kingdom (GB; England is not separable)', 'Germany', 'Poland']) {
+    await expect(page.getByRole('rowheader', { name: market })).toBeVisible()
+  }
+  await expect(page.getByText(/Future sales cohorts 2026, 2027, 2028 are not added/i)).toBeVisible()
 })
 
-test('retries a recoverable configurations failure without losing controls', async ({ page }) => {
-  let requests = 0
-  await page.route('**/api/v1/planner/configurations*', async (route) => {
-    requests += 1
-    if (requests <= 2) {
-      await route.fulfill({
-        contentType: 'application/json',
-        status: 500,
-        body: JSON.stringify({
-          code: 'internal_error',
-          message: 'Temporary planner failure.',
-          correlation_id: 'e2e-retry',
-          field_errors: [],
-        }),
-      })
-      return
-    }
-    await route.continue()
-  })
-
+test('supports selecting a generation directly', async ({ page }) => {
   await page.goto('/planner')
-  const retry = page.getByRole('button', { name: 'Retry' })
-  await expect(retry).toBeVisible()
-  await retry.focus()
-  await page.keyboard.press('Enter')
-
-  await expect(page.getByRole('button', { name: /View details/ }).first()).toBeVisible()
-  await expect(page.getByRole('checkbox', { name: 'France' })).not.toBeChecked()
+  await page.getByRole('combobox', { name: 'Brand' }).fill('Volkswagen')
+  await page.getByRole('combobox', { name: 'Model', exact: true }).fill('Golf')
+  await page.getByRole('radio', { name: 'Generation directly' }).check()
+  await page.getByRole('combobox', { name: 'Generation' }).selectOption('volkswagen-golf-mk8-europe')
+  await page.getByRole('combobox', { name: 'Forecast year' }).selectOption('2031')
+  await page.getByRole('button', { name: 'Calculate forecast' }).click()
+  await expect(page.getByText('2031 windshield replacement forecast')).toBeVisible()
 })
 
 test('a missing deep link has a safe planner return', async ({ page }) => {
@@ -58,5 +33,5 @@ test('a missing deep link has a safe planner return', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'Opportunity not found' })).toBeVisible()
   await page.getByRole('link', { name: 'Return to planner' }).click()
-  await expect(page.getByRole('checkbox', { name: 'France' })).toBeChecked()
+  await expect(page.getByRole('heading', { name: 'Search by model year or generation' })).toBeVisible()
 })

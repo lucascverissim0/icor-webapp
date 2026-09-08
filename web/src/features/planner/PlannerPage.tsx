@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from '@tanstack/react-router'
 
-import { configurationRoute, plannerRoute } from '../../app/router'
 import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
 import type { components } from '../../lib/api/schema'
-import { parsePlannerSearch, serializePlannerSearch, type PlannerSearch } from '../../lib/planner-search'
+import { parsePlannerSearch, type PlannerSearch } from '../../lib/planner-search'
+import { VehicleForecastSearch } from './VehicleForecastSearch'
 
 type Configuration = components['schemas']['PlanningConfigurationResponse']
 type PlannerOptions = components['schemas']['PlannerOptionsResponse']
@@ -78,7 +77,7 @@ function Filters({ options, search, onApply }: {
       onApply(parsePlannerSearch(draft as unknown as Record<string, unknown>).value)
     }}>
       <div className="filter-heading">
-        <div><p className="eyebrow">Narrow the scenario</p><h2>Filters</h2></div>
+        <div><p className="eyebrow">Find a vehicle</p><h2>Search filters</h2></div>
         <span>{activeConstraintNames(draft).length} active</span>
       </div>
       <FilterGroup labelFor={(value) => MARKET_NAMES[String(value)] ?? String(value)} legend="Market" onToggle={(value) => toggle('market', value)} selected={draft.market ?? []} values={options.markets} />
@@ -130,7 +129,7 @@ function ProblemState({ error, onRetry }: { error: Error; onRetry: () => void })
   const correlation = error instanceof ApiProblem ? error.correlationId : null
   return (
     <section className="planner-state" role="alert">
-      <p className="eyebrow">Planner unavailable</p><h2>We could not load these generation opportunities</h2>
+      <p className="eyebrow">Vehicle search unavailable</p><h2>We could not load these vehicle forecasts</h2>
       <p>{error.message}</p>{correlation && <p className="correlation">Reference: {correlation}</p>}
       <button className="primary-action" onClick={onRetry} type="button">Retry</button>
     </section>
@@ -175,7 +174,7 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
     <div className="planner-layout">
       <Filters key={JSON.stringify(canonicalSearch)} options={optionsQuery.data} search={canonicalSearch} onApply={onSearchChange} />
       <section className="planner-results" aria-labelledby="results-title">
-        <div className="results-heading"><div><p className="eyebrow">Generation-level outlook</p><h2 id="results-title">Replacement opportunity planner</h2><p>Official registration history with explicit survival, hazard, and forecast assumptions. Values are opportunity ranges, not exact fitment demand.</p></div><span className="status-pill">Validated snapshot</span></div>
+        <div className="results-heading"><div><p className="eyebrow">Vehicle forecast search</p><h2 id="results-title">Search vehicle forecasts</h2><p>Find a brand, model, and generation, then inspect its upcoming windshield replacement range. Values are forecasts, not exact fitment demand.</p></div><span className="status-pill">Validated snapshot</span></div>
         {normalizedKeys.length > 0 && <p className="url-notice" role="status">Adjusted URL filters: {normalizedKeys.join(', ')}</p>}
         {constraints.length > 0 && (
           <div className="active-constraints">
@@ -233,8 +232,5 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
 }
 
 export function PlannerPage() {
-  const navigate = useNavigate()
-  const routeSearch = plannerRoute.useSearch()
-  const search = serializePlannerSearch(routeSearch)
-  return <PlannerWorkbench invalidKeys={routeSearch.invalidKeys} onSearchChange={(nextSearch) => void navigate({ to: '/planner', search: nextSearch })} onSelect={(configurationId) => void navigate({ to: configurationRoute.to, params: { configurationId }, search })} search={search} />
+  return <VehicleForecastSearch />
 }

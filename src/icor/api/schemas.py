@@ -135,6 +135,60 @@ class PlannerPageResponse(ApiModel):
     summary: PlannerSummaryResponse
 
 
+class VehicleOptionResponse(ApiModel):
+    brand: str
+    model: str
+
+
+class GenerationOptionResponse(ApiModel):
+    key: str
+    name: str
+    start_year: int
+    end_year: int | None
+    basis: str
+    confidence: str
+
+
+class VehicleForecastOptionsResponse(ApiModel):
+    vehicles: tuple[VehicleOptionResponse, ...]
+    years: tuple[int, ...]
+    generations: tuple[GenerationOptionResponse, ...]
+    horizons: tuple[int, ...]
+
+
+class MarketVehicleForecastResponse(ApiModel):
+    code: str
+    name: str
+    availability: str
+    registration_cohort_units: int | None
+    cohort_count: int
+    active_fleet: DemandRangeResponse | None
+    replacements: DemandRangeResponse | None
+
+
+class VehicleForecastResponse(ApiModel):
+    brand: str
+    model: str
+    selected_year: int | None
+    generation_key: str
+    generation_name: str
+    generation_basis: str
+    generation_confidence: str
+    generation_source_url: str | None
+    generation_start_year: int
+    generation_end_year: int | None
+    horizon: int
+    included_cohort_years: tuple[int, ...]
+    excluded_ambiguous_years: tuple[int, ...]
+    excluded_forecast_cohort_years: tuple[int, ...]
+    markets: tuple[MarketVehicleForecastResponse, ...]
+    survival_method: str
+    hazard_method: str
+    uncertainty_method: str
+    calibration_status: str
+    data_version: str
+
+
 class ModelYearDemandResponse(ApiModel):
     configuration_id: str
     model_year: int
@@ -188,6 +242,9 @@ class OpportunityRowResponse(ApiModel):
     brand: str
     model: str | None
     model_year: int | None
+    generation_name: str | None
+    generation_basis: str | None
+    icor_worked_base_units: int
     demand: DemandRangeResponse
     contributing_configuration_count: int
     exact_covered_base_units: int
@@ -365,15 +422,20 @@ class RegistrationRowResponse(ApiModel):
     vehicle_id: str
     make: str
     model: str
-    model_year: None
+    model_year: int
+    model_year_basis: str
+    generation_name: str | None
+    generation_basis: str
+    generation_confidence: str
+    generation_source_url: str | None
     registrations: Decimal
     status: str
     evidence_confidence: int
     input_observation_count: int
     release_ids: tuple[str, ...]
     source_ids: tuple[str, ...]
-    publication_status: str = 'final'
-    evidence_kind: str = 'observed'
+    publication_status: str = "final"
+    evidence_kind: str = "observed"
     label_breakdown: tuple[RegistrationLabelBreakdownResponse, ...] = ()
 
 

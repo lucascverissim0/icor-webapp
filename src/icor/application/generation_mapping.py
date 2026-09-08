@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 from icor.domain.evidence import MappingStatus, Measure, Observation
 from icor.domain.generations import GenerationAssignment, GenerationEntry
 from icor.generations.estimator import EstimatedGenerationBuilder
+from icor.generations.public_catalog import (
+    ReviewedGenerationCatalog,
+    official_public_generation_catalog,
+)
 from icor.generations.registry import GenerationRegistry
 from icor.generations.resolver import GenerationResolver, ResolutionRequest
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
@@ -38,11 +42,13 @@ class GenerationMappingService:
     def __init__(
         self,
         *,
-        registry_version: str = "generation-registry-v1",
+        registry_version: str = "public-generation-registry-v1",
         resolver_version: str = "generation-resolver-v1",
+        public_catalog: ReviewedGenerationCatalog | None = None,
     ) -> None:
         self.registry_version = registry_version
         self.resolver_version = resolver_version
+        self.public_catalog = public_catalog or official_public_generation_catalog()
 
     def apply(
         self,
@@ -76,6 +82,13 @@ class GenerationMappingService:
             if vehicle is None:
                 raise ValueError("canonical observation vehicle is unavailable")
             history = histories[vehicle_id]
+            reviewed_generations = self.public_catalog.entries_for(
+                vehicle,
+                registry_version=self.registry_version,
+            )
+            if reviewed_generations:
+                generations.extend(reviewed_generations)
+                continue
             generations.extend(
                 estimator.build(
                     canonical_vehicle_id=vehicle_id,

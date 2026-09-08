@@ -41,6 +41,7 @@ def main() -> int:
         return 0
     os.environ["ICOR_EVIDENCE_ACTIVE_ROOT"] = str(args.snapshot_root)
     os.environ["ICOR_COVERAGE_DB"] = str(args.coverage_db)
+    os.environ["ICOR_PREVIEW_ASSET_ROOT"] = str(args.asset_root)
     result = subprocess.run(server_command(), check=False)
     if result.returncode:
         print(json.dumps({"state": "stopped"}, separators=(",", ":")))

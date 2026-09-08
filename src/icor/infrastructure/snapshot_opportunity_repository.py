@@ -18,10 +18,15 @@ from icor.application.opportunities import (
     _coverage_status,
 )
 from icor.application.ranking import RankingStrategy
+from icor.application.worked_models import IcorWorkedModelCatalog
+from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
+from icor.generations.public_catalog import official_public_generation_catalog
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
+
+_GENERATION_REGISTRY = "public-generation-registry-v1"
 
 
 class SnapshotOpportunityRepository:
@@ -32,6 +37,9 @@ class SnapshotOpportunityRepository:
         planner: SnapshotPlannerRepository,
         coverage: SQLiteCoverageRepository,
         strategy: RankingStrategy,
+        *,
+        worked_models: IcorWorkedModelCatalog | None = None,
+        verified_only: bool = False,
     ) -> None:
         path = getattr(planner._ledger, "path", None)
         if not isinstance(path, Path):
@@ -40,6 +48,9 @@ class SnapshotOpportunityRepository:
         self._planner = planner
         self._coverage_path = coverage.path
         self._strategy = strategy
+        self._worked_models = worked_models or IcorWorkedModelCatalog.empty()
+        self._generation_catalog = official_public_generation_catalog()
+        self._verified_only = verified_only
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
@@ -47,17 +58,18 @@ class SnapshotOpportunityRepository:
     def search(self, query: OpportunityQuery) -> OpportunityPage:
         offset = (query.page - 1) * query.page_size
         with self._connect() as connection:
-            has_coverage = bool(
+            has_manual_coverage = bool(
                 connection.execute(
                     "SELECT EXISTS(SELECT 1 FROM coverage_db.production_coverage)"
                 ).fetchone()[0]
             )
-            if not has_coverage:
+            if not has_manual_coverage:
                 cached = self._uncovered_cache.get(query)
                 if cached is not None:
                     return cached
             cte, parameters = self._scored_cte(
-                query, include_coverage=has_coverage
+                query,
+                include_coverage=has_manual_coverage or bool(self._worked_models.records),
             )
             rows = connection.execute(
                 f"""{cte}
@@ -107,7 +119,7 @@ class SnapshotOpportunityRepository:
             page_size=query.page_size,
             pages=ceil(total / query.page_size),
         )
-        if not has_coverage:
+        if not has_manual_coverage:
             if len(self._uncovered_cache) >= 128:
                 self._uncovered_cache.pop(next(iter(self._uncovered_cache)))
             self._uncovered_cache[query] = result
@@ -125,11 +137,43 @@ class SnapshotOpportunityRepository:
         identity = _decode_group_id(group_id, query.group_by)
         if identity is None:
             return ()
-        clauses = ["vehicle.make = ?"]
-        parameters: list[object] = [identity[0]]
-        if query.group_by in {OpportunityGroupBy.MODEL, OpportunityGroupBy.MODEL_YEAR}:
-            clauses.append("vehicle.model = ?")
-            parameters.append(identity[1])
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if self._verified_only:
+            if identity[1] is None:
+                return ()
+            profile = self._generation_catalog.profile_for(
+                CanonicalVehicle(
+                    "opportunity-drill-down",
+                    identity[0],
+                    identity[1],
+                    None,
+                    "Europe",
+                )
+            )
+            if profile is None:
+                return ()
+            clauses.append(
+                "("
+                + " OR ".join(
+                    "(LOWER(TRIM(vehicle.make)) = ? AND "
+                    "LOWER(TRIM(vehicle.model)) = ?)"
+                    for _ in profile._normalized_aliases
+                )
+                + ")"
+            )
+            parameters.extend(
+                value for alias in profile._normalized_aliases for value in alias
+            )
+        else:
+            clauses.append("vehicle.make = ?")
+            parameters.append(identity[0])
+            if query.group_by in {
+                OpportunityGroupBy.MODEL,
+                OpportunityGroupBy.MODEL_YEAR,
+            }:
+                clauses.append("vehicle.model = ?")
+                parameters.append(identity[1])
         if query.markets:
             clauses.append(
                 f"opportunity.geography IN ({', '.join('?' for _ in query.markets)})"
@@ -209,6 +253,10 @@ class SnapshotOpportunityRepository:
                 if (record.configuration_id, demand.model_year) in exact
                 else CoverageStatus.FALLBACK_ONLY
                 if (record.brand, record.model, demand.model_year) in fallback
+                else CoverageStatus.FALLBACK_ONLY
+                if self._worked_models.matches(
+                    record.brand, record.model, demand.model_year
+                )
                 else CoverageStatus.UNCOVERED
             )
             for record in records
@@ -240,7 +288,9 @@ class SnapshotOpportunityRepository:
             group_columns.append("model_year")
         groups = ", ".join(group_columns)
         needs_model_year = (
-            include_coverage or query.group_by is OpportunityGroupBy.MODEL_YEAR
+            include_coverage
+            or query.group_by is OpportunityGroupBy.MODEL_YEAR
+            or self._verified_only
         )
         model_year = "c.registration_cohort_year" if needs_model_year else "NULL"
         lineage_joins = (
@@ -265,23 +315,52 @@ class SnapshotOpportunityRepository:
                         AND pc.model = base_atoms.model
                         AND pc.model_year = base_atoms.model_year
                     ) THEN 'fallback_only'
+                    WHEN EXISTS (
+                        SELECT 1 FROM temp.icor_worked_model wm
+                        WHERE wm.brand = LOWER(base_atoms.brand)
+                        AND wm.model = LOWER(base_atoms.model)
+                        AND wm.model_year = base_atoms.model_year
+                    ) THEN 'fallback_only'
                     ELSE 'uncovered'
                 END"""
             if include_coverage
             else "'uncovered'"
         )
+        icor_worked = (
+            """CASE WHEN EXISTS (
+                    SELECT 1 FROM temp.icor_worked_model wm
+                    WHERE wm.brand = LOWER(base_atoms.brand)
+                    AND wm.model = LOWER(base_atoms.model)
+                    AND wm.model_year = base_atoms.model_year
+                ) THEN 1 ELSE 0 END"""
+            if include_coverage
+            else "0"
+        )
+        identity_join = ""
+        brand_expression = "v.make"
+        model_expression = "v.model"
+        if self._verified_only:
+            identity_join = """JOIN temp.reviewed_vehicle_year reviewed
+                ON reviewed.brand = LOWER(TRIM(v.make))
+                AND reviewed.model = LOWER(TRIM(v.model))
+                AND reviewed.registration_year = c.registration_cohort_year"""
+            brand_expression = "reviewed.canonical_brand"
+            model_expression = "reviewed.canonical_model"
         cte = f"""WITH base_atoms AS MATERIALIZED (
-            SELECT o.opportunity_id, v.make brand, v.model,
+            SELECT o.opportunity_id, {brand_expression} brand,
+                {model_expression} model,
                 {model_year} model_year,
                 CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER) downside_units,
                 CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER) base_units,
                 CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER) upside_units
             FROM opportunity_estimate o
             JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+            {identity_join}
             {lineage_joins}
             WHERE {where}
         ), atoms AS (
-            SELECT base_atoms.*, {coverage_status} coverage_status
+            SELECT base_atoms.*, {coverage_status} coverage_status,
+                {icor_worked} icor_worked
             FROM base_atoms
         ), grouped AS (
             SELECT brand, {model} model, {year} model_year,
@@ -293,7 +372,9 @@ class SnapshotOpportunityRepository:
                 SUM(CASE WHEN coverage_status = 'fallback_only'
                     THEN base_units ELSE 0 END) fallback_units,
                 SUM(CASE WHEN coverage_status = 'uncovered'
-                    THEN base_units ELSE 0 END) uncovered_units
+                    THEN base_units ELSE 0 END) uncovered_units,
+                SUM(CASE WHEN icor_worked = 1 THEN base_units ELSE 0 END)
+                    icor_worked_units
             FROM atoms GROUP BY {groups}
         ), ranked AS (
             SELECT *, RANK() OVER (ORDER BY base_units) demand_rank,
@@ -329,6 +410,51 @@ class SnapshotOpportunityRepository:
         connection.row_factory = sqlite3.Row
         coverage_uri = f"{self._coverage_path.resolve().as_uri()}?mode=ro"
         connection.execute("ATTACH DATABASE ? AS coverage_db", (coverage_uri,))
+        connection.execute(
+            "CREATE TEMP TABLE icor_worked_model "
+            "(brand TEXT, model TEXT, model_year INTEGER, PRIMARY KEY (brand, model, model_year))"
+        )
+        connection.executemany(
+            "INSERT INTO temp.icor_worked_model VALUES (?, ?, ?)",
+            (
+                (record.brand, record.model, record.model_year)
+                for record in self._worked_models.records
+            ),
+        )
+        if self._verified_only:
+            connection.execute(
+                "CREATE TEMP TABLE reviewed_vehicle_year "
+                "(brand TEXT, model TEXT, registration_year INTEGER, "
+                "canonical_brand TEXT, canonical_model TEXT, "
+                "PRIMARY KEY (brand, model, registration_year))"
+            )
+            connection.executemany(
+                "INSERT INTO temp.reviewed_vehicle_year VALUES (?, ?, ?, ?, ?)",
+                (
+                    (
+                        alias[0],
+                        alias[1],
+                        year,
+                        profile.aliases[0][0],
+                        profile.aliases[0][1],
+                    )
+                    for profile in self._generation_catalog.profiles
+                    for alias in profile._normalized_aliases
+                    for year in range(
+                        min(window.start_month.year for window in profile.windows),
+                        2101,
+                    )
+                    if sum(
+                        window.start_month.year <= year
+                        and (
+                            window.end_month is None
+                            or window.end_month.year >= year
+                        )
+                        for window in profile.windows
+                    )
+                    == 1
+                ),
+            )
         connection.execute("PRAGMA query_only = ON")
         return connection
 
@@ -381,12 +507,31 @@ class SnapshotOpportunityRepository:
                 f"{readiness_points:g} production-readiness points."
             ),
         )
+        generation = None
+        if row["model"] is not None and row["model_year"] is not None:
+            vehicle = CanonicalVehicle(
+                vehicle_id="opportunity-row",
+                make=row["brand"],
+                model=row["model"],
+                model_year=None,
+                market="Europe",
+            )
+            generation = self._generation_catalog.entry_for_year(
+                vehicle,
+                int(row["model_year"]),
+                registry_version=_GENERATION_REGISTRY,
+            )
         return OpportunityRow(
             group_id=group_id,
             group_by=group_by,
             brand=row["brand"],
             model=row["model"],
             model_year=row["model_year"],
+            generation_name=generation.display_name if generation else None,
+            generation_basis=(
+                "manufacturer_generation_window" if generation else None
+            ),
+            icor_worked_base_units=int(row["icor_worked_units"]),
             demand=demand,
             contributing_configuration_count=int(row["configuration_count"]),
             exact_covered_base_units=exact,

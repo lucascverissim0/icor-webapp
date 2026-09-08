@@ -68,9 +68,9 @@ const rootRoute = createRootRoute({
   notFoundComponent: () => (
     <section className="route-state">
       <p className="eyebrow">Not found</p>
-      <h2>This planner view does not exist</h2>
-      <a className="primary-action" href="/registrations">
-        Return to official registrations
+      <h2>This forecast view does not exist</h2>
+      <a className="primary-action" href="/opportunities">
+        Return to opportunities
       </a>
     </section>
   ),
@@ -81,8 +81,8 @@ const indexRoute = createRoute({
   path: '/',
   beforeLoad: ({ search }) =>
     redirect({
-      to: '/registrations',
-      search: parseRegistrationSearch(search),
+      to: '/opportunities',
+      search: parseOpportunitySearch(search as Record<string, unknown>).value,
       throw: true,
     }),
 })

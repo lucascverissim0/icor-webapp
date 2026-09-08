@@ -90,6 +90,16 @@ def opportunities(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> OpportunityPageResponse | JSONResponse:
+    if (
+        getattr(request.app.state, "client_release", False)
+        and group_by is not OpportunityGroupBy.MODEL_YEAR
+    ):
+        return _problem(
+            request,
+            status_code=422,
+            code="client_release_scope",
+            message="The verified client release supports model-year opportunities only.",
+        )
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
@@ -111,6 +121,16 @@ def opportunity_configurations(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> list[OpportunityDrillDownResponse] | JSONResponse:
+    if (
+        getattr(request.app.state, "client_release", False)
+        and group_by is not OpportunityGroupBy.MODEL_YEAR
+    ):
+        return _problem(
+            request,
+            status_code=422,
+            code="client_release_scope",
+            message="The verified client release supports model-year opportunities only.",
+        )
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)

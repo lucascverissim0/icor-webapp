@@ -44,11 +44,19 @@ def _stub_api() -> FastAPI:
     return app
 
 
-def _preview(monkeypatch: pytest.MonkeyPatch, settings: PreviewSettings, assets: Path):
+def _preview(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: PreviewSettings,
+    assets: Path,
+    *,
+    client_release: bool = False,
+):
     from icor.preview import app as preview_module
 
     monkeypatch.setattr(preview_module, "create_app", lambda **kwargs: _stub_api())
-    return preview_module.create_preview_app(settings, asset_root=assets)
+    return preview_module.create_preview_app(
+        settings, asset_root=assets, client_release=client_release
+    )
 
 
 def test_factory_fails_closed_without_configuration(
@@ -107,6 +115,26 @@ def test_factory_uses_configured_active_snapshot_root(
         settings, asset_root=assets, snapshot_root=explicit_root
     )
     assert captured["snapshot_root"] == explicit_root
+
+
+def test_factory_uses_configured_compiled_asset_root(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: PreviewSettings,
+    assets: Path,
+) -> None:
+    from icor.preview import app as preview_module
+
+    monkeypatch.setenv("ICOR_PREVIEW_ASSET_ROOT", str(assets))
+    monkeypatch.setattr(preview_module, "create_app", lambda **kwargs: _stub_api())
+
+    app = preview_module.create_preview_app(settings)
+
+    with TestClient(app, base_url="https://preview.example") as client:
+        client.post(
+            "/auth/login",
+            data={"username": "Lucas", "password": "correct horse battery staple"},
+        )
+        assert client.get("/").text == "<main>ICOR application</main>"
 
 
 def test_login_logout_and_protected_navigation(
@@ -188,6 +216,22 @@ def test_static_assets_spa_and_api_404_are_distinct(
         assert missing_api.status_code == 404
         assert missing_api.headers["content-type"].startswith("application/json")
         assert "ICOR application" not in missing_api.text
+
+
+def test_client_release_denies_internal_surfaces_and_unknown_apis(
+    monkeypatch: pytest.MonkeyPatch, settings: PreviewSettings, assets: Path
+) -> None:
+    app = _preview(monkeypatch, settings, assets, client_release=True)
+    with TestClient(app, base_url="https://preview.example") as client:
+        client.post(
+            "/auth/login",
+            data={"username": "Lucas", "password": "correct horse battery staple"},
+        )
+
+        assert client.get("/planner").status_code == 200
+        assert client.get("/opportunities").status_code == 200
+        assert client.get("/evidence").status_code == 404
+        assert client.get("/api/example").status_code == 404
 
 
 @pytest.mark.parametrize(

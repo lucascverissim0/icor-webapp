@@ -42,3 +42,9 @@ def test_explicit_service_override_does_not_compose_the_active_snapshot(
 
     assert app.state.snapshot_manifest is None
     assert app.state.planner_service is None
+
+
+def test_client_release_flag_is_explicit_application_state() -> None:
+    app = create_app(completeness_service=object(), client_release=True)
+
+    assert app.state.client_release is True

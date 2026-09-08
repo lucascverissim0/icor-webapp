@@ -1,17 +1,19 @@
 :root {
-  color: #142524;
-  background: #eef2f0;
+  color: #152f4a;
+  background: #f1f6f8;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --surface: #ffffff;
-  --surface-muted: #f4f7f5;
-  --line: #d9e1dd;
-  --ink: #142524;
-  --ink-muted: #5b6c68;
-  --accent: #087b70;
-  --accent-strong: #045f57;
+  --surface-muted: #f4f8fa;
+  --line: #d5e2e8;
+  --ink: #152f4a;
+  --ink-muted: #5d6e7e;
+  --brand-cyan: #00a3d9;
+  --brand-navy: #152f4a;
+  --accent: #007da7;
+  --accent-strong: #005a78;
   --demo-bg: #fff5d8;
   --demo-ink: #715315;
   --focus: #0a7cff;
@@ -23,7 +25,7 @@
 
 html {
   min-width: 320px;
-  background: #eef2f0;
+  background: #f1f6f8;
 }
 
 body {
@@ -72,30 +74,33 @@ a {
   display: none;
   width: 15rem;
   padding: 1.5rem 1rem;
-  color: #e7f2ef;
-  background: #102e2b;
+  color: #ffffff;
+  background: var(--brand-navy);
 }
 
 .brand-mark {
   display: inline-flex;
   align-items: center;
-  gap: 0.7rem;
   min-height: 44px;
-  color: white;
-  font-size: 1.05rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
   text-decoration: none;
 }
 
-.brand-mark__symbol {
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  place-items: center;
-  border-radius: 0.45rem;
-  color: #0b332f;
-  background: #8be0d4;
+.brand-mark img {
+  display: block;
+  width: 8.4rem;
+  height: auto;
+}
+
+.brand-mark--mobile {
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.6rem;
+  background: var(--brand-navy);
+}
+
+.brand-mark--mobile img {
+  width: 6.7rem;
 }
 
 .desktop-navigation {
@@ -105,7 +110,7 @@ a {
 .navigation-section-label {
   display: block;
   margin: 1.2rem 0.75rem 0.35rem;
-  color: #a9bfba;
+  color: #b7d4e2;
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -131,7 +136,7 @@ a {
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 999px;
-  background: #8be0d4;
+  background: var(--brand-cyan);
 }
 
 .rail-caption {
@@ -139,7 +144,7 @@ a {
   right: 1rem;
   bottom: 1.25rem;
   left: 1rem;
-  color: #a9bfba;
+  color: #b7d4e2;
   font-size: 0.78rem;
   line-height: 1.45;
 }
@@ -152,6 +157,10 @@ a {
   padding: 1.1rem 1rem;
   border-bottom: 1px solid var(--line);
   background: rgb(255 255 255 / 94%);
+}
+
+.shell-header__title {
+  min-width: 0;
 }
 
 .shell-header h1 {
@@ -681,6 +690,149 @@ a {
   gap: 1rem;
 }
 
+.score-method,
+.vehicle-search-panel,
+.vehicle-forecast-results {
+  min-width: 0;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(20 37 36 / 5%);
+}
+
+.score-method h2,
+.vehicle-search-panel h2 {
+  margin: 0.3rem 0 0.8rem;
+}
+
+.score-method__formula {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.score-method__formula p,
+.forecast-method-note {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.85rem;
+  border-radius: 0.7rem;
+  background: var(--surface-muted);
+}
+
+.score-method__formula span,
+.forecast-method-note span {
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.vehicle-search-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.vehicle-search-bar,
+.vehicle-search-bar label,
+.vehicle-select-grid label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.vehicle-search-bar > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+.vehicle-search-bar input,
+.vehicle-select-grid input,
+.vehicle-select-grid select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+}
+
+.vehicle-search-feedback {
+  margin: 0.75rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.vehicle-select-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.selection-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  border: 0;
+  padding: 0;
+}
+
+.selection-mode label {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.forecast-method-note {
+  margin: 1rem 0;
+}
+
+.forecast-boundary {
+  margin: 1rem 0 0;
+  padding: 0.75rem 0.85rem;
+  border-left: 4px solid var(--accent);
+  color: var(--ink-muted);
+  background: var(--surface-muted);
+}
+
+.forecast-boundary strong {
+  color: var(--ink);
+}
+
+.vehicle-forecast-table-wrap {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.vehicle-forecast-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.vehicle-forecast-table th,
+.vehicle-forecast-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .score-method__formula,
+  .vehicle-select-grid,
+  .vehicle-search-bar > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 .opportunities-hero,
 .opportunity-ranking,
 .opportunity-drilldown,
@@ -733,6 +885,28 @@ a {
   border: 1px solid var(--line);
   border-radius: 0.7rem;
   background: var(--surface);
+}
+
+.grouping-label {
+  margin: 0 0 0.4rem;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.forecast-freshness {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+
+.forecast-freshness span {
+  color: var(--ink-muted);
+  font-size: 0.86rem;
 }
 
 .grouping-control button {
@@ -838,6 +1012,22 @@ a {
   font-size: 0.84rem;
 }
 
+.opportunity-card__heading .generation-name {
+  margin-top: 0.2rem;
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.icor-experience {
+  width: fit-content;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  color: #155d54;
+  background: #dff5ef;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
 .opportunity-demand__base {
   margin-top: 0.65rem;
   font-size: clamp(1.25rem, 4vw, 1.8rem);
@@ -924,6 +1114,28 @@ a {
   display: grid;
   gap: 1rem;
   margin-top: 1rem;
+}
+
+.coverage-disclosure {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--surface);
+}
+
+.coverage-disclosure > summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.coverage-disclosure > p {
+  color: var(--ink-muted);
+}
+
+.coverage-disclosure .coverage-manager {
+  margin-top: 0.9rem;
+  box-shadow: none;
 }
 
 .coverage-manager form,
@@ -1523,6 +1735,10 @@ a {
 }
 
 @media (min-width: 768px) {
+  .brand-mark--mobile {
+    display: none;
+  }
+
   .desktop-rail {
     display: block;
   }

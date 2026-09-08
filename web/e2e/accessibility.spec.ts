@@ -22,11 +22,14 @@ async function seriousViolations(page: import('@playwright/test').Page) {
 
 test('primary planner routes have no serious accessibility violations', async ({ page }) => {
   await page.goto('/planner')
-  await expect(page.getByRole('checkbox', { name: 'France' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Search by model year or generation' })).toBeVisible()
   expect(await seriousViolations(page)).toEqual([])
 
-  await page.getByRole('button', { name: /View details/ }).first().click()
-  await expect(page.getByText('Generation opportunity detail')).toBeVisible()
+  await page.getByRole('combobox', { name: 'Brand' }).fill('Volkswagen')
+  await page.getByRole('combobox', { name: 'Model', exact: true }).fill('Golf')
+  await page.getByRole('combobox', { name: 'Model year' }).selectOption('2020')
+  await page.getByRole('button', { name: 'Calculate forecast' }).click()
+  await expect(page.getByRole('heading', { name: 'Volkswagen Golf · Golf Mk8' })).toBeVisible()
   expect(await seriousViolations(page)).toEqual([])
 
   await page.goto('/planner/configurations/not-a-configuration')
@@ -36,7 +39,7 @@ test('primary planner routes have no serious accessibility violations', async ({
 
 test('keyboard focus is visible', async ({ page }) => {
   await page.goto('/planner')
-  await expect(page.getByRole('checkbox', { name: 'France' })).toBeVisible()
+  await expect(page.getByRole('searchbox', { name: 'Search brand or model' })).toBeVisible()
 
   await page.keyboard.press('Tab')
   const focused = page.locator(':focus')

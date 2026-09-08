@@ -101,8 +101,8 @@ export function RegistrationsWorkbench({
       <section className="registration-boundary" aria-label="Registration interpretation boundary">
         <Database aria-hidden="true" size={20} />
         <div>
-          <strong>Registration year is not model year</strong>
-          <p>Model year is unavailable. Windshield fitment and replacement forecasts are not inferred from this dataset.</p>
+          <strong>Generation evidence stays explicit</strong>
+          <p>Reviewed manufacturer histories provide a generation where the registration year has one unambiguous match. All other results retain first-registration year as a proxy; manufacturer model year remains unavailable.</p>
         </div>
       </section>
 
@@ -167,7 +167,10 @@ export function RegistrationsWorkbench({
                   <tr key={row.vehicle_id}>
                     <td data-label="Rank"><strong>#{row.rank}</strong></td>
                     <td data-label="Make and model">
-                      <strong>{row.make}</strong><span>{row.model}</span><small>Model year unavailable</small>
+                      <strong>{row.make}</strong><span>{row.model}</span>
+                      <small>{row.generation_name ?? `${row.model_year} generation-year proxy`}</small>
+                      {row.generation_name && <small>Manufacturer-confirmed generation</small>}
+                      {row.generation_source_url && <a href={row.generation_source_url} rel="noreferrer" target="_blank">Generation source</a>}
                       {row.label_breakdown.length > 0 && <details>
                         <summary>Official source labels</summary>
                         <ul>{row.label_breakdown.map((label) => (

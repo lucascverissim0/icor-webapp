@@ -8,15 +8,16 @@ const expectedTopRegistrations = usesRealCandidate ? '257,883' : '300'
 test.describe.configure({ timeout: 90_000 })
 
 test('serves the promoted official EU27 registration ranking', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/registrations')
 
   await expect(page.getByRole('heading', { name: 'Official 2024 registrations' })).toBeVisible()
   await expect(page.getByText(expectedTotal)).toBeVisible({ timeout: 60_000 })
   await expect(page.getByText(expectedModelCount, { exact: true })).toBeVisible()
   await expect(page.getByText('SANDERO', { exact: true })).toBeVisible({ timeout: 60_000 })
   await expect(page.getByText(expectedTopRegistrations, { exact: true })).toBeVisible()
-  await expect(page.getByText(/registration year is not model year/i)).toBeVisible()
-  await expect(page.getByText(/windshield fitment and replacement forecasts are not inferred/i)).toBeVisible()
+  await expect(page.getByText(/generation evidence stays explicit/i)).toBeVisible()
+  await expect(page.getByText(/manufacturer model year remains unavailable/i)).toBeVisible()
+  await expect(page.getByText('2024 generation-year proxy').first()).toBeVisible()
 
   await page.getByRole('searchbox', { name: 'Search make or model' }).fill('Tesla')
   await page.getByRole('button', { name: 'Search registrations' }).click()

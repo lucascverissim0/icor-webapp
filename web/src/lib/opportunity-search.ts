@@ -32,7 +32,7 @@ export function parseOpportunitySearch(
   const invalid = new Set<string>()
   const groupBy = GROUPINGS.includes(raw.groupBy as OpportunityGroupBy)
     ? (raw.groupBy as OpportunityGroupBy)
-    : 'brand'
+    : 'model_year'
   if (raw.groupBy !== undefined && groupBy !== raw.groupBy) invalid.add('groupBy')
 
   const rawMarkets = rawValues(raw.market)

@@ -712,6 +712,52 @@
         "title": "FieldError",
         "type": "object"
       },
+      "GenerationOptionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "end_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Year"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "start_year": {
+            "title": "Start Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "start_year",
+          "end_year",
+          "basis",
+          "confidence"
+        ],
+        "title": "GenerationOptionResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -761,6 +807,69 @@
         ],
         "title": "MappingStatus",
         "type": "string"
+      },
+      "MarketVehicleForecastResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_fleet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemandRangeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "availability": {
+            "title": "Availability",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "cohort_count": {
+            "title": "Cohort Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "registration_cohort_units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registration Cohort Units"
+          },
+          "replacements": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemandRangeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "availability",
+          "registration_cohort_units",
+          "cohort_count",
+          "active_fleet",
+          "replacements"
+        ],
+        "title": "MarketVehicleForecastResponse",
+        "type": "object"
       },
       "Measure": {
         "enum": [
@@ -957,6 +1066,28 @@
             "title": "Fallback Covered Base Units",
             "type": "integer"
           },
+          "generation_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Basis"
+          },
+          "generation_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Name"
+          },
           "group_by": {
             "title": "Group By",
             "type": "string"
@@ -964,6 +1095,10 @@
           "group_id": {
             "title": "Group Id",
             "type": "string"
+          },
+          "icor_worked_base_units": {
+            "title": "Icor Worked Base Units",
+            "type": "integer"
           },
           "model": {
             "anyOf": [
@@ -1001,6 +1136,9 @@
           "brand",
           "model",
           "model_year",
+          "generation_name",
+          "generation_basis",
+          "icor_worked_base_units",
           "demand",
           "contributing_configuration_count",
           "exact_covered_base_units",
@@ -1737,6 +1875,36 @@
             "title": "Evidence Kind",
             "type": "string"
           },
+          "generation_basis": {
+            "title": "Generation Basis",
+            "type": "string"
+          },
+          "generation_confidence": {
+            "title": "Generation Confidence",
+            "type": "string"
+          },
+          "generation_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Name"
+          },
+          "generation_source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Source Url"
+          },
           "input_observation_count": {
             "title": "Input Observation Count",
             "type": "integer"
@@ -1759,7 +1927,11 @@
           },
           "model_year": {
             "title": "Model Year",
-            "type": "null"
+            "type": "integer"
+          },
+          "model_year_basis": {
+            "title": "Model Year Basis",
+            "type": "string"
           },
           "publication_status": {
             "default": "final",
@@ -1804,6 +1976,11 @@
           "make",
           "model",
           "model_year",
+          "model_year_basis",
+          "generation_name",
+          "generation_basis",
+          "generation_confidence",
+          "generation_source_url",
           "registrations",
           "status",
           "evidence_confidence",
@@ -2088,6 +2265,208 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VehicleForecastOptionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "generations": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationOptionResponse"
+            },
+            "title": "Generations",
+            "type": "array"
+          },
+          "horizons": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Horizons",
+            "type": "array"
+          },
+          "vehicles": {
+            "items": {
+              "$ref": "#/components/schemas/VehicleOptionResponse"
+            },
+            "title": "Vehicles",
+            "type": "array"
+          },
+          "years": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Years",
+            "type": "array"
+          }
+        },
+        "required": [
+          "vehicles",
+          "years",
+          "generations",
+          "horizons"
+        ],
+        "title": "VehicleForecastOptionsResponse",
+        "type": "object"
+      },
+      "VehicleForecastResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "calibration_status": {
+            "title": "Calibration Status",
+            "type": "string"
+          },
+          "data_version": {
+            "title": "Data Version",
+            "type": "string"
+          },
+          "excluded_ambiguous_years": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Excluded Ambiguous Years",
+            "type": "array"
+          },
+          "excluded_forecast_cohort_years": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Excluded Forecast Cohort Years",
+            "type": "array"
+          },
+          "generation_basis": {
+            "title": "Generation Basis",
+            "type": "string"
+          },
+          "generation_confidence": {
+            "title": "Generation Confidence",
+            "type": "string"
+          },
+          "generation_end_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation End Year"
+          },
+          "generation_key": {
+            "title": "Generation Key",
+            "type": "string"
+          },
+          "generation_name": {
+            "title": "Generation Name",
+            "type": "string"
+          },
+          "generation_source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Source Url"
+          },
+          "generation_start_year": {
+            "title": "Generation Start Year",
+            "type": "integer"
+          },
+          "hazard_method": {
+            "title": "Hazard Method",
+            "type": "string"
+          },
+          "horizon": {
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "included_cohort_years": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Included Cohort Years",
+            "type": "array"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/MarketVehicleForecastResponse"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "selected_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Year"
+          },
+          "survival_method": {
+            "title": "Survival Method",
+            "type": "string"
+          },
+          "uncertainty_method": {
+            "title": "Uncertainty Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand",
+          "model",
+          "selected_year",
+          "generation_key",
+          "generation_name",
+          "generation_basis",
+          "generation_confidence",
+          "generation_source_url",
+          "generation_start_year",
+          "generation_end_year",
+          "horizon",
+          "included_cohort_years",
+          "excluded_ambiguous_years",
+          "excluded_forecast_cohort_years",
+          "markets",
+          "survival_method",
+          "hazard_method",
+          "uncertainty_method",
+          "calibration_status",
+          "data_version"
+        ],
+        "title": "VehicleForecastResponse",
+        "type": "object"
+      },
+      "VehicleOptionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand",
+          "model"
+        ],
+        "title": "VehicleOptionResponse",
         "type": "object"
       }
     }
@@ -3458,6 +3837,205 @@
         "tags": [
           "official registrations"
         ]
+      }
+    },
+    "/api/v1/vehicle-forecasts": {
+      "get": {
+        "operationId": "vehicle_forecast_api_v1_vehicle_forecasts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "brand",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Brand",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": true,
+            "schema": {
+              "maximum": 2200,
+              "minimum": 2020,
+              "title": "Horizon",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2200,
+                  "minimum": 1900,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          },
+          {
+            "in": "query",
+            "name": "generation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Generation"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleForecastResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Vehicle Forecast"
+      }
+    },
+    "/api/v1/vehicle-forecasts/options": {
+      "get": {
+        "operationId": "vehicle_forecast_options_api_v1_vehicle_forecasts_options_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "brand",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleForecastOptionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Vehicle Forecast Options"
       }
     }
   }

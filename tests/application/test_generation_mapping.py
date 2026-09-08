@@ -95,9 +95,9 @@ def test_generation_mapping_assigns_every_usable_observation_once(tmp_path: Path
         quarantined_record_count=0,
     )
     vehicle = CanonicalVehicle(
-        "vehicle-volkswagen-golf-eu",
-        "Volkswagen",
-        "Golf",
+        "vehicle-example-alpha-eu",
+        "Example",
+        "Alpha",
         None,
         "Europe",
     )
@@ -157,3 +157,71 @@ def test_generation_mapping_assigns_every_usable_observation_once(tmp_path: Path
     assert {item.method for item in assignments} == {
         AssignmentMethod.ESTIMATED_GENERATION
     }
+
+
+def test_generation_mapping_uses_reviewed_golf_generation_for_2024(tmp_path: Path) -> None:
+    repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
+    release = ReleaseManifest(
+        release_id="release-official-history",
+        source_id="official-history",
+        publisher="Official publisher",
+        source_url="https://example.test/history",
+        retrieved_at=datetime(2026, 8, 28, tzinfo=UTC),
+        published_at=datetime(2026, 8, 1, tzinfo=UTC),
+        coverage_start=date(2024, 1, 1),
+        coverage_end=date(2024, 12, 31),
+        geography="DE",
+        geography_version="de-v1",
+        measure=Measure.NEW_REGISTRATIONS,
+        unit="vehicles",
+        publication_status=PublicationStatus.FINAL,
+        dependency_group="official-register",
+        terms_url="https://example.test/terms",
+        permitted_local_use="Reuse permitted.",
+        artifact_path="artifact.csv",
+        artifact_bytes=1,
+        sha256="a" * 64,
+        parser_name="test-parser",
+        parser_version="v1",
+        expected_schema="test-v1",
+        raw_record_count=1,
+        accepted_record_count=1,
+        rejected_record_count=0,
+        quarantined_record_count=0,
+    )
+    vehicle = CanonicalVehicle(
+        "vehicle-volkswagen-golf-eu", "Volkswagen", "Golf", None, "Europe"
+    )
+    repository.add_release(release)
+    repository.add_vehicle(vehicle)
+    repository.add_observations(
+        (
+            observation(
+                "observation-reviewed-registration-2024",
+                measure=Measure.NEW_REGISTRATIONS,
+                period_year=2024,
+                vehicle_id=vehicle.vehicle_id,
+                status=MappingStatus.NORMALIZED_LABEL,
+            ),
+        )
+    )
+
+    result = GenerationMappingService().apply(
+        repository,
+        reviewed_at=datetime(2026, 8, 28, 8, 0, tzinfo=UTC),
+    )
+
+    assert result.generation_count == 3
+    generations = repository.list_generations()
+    assert sorted(item.display_name for item in generations) == [
+        "Golf Mk6",
+        "Golf Mk7",
+        "Golf Mk8",
+    ]
+    assignment = repository.list_generation_assignments()[0]
+    selected = next(
+        item for item in generations if item.generation_id == assignment.selected_generation_id
+    )
+    assert selected.display_name == "Golf Mk8"
+    assert selected.identity_kind is GenerationIdentityKind.MANUFACTURER_CONFIRMED
+    assert assignment.method is AssignmentMethod.UNIQUE_WINDOW

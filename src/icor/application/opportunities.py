@@ -73,6 +73,9 @@ class OpportunityRow:
     brand: str
     model: str | None
     model_year: int | None
+    generation_name: str | None
+    generation_basis: str | None
+    icor_worked_base_units: int
     demand: DemandRange
     contributing_configuration_count: int
     exact_covered_base_units: int
@@ -299,6 +302,17 @@ class OpportunityService:
             brand=identity[0],
             model=identity[1] if len(identity) > 1 else None,
             model_year=identity[2] if len(identity) > 2 else None,
+            generation_name=(
+                first.configuration.generation
+                if group_by is OpportunityGroupBy.MODEL_YEAR
+                else None
+            ),
+            generation_basis=(
+                "planning_configuration"
+                if group_by is OpportunityGroupBy.MODEL_YEAR
+                else None
+            ),
+            icor_worked_base_units=0,
             demand=demand,
             contributing_configuration_count=len(
                 {atom.configuration.configuration_id for atom in atoms}

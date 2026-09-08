@@ -12,11 +12,15 @@ from decimal import Decimal
 from pathlib import Path
 
 from icor.application.evidence_review import EvidenceReviewService
+from icor.domain.evidence import CanonicalVehicle
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
+from icor.generations.public_catalog import official_public_generation_catalog
 from icor.infrastructure.snapshot_store import SnapshotStore
 
 _EEA_SOURCE_ID = "eea-co2-monitoring"
 _IDENTITY_REGISTRY = "exact-normalized-model-family-v1"
+_GENERATION_REGISTRY = "public-generation-registry-v1"
+_PUBLIC_GENERATION_CATALOG = official_public_generation_catalog()
 
 
 class RegistrationUnavailableError(RuntimeError):
@@ -69,7 +73,12 @@ class RegistrationRow:
     vehicle_id: str
     make: str
     model: str
-    model_year: None
+    model_year: int
+    model_year_basis: str
+    generation_name: str | None
+    generation_basis: str
+    generation_confidence: str
+    generation_source_url: str | None
     registrations: Decimal
     status: str
     evidence_confidence: int
@@ -238,7 +247,8 @@ class RegistrationService:
                 )
             breakdowns = self._label_breakdowns(connection, query, rows)
         items = tuple(
-            _registration_row(row, breakdowns.get(row['vehicle_id'], ())) for row in rows
+            _registration_row(row, query.year, breakdowns.get(row['vehicle_id'], ()))
+            for row in rows
         )
         pages = (total + query.page_size - 1) // query.page_size if total else 0
         return RegistrationPage(
@@ -384,14 +394,38 @@ def _group_label_rows(
 
 def _registration_row(
     row: sqlite3.Row,
+    registration_year: int,
     labels: tuple[RegistrationLabelBreakdown, ...] = (),
 ) -> RegistrationRow:
+    vehicle = CanonicalVehicle(
+        vehicle_id=row["vehicle_id"],
+        make=row["make"],
+        model=row["model"],
+        model_year=None,
+        market="Europe",
+    )
+    generation = _PUBLIC_GENERATION_CATALOG.entry_for_year(
+        vehicle,
+        registration_year,
+        registry_version=_GENERATION_REGISTRY,
+    )
     return RegistrationRow(
         rank=row["rank"],
         vehicle_id=row["vehicle_id"],
         make=row["make"],
         model=row["model"],
-        model_year=None,
+        model_year=registration_year,
+        model_year_basis="registration_year_proxy",
+        generation_name=generation.display_name if generation is not None else None,
+        generation_basis=(
+            "manufacturer_generation_window"
+            if generation is not None
+            else "registration_year_proxy"
+        ),
+        generation_confidence="high" if generation is not None else "low",
+        generation_source_url=(
+            generation.evidence_ids[0] if generation is not None else None
+        ),
         registrations=Decimal(str(row["registrations"])),
         status="derived_observed",
         evidence_confidence=row["evidence_confidence"],

@@ -47,6 +47,21 @@ def test_opportunities_reconcile_and_expose_score_components(client: TestClient)
     assert body["items"][0]["score"]["readiness_points"] <= 20
 
 
+def test_client_release_rejects_groupings_without_generation_identity(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        repository=DemoPlannerRepository.from_path(FIXTURE),
+        coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        client_release=True,
+    )
+    with TestClient(app) as release_client:
+        response = release_client.get("/api/v1/opportunities?group_by=brand")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "client_release_scope"
+
+
 def test_create_exact_coverage_then_ranking_reflects_committed_state(
     client: TestClient,
 ) -> None:

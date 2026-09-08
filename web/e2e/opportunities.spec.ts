@@ -20,9 +20,21 @@ async function selectVehicle(page: import('@playwright/test').Page) {
   await page.getByLabel('Model year').selectOption('2025')
 }
 
+test('opens model-year opportunities from the app home', async ({ page }) => {
+  await page.goto('/')
+
+  await expect(page).toHaveURL(/\/opportunities/)
+  await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Model years' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+})
+
 test('exact coverage create, edit, and delete refetches committed ranking', async ({ page }) => {
   await page.goto('/opportunities')
-  await expect(page.getByText('Where demand and readiness meet')).toBeVisible()
+  await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
+  await page.getByText('Manage ICOR worked-model coverage').click()
   await selectVehicle(page)
   await page.getByLabel('Exact configuration / SKU').selectOption(
     'demo-aurora-a1-camera-fr-2030',
@@ -31,7 +43,7 @@ test('exact coverage create, edit, and delete refetches committed ranking', asyn
 
   await expect(page.getByText('Production coverage saved.')).toBeVisible()
   const exactSummary = page.locator('.opportunity-summary > div').filter({
-    hasText: 'Exact-covered base',
+    hasText: 'Exact ICOR coverage',
   })
   await expect(exactSummary.getByRole('definition')).toHaveText('250')
 
@@ -50,6 +62,7 @@ test('exact coverage create, edit, and delete refetches committed ranking', asyn
 
 test('fallback coverage requires confirmation and shows lower precision', async ({ page }) => {
   await page.goto('/opportunities?groupBy=model_year')
+  await page.getByText('Manage ICOR worked-model coverage').click()
   await selectVehicle(page)
   await page.getByLabel('Exact configuration unknown').check()
 
@@ -70,7 +83,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
   test(`opportunities has no page overflow at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.goto('/opportunities')
-    await expect(page.getByText('Where demand and readiness meet')).toBeVisible()
+    await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     if (process.env.ICOR_CAPTURE_REVIEW === '1') {
       await page.screenshot({
@@ -83,7 +96,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
 
 test('opportunities is keyboard reachable and has no serious accessibility violations', async ({ page }) => {
   await page.goto('/opportunities')
-  await expect(page.getByText('Where demand and readiness meet')).toBeVisible()
+  await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
   await page.keyboard.press('Tab')
   await expect(page.locator(':focus')).toBeVisible()
 
