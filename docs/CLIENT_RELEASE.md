@@ -24,8 +24,11 @@ The internal development app remains unchanged when client-release mode is absen
 
 Before sharing a build, confirm all of the following:
 
-1. The historically exposed OpenAI key has been revoked and rotated. Never place the
-   replacement secret in Git, chat, a command shown to another person, or this runbook.
+1. The historically exposed OpenAI key is not used by this preview and is never copied
+   into its environment. Lucas has deferred revocation/rotation until immediately after
+   the client review; complete that owner action as soon as the review ends. Never place
+   the old or replacement secret in Git, chat, a command shown to another person, or
+   this runbook.
 2. The active snapshot ID and release-check results match the durable handoff.
 3. The frontend was built with VITE_ICOR_CLIENT_RELEASE=verified.
 4. The authenticated server runs with ICOR_CLIENT_RELEASE_MODE=verified and serves
