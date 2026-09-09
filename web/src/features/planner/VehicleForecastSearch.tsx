@@ -22,16 +22,20 @@ function units(value: number): string {
   return new Intl.NumberFormat('en-US').format(value)
 }
 
-function ForecastResults({ result }: { result: VehicleForecast }) {
+function ForecastResults({ result, clientRelease }: { result: VehicleForecast; clientRelease: boolean }) {
   return (
     <section className="vehicle-forecast-results" aria-labelledby="vehicle-forecast-title">
       <header className="results-heading">
         <div>
           <p className="eyebrow">{result.horizon} windshield replacement forecast</p>
-          <h2 id="vehicle-forecast-title">{result.brand} {result.model} · {result.generation_name}</h2>
-          <p>Cohorts {result.included_cohort_years.join(', ')} are included. Fleet decay has already been applied before the windshield replacement hazard.</p>
+          <h2 id="vehicle-forecast-title">{clientRelease
+            ? `${result.brand} ${result.model} · registration year ${result.selected_year}`
+            : `${result.brand} ${result.model} · ${result.generation_name}`}</h2>
+          <p>{clientRelease
+            ? `The official-source ${result.selected_year} registration cohort is included. Fleet decay has already been applied before the windshield replacement hazard.`
+            : `Cohorts ${result.included_cohort_years.join(', ')} are included. Fleet decay has already been applied before the windshield replacement hazard.`}</p>
         </div>
-        <span className="status-pill">{result.generation_confidence} generation confidence</span>
+        <span className="status-pill">{clientRelease ? 'Official registration cohort' : `${result.generation_confidence} generation confidence`}</span>
       </header>
       <p className="forecast-boundary"><strong>Only registration cohorts through the latest observed year are counted.</strong> Historical gap estimates remain explicit; future sales cohorts {result.excluded_forecast_cohort_years.join(', ') || 'none'} are not added to the circulating fleet.</p>
       <div className="forecast-method-note">
@@ -60,7 +64,13 @@ function ForecastResults({ result }: { result: VehicleForecast }) {
   )
 }
 
-export function VehicleForecastSearch({ apiClient = plannerApi }: { apiClient?: PlannerApiClient }) {
+export function VehicleForecastSearch({
+  apiClient = plannerApi,
+  clientRelease = import.meta.env.VITE_ICOR_CLIENT_RELEASE === 'verified',
+}: {
+  apiClient?: PlannerApiClient
+  clientRelease?: boolean
+}) {
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
   const [brandInput, setBrandInput] = useState<string | null>(null)
@@ -100,7 +110,7 @@ export function VehicleForecastSearch({ apiClient = plannerApi }: { apiClient?: 
   return (
     <div className="vehicle-search-page">
       <header className="opportunities-hero">
-        <div><p className="eyebrow">Vehicle forecast search</p><h2>Search by model year or generation</h2><p>Choose one vehicle identity, then forecast every surviving cohort assigned to that generation across the requested European markets.</p></div>
+        <div><p className="eyebrow">Vehicle forecast search</p><h2>{clientRelease ? 'Search by vehicle and registration year' : 'Search by model year or generation'}</h2><p>{clientRelease ? 'Choose an official-source make/model label and registration year, then forecast that cohort across the requested European markets.' : 'Choose one vehicle identity, then forecast every surviving cohort assigned to that generation across the requested European markets.'}</p></div>
         <span className="status-pill">Cohort-based</span>
       </header>
       <section className="vehicle-search-panel" aria-labelledby="vehicle-search-heading">
@@ -121,17 +131,17 @@ export function VehicleForecastSearch({ apiClient = plannerApi }: { apiClient?: 
         </div>
       </section>
       {brand && model && <section className="vehicle-search-panel" aria-labelledby="forecast-selection-heading">
-        <h2 id="forecast-selection-heading">2. Choose year or generation</h2>
-        <fieldset className="selection-mode"><legend>Selection method</legend><label><input checked={selectionMode === 'year'} name="selection-mode" onChange={() => { setSelectionMode('year'); setGeneration('') }} type="radio" /> Model year</label><label><input checked={selectionMode === 'generation'} name="selection-mode" onChange={() => { setSelectionMode('generation'); setYear('') }} type="radio" /> Generation directly</label></fieldset>
+        <h2 id="forecast-selection-heading">{clientRelease ? '2. Choose registration year' : '2. Choose year or generation'}</h2>
+        {!clientRelease && <fieldset className="selection-mode"><legend>Selection method</legend><label><input checked={selectionMode === 'year'} name="selection-mode" onChange={() => { setSelectionMode('year'); setGeneration('') }} type="radio" /> Model year</label><label><input checked={selectionMode === 'generation'} name="selection-mode" onChange={() => { setSelectionMode('generation'); setYear('') }} type="radio" /> Generation directly</label></fieldset>}
         <div className="vehicle-select-grid">
-          {selectionMode === 'year' ? <label>Model year<select aria-label="Model year" value={year} onChange={(event) => setYear(event.target.value)}><option value="">Select year</option>{selectionOptions.data?.years.map((item) => <option key={item} value={item}>{item}</option>)}</select></label> : <label>Generation<select aria-label="Generation" value={generation} onChange={(event) => setGeneration(event.target.value)}><option value="">Select generation</option>{selectionOptions.data?.generations.map((item) => <option key={item.key} value={item.key}>{item.name} · {item.confidence} confidence</option>)}</select></label>}
+          {selectionMode === 'year' ? <label>{clientRelease ? 'Registration year' : 'Model year'}<select aria-label={clientRelease ? 'Registration year' : 'Model year'} value={year} onChange={(event) => setYear(event.target.value)}><option value="">Select year</option>{selectionOptions.data?.years.map((item) => <option key={item} value={item}>{item}</option>)}</select></label> : <label>Generation<select aria-label="Generation" value={generation} onChange={(event) => setGeneration(event.target.value)}><option value="">Select generation</option>{selectionOptions.data?.generations.map((item) => <option key={item.key} value={item.key}>{item.name} · {item.confidence} confidence</option>)}</select></label>}
           <label>Forecast year<select aria-label="Forecast year" value={selectedHorizon} onChange={(event) => setHorizon(event.target.value)}>{selectionOptions.data?.horizons.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         </div>
         {!selectionOptions.isFetching && selectionOptions.data && selectionOptions.data.horizons.length === 0 && <p className="mutation-error" role="alert">No forecastable vehicle matches this exact brand and model. Check the spelling or choose a suggestion.</p>}
         <button className="primary-action" disabled={!canCalculate || forecast.isPending} onClick={() => forecast.mutate()} type="button">{forecast.isPending ? 'Calculating…' : 'Calculate forecast'}</button>
         {error && <p className="mutation-error" role="alert">{error}</p>}
       </section>}
-      {forecast.data && <ForecastResults result={forecast.data} />}
+      {forecast.data && <ForecastResults clientRelease={clientRelease} result={forecast.data} />}
     </div>
   )
 }

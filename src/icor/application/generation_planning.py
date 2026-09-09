@@ -323,7 +323,11 @@ class GenerationPlanningService:
             return "single-observation-constant-v1", {
                 year: registration for year in range(latest + 1, horizon + 1)
             }
-        forecast = self.forecaster.forecast(observed, horizon_year=horizon)
+        forecast = self.forecaster.forecast(
+            observed,
+            horizon_year=horizon,
+            evaluate_backtest=False,
+        )
         return forecast.method, dict(forecast.values)
 
 

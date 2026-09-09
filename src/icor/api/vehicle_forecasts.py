@@ -63,6 +63,8 @@ def vehicle_forecast(
         return _problem(request, "Vehicle forecast data is unavailable.", 503)
     if (year is None) == (generation is None):
         return _problem(request, "Select exactly one model year or generation.")
+    if getattr(request.app.state, "client_release", False) and generation is not None:
+        return _problem(request, "The client catalog supports source model-year selection only.")
     try:
         result = service.forecast(
             brand=brand,

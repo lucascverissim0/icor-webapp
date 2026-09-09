@@ -8,6 +8,15 @@ import unicodedata
 
 _MISSING_MARKERS = frozenset({"", "-", "[c]", "[x]", "[z]", "n/a"})
 _ID_PREFIX = re.compile(r"[a-z0-9][a-z0-9._-]{0,42}\Z")
+_DISPLAY_ACRONYMS = {
+    "bmw": "BMW",
+    "byd": "BYD",
+    "daf": "DAF",
+    "ds": "DS",
+    "man": "MAN",
+    "mg": "MG",
+    "vw": "VW",
+}
 
 
 def normalize_vehicle_label(value: str) -> str | None:
@@ -17,6 +26,20 @@ def normalize_vehicle_label(value: str) -> str | None:
         raise ValueError("vehicle label must be text")
     normalized = " ".join(unicodedata.normalize("NFC", value).split()).casefold()
     return None if normalized in _MISSING_MARKERS else normalized
+
+
+def source_vehicle_display_label(value: str) -> str:
+    """Normalize whitespace and casing without changing lexical identity."""
+
+    if type(value) is not str or not value.strip():
+        raise ValueError("vehicle display label must be text")
+    compact = " ".join(unicodedata.normalize("NFC", value).split())
+    if not (compact.islower() or compact.isupper()):
+        return compact
+    return " ".join(
+        _DISPLAY_ACRONYMS.get(token.casefold(), token.title())
+        for token in compact.split()
+    )
 
 
 def stable_evidence_id(prefix: str, *parts: str) -> str:

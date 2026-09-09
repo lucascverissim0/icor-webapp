@@ -146,6 +146,39 @@ def test_verified_only_options_and_forecasts_reject_unreviewed_models(
         )
 
 
+def test_client_model_year_catalog_includes_unreviewed_source_names(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "snapshot.sqlite3"
+    _database(path)
+    repository = SnapshotVehicleForecastRepository(
+        path, "snapshot-test", model_year_only=True
+    )
+
+    matches = repository.options(search="golf")
+    selected = repository.options(brand="Volkswagen", model="Golf Plus")
+    result = repository.forecast(
+        brand="Volkswagen",
+        model="Golf Plus",
+        year=2020,
+        generation=None,
+        horizon=2028,
+    )
+
+    assert [(item.brand, item.model) for item in matches.vehicles] == [
+        ("Volkswagen", "Golf"),
+        ("Volkswagen", "Golf Plus"),
+    ]
+    assert selected.years == (2020,)
+    assert selected.generations == ()
+    assert result.generation_name == (
+        "Volkswagen Golf Plus — 2020 registration cohort"
+    )
+    assert result.generation_basis == "official_source_registration_cohort"
+    assert result.generation_confidence == "source-reported"
+    assert result.included_cohort_years == (2020,)
+
+
 def test_reviewed_generation_forecast_combines_aliases_and_surviving_cohorts(
     repository: SnapshotVehicleForecastRepository,
 ) -> None:

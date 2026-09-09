@@ -47,6 +47,42 @@ const forecast = {
 }
 
 describe('VehicleForecastSearch', () => {
+  it('limits the client release to truthful source model-year selection', async () => {
+    const user = userEvent.setup()
+    const modelYearForecast = {
+      ...forecast,
+      generation_key: 'source-registration-year:Volkswagen:Golf:2020',
+      generation_name: 'Volkswagen Golf — 2020 registration cohort',
+      generation_basis: 'official_source_registration_cohort',
+      generation_confidence: 'source-reported',
+      generation_source_url: null,
+      generation_start_year: 2020,
+      generation_end_year: 2020,
+      included_cohort_years: [2020],
+      excluded_ambiguous_years: [],
+    }
+    const modelYearOptions = { ...selectedOptions, generations: [] }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      if (url.includes('/vehicle-forecasts?')) return Promise.resolve(json(modelYearForecast))
+      if (url.includes('brand=Volkswagen') && url.includes('model=Golf')) return Promise.resolve(json(modelYearOptions))
+      return Promise.resolve(json(searchOptions))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} clientRelease /></AppProviders>)
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search brand or model' }), 'Golf')
+    await user.click(screen.getByRole('button', { name: 'Search vehicles' }))
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Registration year' }), '2020')
+    await user.click(screen.getByRole('button', { name: 'Calculate forecast' }))
+
+    expect(screen.queryByRole('radio', { name: 'Generation directly' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Volkswagen Golf · registration year 2020/i })).toBeVisible()
+    expect(screen.getByText('Official registration cohort')).toBeVisible()
+  })
+
   it('searches then selects brand, model, year, and forecasts surviving fleet by market', async () => {
     const user = userEvent.setup()
     const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {

@@ -128,7 +128,7 @@ def create_app(
                 worked_models=IcorWorkedModelCatalog.from_path(
                     ROOT / "data" / "icor_supported_models.txt"
                 ),
-                verified_only=client_release,
+                model_year_catalog=client_release,
             )
         )
     elif selected_repository is not None:
@@ -159,7 +159,7 @@ def create_app(
         vehicle_forecast_service = SnapshotVehicleForecastRepository(
             snapshot_ledger.path,
             snapshot_manifest.snapshot_id,
-            verified_only=client_release,
+            model_year_only=client_release,
         )
     app.state.vehicle_forecast_service = vehicle_forecast_service
     if completeness_service is None and snapshot_manifest is not None:

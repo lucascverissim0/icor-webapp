@@ -1,8 +1,8 @@
 # ICOR windshield-demand platform
 
 ICOR is an auditable, local-first planning application that turns official European
-vehicle evidence into generation-level replacement-opportunity baselines for 2028
-and 2031. It preserves registration-year semantics, reports P10/P50/P90 intervals,
+vehicle evidence into vehicle/registration-year replacement-opportunity baselines for 2028 and
+2031. It preserves registration-year semantics, reports P10/P50/P90 intervals,
 and keeps observed, estimated, forecastable, and evidence-only records distinct.
 
 The baseline does not claim an exact windshield, trim, ADAS, configuration, or part
@@ -14,9 +14,11 @@ Development is local-first and isolated from the currently deployed application.
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, audit, test, and local-app
 commands.
 
-The narrow authenticated Volkswagen Golf pilot for external review is documented in
-[docs/CLIENT_RELEASE.md](docs/CLIENT_RELEASE.md). It is a verified-generation client
-preview, not a production deployment or a validated fitment forecast.
+The authenticated all-model-year preview for external review is documented in
+[docs/CLIENT_RELEASE.md](docs/CLIENT_RELEASE.md). Its registration forecast benchmark
+is documented in [docs/FORECAST_VALIDATION.md](docs/FORECAST_VALIDATION.md). It is not
+a production deployment, complete generation/fitment catalogue, or validated
+windshield-demand forecast.
 
 ## Local web app
 

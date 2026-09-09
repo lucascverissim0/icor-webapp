@@ -1,4 +1,8 @@
-from icor.evidence.normalization import normalize_vehicle_label, stable_evidence_id
+from icor.evidence.normalization import (
+    normalize_vehicle_label,
+    source_vehicle_display_label,
+    stable_evidence_id,
+)
 
 
 def test_normalization_removes_layout_noise_without_guessing_aliases() -> None:
@@ -10,6 +14,12 @@ def test_normalization_removes_layout_noise_without_guessing_aliases() -> None:
 def test_normalization_rejects_publisher_missing_value_markers() -> None:
     for marker in ("", " ", "[x]", "[z]", "[c]", "n/a", "N/A", "-"):
         assert normalize_vehicle_label(marker) is None
+
+
+def test_source_vehicle_display_label_normalizes_casing_without_merging() -> None:
+    assert source_vehicle_display_label("  ford   focus ") == "Ford Focus"
+    assert source_vehicle_display_label("bmw") == "BMW"
+    assert source_vehicle_display_label("Golf GTE") == "Golf GTE"
 
 
 def test_stable_evidence_id_is_repeatable_order_sensitive_and_identifier_safe() -> None:

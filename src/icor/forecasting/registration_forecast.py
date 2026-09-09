@@ -1,4 +1,4 @@
-"""Simple registration forecasts selected by deterministic rolling-origin error."""
+"""Backtested robust forecasts for sparse annual vehicle registrations."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 _QUANTUM = Decimal("0.0001")
+_RECENCY_WEIGHT = Decimal("0.5")
+_DAMPING = Decimal("0.8")
+_MAX_BACKTEST_HORIZON = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,11 +19,45 @@ class RegistrationForecast:
 
 
 class RegistrationForecaster:
-    """Choose constant-mean or linear-trend baselines with expanding backtests."""
+    """Use the fixed ensemble that wins the latest held-out snapshot benchmark.
+
+    The method combines a highly robust last-observation forecast with a damped
+    five-year trend. A fixed, globally validated weight avoids unstable per-series
+    model selection across short and noisy vehicle histories.
+    """
+
+    method = "validated-recency-damped-ensemble-v2"
 
     def forecast(
-        self, history: dict[int, Decimal], *, horizon_year: int
+        self,
+        history: dict[int, Decimal],
+        *,
+        horizon_year: int,
+        evaluate_backtest: bool = True,
     ) -> RegistrationForecast:
+        if type(evaluate_backtest) is not bool:
+            raise ValueError("evaluate_backtest must be a boolean")
+        self._validate(history, horizon_year)
+        years = sorted(history)
+        values = tuple(
+            (
+                year,
+                max(Decimal(0), self._estimate(history, year)).quantize(_QUANTUM),
+            )
+            for year in range(years[-1] + 1, horizon_year + 1)
+        )
+        return RegistrationForecast(
+            self.method,
+            values,
+            (
+                self._rolling_origin_wape(history).quantize(_QUANTUM)
+                if evaluate_backtest
+                else Decimal(0)
+            ),
+        )
+
+    @staticmethod
+    def _validate(history: dict[int, Decimal], horizon_year: int) -> None:
         if len(history) < 2:
             raise ValueError("registration forecasting requires at least two annual values")
         years = sorted(history)
@@ -31,37 +68,35 @@ class RegistrationForecaster:
         if any(not value.is_finite() or value < 0 for value in history.values()):
             raise ValueError("registration history must be finite and non-negative")
 
-        candidates = (
-            ("rolling-origin-constant-v1", self._constant),
-            ("rolling-origin-linear-v1", self._linear),
+    def _rolling_origin_wape(self, history: dict[int, Decimal]) -> Decimal:
+        years = sorted(history)
+        absolute_error = Decimal(0)
+        denominator = Decimal(0)
+        for position in range(3, len(years)):
+            training = {year: history[year] for year in years[:position]}
+            for step in range(
+                1,
+                min(_MAX_BACKTEST_HORIZON, len(years) - position) + 1,
+            ):
+                year = years[position + step - 1]
+                actual = history[year]
+                predicted = max(Decimal(0), self._estimate(training, year))
+                absolute_error += abs(predicted - actual)
+                denominator += max(actual, Decimal(1))
+        return absolute_error / denominator if denominator else Decimal(0)
+
+    def _estimate(self, history: dict[int, Decimal], target_year: int) -> Decimal:
+        years = sorted(history)
+        last = history[years[-1]]
+        steps = target_year - years[-1]
+        damped = last + self._slope(history) * sum(
+            (_DAMPING**step for step in range(1, steps + 1)),
+            start=Decimal(0),
         )
-        scored = []
-        for order, (method, estimator) in enumerate(candidates):
-            errors: list[Decimal] = []
-            for position in range(2, len(years)):
-                training = {year: history[year] for year in years[:position]}
-                actual = history[years[position]]
-                predicted = max(Decimal(0), estimator(training, years[position]))
-                errors.append(abs(predicted - actual) / max(actual, Decimal(1)))
-            score = sum(errors, start=Decimal(0)) / max(len(errors), 1)
-            scored.append((score, order, method, estimator))
-        score, _, method, estimator = min(scored, key=lambda item: (item[0], item[1]))
-        values = tuple(
-            (
-                year,
-                max(Decimal(0), estimator(history, year)).quantize(_QUANTUM),
-            )
-            for year in range(years[-1] + 1, horizon_year + 1)
-        )
-        return RegistrationForecast(method, values, score.quantize(_QUANTUM))
+        return _RECENCY_WEIGHT * last + (Decimal(1) - _RECENCY_WEIGHT) * damped
 
     @staticmethod
-    def _constant(history: dict[int, Decimal], _: int) -> Decimal:
-        recent = [history[year] for year in sorted(history)[-3:]]
-        return sum(recent, start=Decimal(0)) / len(recent)
-
-    @staticmethod
-    def _linear(history: dict[int, Decimal], target_year: int) -> Decimal:
+    def _slope(history: dict[int, Decimal]) -> Decimal:
         years = sorted(history)[-5:]
         origin = years[0]
         xs = [Decimal(year - origin) for year in years]
@@ -69,13 +104,9 @@ class RegistrationForecaster:
         mean_x = sum(xs, start=Decimal(0)) / len(xs)
         mean_y = sum(ys, start=Decimal(0)) / len(ys)
         denominator = sum(((x - mean_x) ** 2 for x in xs), start=Decimal(0))
-        slope = (
-            Decimal(0)
-            if denominator == 0
-            else sum(
-                ((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)),
-                start=Decimal(0),
-            )
-            / denominator
-        )
-        return mean_y + slope * (Decimal(target_year - origin) - mean_x)
+        if denominator == 0:
+            return Decimal(0)
+        return sum(
+            ((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)),
+            start=Decimal(0),
+        ) / denominator

@@ -70,12 +70,12 @@ export function OpportunitiesWorkbench({
       <header className="opportunities-hero">
         <div>
           <p className="eyebrow">Windshield replacement forecast</p>
-          <h2>Prioritized model and generation opportunities</h2>
+          <h2>{clientRelease ? 'Prioritized vehicle-year opportunities' : 'Prioritized model and generation opportunities'}</h2>
           <p>{clientRelease
-            ? 'This first client release shows only model-years with an unambiguous manufacturer-reviewed generation. Forecasts remain planning estimates.'
+            ? 'This client release covers every forecastable official-source make/model label and registration cohort year. Manufacturer generations appear only where independently verified; forecasts remain planning estimates.'
             : 'Start with the vehicle opportunities forecast for upcoming years. Demand drives up to 80 points; verified ICOR experience adds up to 20 readiness points.'}</p>
         </div>
-        <span className="status-pill">{clientRelease ? 'Verified identity catalog' : 'Validated snapshot'}</span>
+        <span className="status-pill">{clientRelease ? 'Official vehicle-year evidence' : 'Validated snapshot'}</span>
       </header>
 
       {registrationSummary.data && (() => {
@@ -140,6 +140,7 @@ export function OpportunitiesWorkbench({
             <section className="opportunity-state"><h2>No forecast candidates match this view</h2><p>Change the market or horizon filters to restore candidates.</p></section>
           ) : (
             <OpportunityRanking
+              clientRelease={clientRelease}
               onSelect={setSelectedGroup}
               rows={ranking.data.items}
               selectedGroup={selectedGroup}

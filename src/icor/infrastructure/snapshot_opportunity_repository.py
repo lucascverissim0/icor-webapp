@@ -22,6 +22,7 @@ from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
+from icor.evidence.normalization import source_vehicle_display_label
 from icor.generations.public_catalog import official_public_generation_catalog
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
@@ -40,6 +41,7 @@ class SnapshotOpportunityRepository:
         *,
         worked_models: IcorWorkedModelCatalog | None = None,
         verified_only: bool = False,
+        model_year_catalog: bool = False,
     ) -> None:
         path = getattr(planner._ledger, "path", None)
         if not isinstance(path, Path):
@@ -51,6 +53,7 @@ class SnapshotOpportunityRepository:
         self._worked_models = worked_models or IcorWorkedModelCatalog.empty()
         self._generation_catalog = official_public_generation_catalog()
         self._verified_only = verified_only
+        self._model_year_catalog = model_year_catalog
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
@@ -291,6 +294,7 @@ class SnapshotOpportunityRepository:
             include_coverage
             or query.group_by is OpportunityGroupBy.MODEL_YEAR
             or self._verified_only
+            or self._model_year_catalog
         )
         model_year = "c.registration_cohort_year" if needs_model_year else "NULL"
         lineage_joins = (
@@ -521,11 +525,21 @@ class SnapshotOpportunityRepository:
                 int(row["model_year"]),
                 registry_version=_GENERATION_REGISTRY,
             )
+        brand = (
+            source_vehicle_display_label(row["brand"])
+            if self._model_year_catalog
+            else row["brand"]
+        )
+        model = (
+            source_vehicle_display_label(row["model"])
+            if self._model_year_catalog and row["model"] is not None
+            else row["model"]
+        )
         return OpportunityRow(
             group_id=group_id,
             group_by=group_by,
-            brand=row["brand"],
-            model=row["model"],
+            brand=brand,
+            model=model,
             model_year=row["model_year"],
             generation_name=generation.display_name if generation else None,
             generation_basis=(

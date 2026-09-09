@@ -11,10 +11,11 @@ function label(row: OpportunityRow): string {
   return [row.brand, row.model, row.model_year].filter(Boolean).join(' · ')
 }
 
-export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
+export function OpportunityRanking({ rows, selectedGroup, onSelect, clientRelease = false }: {
   rows: OpportunityRow[]
   selectedGroup: string | null
   onSelect: (groupId: string) => void
+  clientRelease?: boolean
 }) {
   return (
     <section aria-labelledby="ranking-title" className="opportunity-ranking">
@@ -32,7 +33,9 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
                 <div className="opportunity-card__heading">
                   <div>
                     <h3>{label(row)}</h3>
-                    <p className="generation-name">{row.generation_name ?? 'Generation not yet verified'}</p>
+                    <p className="generation-name">{clientRelease
+                      ? 'Official-source registration cohort'
+                      : row.generation_name ?? 'Generation not yet verified'}</p>
                     <p>{row.contributing_configuration_count} contributing configurations</p>
                   </div>
                   <span className={`coverage-status coverage-status--${row.coverage_status}`}>{row.coverage_status.replaceAll('_', ' ')}</span>

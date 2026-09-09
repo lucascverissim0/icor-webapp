@@ -41,4 +41,7 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
     assert OFFICIAL_SOURCE_VERSIONS.estimation_method == "linear-gap-interpolation-v1"
     assert OFFICIAL_SOURCE_VERSIONS.survival_method == "constant-annual-retention-v1"
     assert OFFICIAL_SOURCE_VERSIONS.hazard_method == "age-band-geography-hazard-v1"
-    assert OFFICIAL_SOURCE_VERSIONS.forecast_method == "rolling-origin-simple-candidates-v1"
+    assert (
+        OFFICIAL_SOURCE_VERSIONS.forecast_method
+        == "validated-recency-damped-ensemble-v2"
+    )

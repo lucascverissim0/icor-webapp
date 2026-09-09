@@ -11,7 +11,10 @@ from pathlib import Path
 
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.planner import DemandRange
-from icor.evidence.normalization import normalize_vehicle_label
+from icor.evidence.normalization import (
+    normalize_vehicle_label,
+    source_vehicle_display_label,
+)
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 from icor.generations.public_catalog import (
@@ -137,6 +140,7 @@ class _Selection:
     confidence: str
     source_url: str | None
     profile: VehicleGenerationProfile | None
+    cohort_year: int | None = None
 
 
 class SnapshotVehicleForecastRepository:
@@ -149,11 +153,13 @@ class SnapshotVehicleForecastRepository:
         *,
         catalog: ReviewedGenerationCatalog | None = None,
         verified_only: bool = False,
+        model_year_only: bool = False,
     ) -> None:
         self._path = path
         self._data_version = data_version
         self._catalog = catalog or official_public_generation_catalog()
         self._verified_only = verified_only
+        self._model_year_only = model_year_only
         self._hazard = ReplacementHazardModel(geography_multipliers={"GB": "1.10"})
         self._uncertainty = OpportunityUncertaintyModel(draw_count=2000)
 
@@ -196,6 +202,8 @@ class SnapshotVehicleForecastRepository:
                         for row in cohort_rows
                         if row["registration_cohort_year"] <= latest_observed_year
                         and (
+                            self._model_year_only
+                            or
                             profile is None
                             or self._catalog.entry_for_year(
                                 selected_vehicle,
@@ -207,7 +215,9 @@ class SnapshotVehicleForecastRepository:
                     }
                 )
             )
-            if profile is not None:
+            if self._model_year_only:
+                generations = ()
+            elif profile is not None:
                 generations = tuple(
                     GenerationOption(
                         window.key,
@@ -253,6 +263,10 @@ class SnapshotVehicleForecastRepository:
     ) -> VehicleForecastResult:
         if (year is None) == (generation is None):
             raise VehicleForecastSelectionError("select exactly one year or generation")
+        if self._model_year_only and year is None:
+            raise VehicleForecastSelectionError(
+                "the client catalog supports source model-year selection only"
+            )
         vehicle = CanonicalVehicle("selection", brand, model, None, "Europe")
         profile = self._catalog.profile_for(vehicle)
         if self._verified_only and profile is None:
@@ -315,6 +329,26 @@ class SnapshotVehicleForecastRepository:
         )
 
     def _selection(self, vehicle, profile, year, generation):  # type: ignore[no-untyped-def]
+        if self._model_year_only:
+            if year is None:
+                raise VehicleForecastSelectionError(
+                    "the client catalog supports source model-year selection only"
+                )
+            return _Selection(
+                f"source-registration-year:{vehicle.make}:{vehicle.model}:{year}",
+                (
+                    f"{source_vehicle_display_label(vehicle.make)} "
+                    f"{source_vehicle_display_label(vehicle.model)} — "
+                    f"{year} registration cohort"
+                ),
+                year,
+                year,
+                "official_source_registration_cohort",
+                "source-reported",
+                None,
+                profile,
+                year,
+            )
         if profile is not None:
             entries = self._catalog.entries_for(vehicle, registry_version=_GENERATION_REGISTRY)
             if year is not None:
@@ -401,6 +435,15 @@ class SnapshotVehicleForecastRepository:
         )
 
     def _select_rows(self, rows, vehicle, selection):  # type: ignore[no-untyped-def]
+        if selection.cohort_year is not None:
+            return (
+                [
+                    row
+                    for row in rows
+                    if row["registration_cohort_year"] == selection.cohort_year
+                ],
+                set(),
+            )
         if selection.profile is None:
             return [row for row in rows if row["generation_id"] == selection.key], set()
         selected = []
@@ -493,7 +536,14 @@ class SnapshotVehicleForecastRepository:
             if profile is None:
                 if self._verified_only:
                     continue
-                option = VehicleOption(row[1], row[2])
+                option = VehicleOption(
+                    source_vehicle_display_label(row[1])
+                    if self._model_year_only
+                    else row[1],
+                    source_vehicle_display_label(row[2])
+                    if self._model_year_only
+                    else row[2],
+                )
             else:
                 option = VehicleOption(*profile.aliases[0])
                 reviewed.add((option.brand, option.model))
@@ -508,7 +558,7 @@ class SnapshotVehicleForecastRepository:
                 item.model,
             ),
         )
-        return tuple(ordered[:200])
+        return tuple(ordered if term else ordered[:200])
 
     @staticmethod
     def _vehicle_ids(

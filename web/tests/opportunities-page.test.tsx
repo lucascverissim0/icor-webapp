@@ -163,7 +163,8 @@ describe('OpportunitiesWorkbench', () => {
     )
 
     expect(await screen.findByText('2,150 replacements')).toBeVisible()
-    expect(screen.getByText('Verified identity catalog')).toBeVisible()
+    expect(screen.getByText('Official vehicle-year evidence')).toBeVisible()
+    expect(screen.getByText('Official-source registration cohort')).toBeVisible()
     expect(screen.queryByText('Summarize ranking by')).not.toBeInTheDocument()
     expect(screen.queryByText('Manage ICOR worked-model coverage')).not.toBeInTheDocument()
   })

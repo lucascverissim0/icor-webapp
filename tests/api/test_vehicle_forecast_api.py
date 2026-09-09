@@ -67,11 +67,12 @@ class VehicleForecasts:
         )
 
 
-def _client() -> TestClient:
+def _client(*, client_release: bool = False) -> TestClient:
     return TestClient(
         create_app(
             vehicle_forecast_service=VehicleForecasts(),
             snapshot_root=Path("C:/local/missing-active-root"),
+            client_release=client_release,
         )
     )
 
@@ -109,3 +110,20 @@ def test_vehicle_forecast_requires_year_xor_generation_and_reports_safe_selectio
     assert missing.json()["code"] == "invalid_vehicle_forecast_selection"
     assert ambiguous.status_code == 422
     assert ambiguous.json()["message"] == "ambiguous transition year"
+
+
+def test_client_release_rejects_direct_generation_selection() -> None:
+    response = _client(client_release=True).get(
+        "/api/v1/vehicle-forecasts",
+        params={
+            "brand": "Volkswagen",
+            "model": "Golf",
+            "generation": "mk8",
+            "horizon": 2028,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["message"] == (
+        "The client catalog supports source model-year selection only."
+    )

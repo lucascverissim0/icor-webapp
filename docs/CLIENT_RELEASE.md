@@ -1,11 +1,10 @@
-# Verified client preview
+# Authenticated client preview
 
-The first client-shareable release is a deliberately narrow, authenticated preview.
-It exposes only vehicle/model-year rows that resolve to one unambiguous,
-manufacturer-reviewed generation. The current reviewed catalog contains Volkswagen
-Golf Mk6, Mk7, and Mk8 for Europe. Publisher aliases are consolidated behind the
-canonical Volkswagen Golf identity, and annual transition years are excluded when
-month-level generation windows overlap.
+The client-shareable release exposes every forecastable official-source make/model
+label and registration cohort year. These source-reported vehicle-year identities replace
+invented fallback generation names. A manufacturer generation is shown only where an
+independent manufacturer source verifies it; the application never presents a broad
+estimated generation as fact.
 
 This boundary is fail-closed. The client preview:
 
@@ -35,9 +34,11 @@ Before sharing a build, confirm all of the following:
    the same compiled client bundle through ICOR_PREVIEW_ASSET_ROOT.
 5. The forwarded URL uses HTTPS and is shared only with the intended named client
    reviewer. Do not expose the local Vite or API development ports.
-6. The reviewer is told that this is a Volkswagen Golf pilot; generation catalog
-   expansion, proprietary fitment, and replacement-history calibration are later
-   release phases.
+6. The reviewer is told that source-reported vehicle-year coverage is complete for the
+   forecastable public snapshot, while complete generation canonicalization,
+   proprietary fitment, and replacement-history calibration require later ICOR data.
+7. The forecast benchmark in docs/FORECAST_VALIDATION.md passes against the active
+   snapshot, and the snapshot method version matches the application method version.
 
 ## Build the client bundle
 
@@ -81,16 +82,19 @@ requires explicit authorization.
 After signing in over HTTPS:
 
 1. Confirm the navigation contains only Opportunities and Model search.
-2. Confirm Opportunities shows  Verified identity catalog,  exactly one canonical
-   make/model (Volkswagen Golf), and a named Golf generation on every row.
-3. Confirm no 2012 or 2019 transition-year opportunity is displayed.
-4. Search for Volkswagen Golf, select a non-transition model year or a generation,
-   and calculate 2028 and 2031 forecasts.
+2. Confirm Opportunities shows “Official vehicle-year evidence” and paginates across
+   more than one make/model.
+3. Confirm every opportunity is labelled by make, source-reported model, and
+   registration year;
+   no `estimated-generation-*` label is visible.
+4. Search for at least Volkswagen Golf and an unreviewed model such as Ford Focus,
+   select a registration year, and calculate 2028 and 2031 forecasts.
 5. Confirm the eight configured market rows render and unavailable evidence is never
    displayed as zero.
 6. Confirm /evidence, /registrations, /completeness, /exports, /docs, and
    /openapi.json return 404 after authentication.
 7. Sign out and confirm protected pages return 401.
 
-Stop or delete the preview when the review window ends. Never call this pilot a
-production deployment or a validated windshield demand forecast.
+Stop or delete the preview when the review window ends. Never call this preview a
+production deployment, a complete generation/fitment catalogue, or a validated
+windshield demand forecast.
