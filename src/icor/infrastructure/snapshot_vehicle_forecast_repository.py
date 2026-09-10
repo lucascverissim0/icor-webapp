@@ -160,7 +160,7 @@ class SnapshotVehicleForecastRepository:
         self._catalog = catalog or official_public_generation_catalog()
         self._verified_only = verified_only
         self._model_year_only = model_year_only
-        self._hazard = ReplacementHazardModel(geography_multipliers={"GB": "1.10"})
+        self._hazard = ReplacementHazardModel()
         self._uncertainty = OpportunityUncertaintyModel(draw_count=2000)
 
     def options(

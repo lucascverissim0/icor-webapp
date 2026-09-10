@@ -40,7 +40,7 @@ const forecast = {
     { code: 'EU27', name: 'Europe (EU27)', availability: 'available', registration_cohort_units: 1000, cohort_count: 2, active_fleet: { downside_units: 700, base_units: 800, upside_units: 900 }, replacements: { downside_units: 24, base_units: 32, upside_units: 41 } },
     { code: 'GB', name: 'United Kingdom (GB; England is not separable)', availability: 'unavailable', registration_cohort_units: null, cohort_count: 0, active_fleet: null, replacements: null },
   ],
-  survival_method: 'constant-annual-retention-v1', hazard_method: 'age-band-geography-hazard-v1',
+  survival_method: 'constant-annual-retention-v1', hazard_method: 'france-insurance-windshield-hazard-v2',
   uncertainty_method: 'seeded-triangular-propagation-v1',
   calibration_status: 'assumption_led_without_proprietary_fitment_or_hazard_calibration',
   data_version: 'snapshot-test',

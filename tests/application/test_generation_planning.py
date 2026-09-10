@@ -20,6 +20,7 @@ class Repository:
         self.generation = SimpleNamespace(
             generation_id="generation-volkswagen-golf-eu",
             canonical_vehicle_id="vehicle-volkswagen-golf-eu",
+            end_month=None,
         )
         self.observations = tuple(
             SimpleNamespace(
@@ -111,6 +112,22 @@ def test_sparse_series_without_backtest_history_remains_evidence_only() -> None:
     assert result.cohort_count == 0
     assert result.opportunity_count == 0
     assert result.evidence_only_series_count == 1
+
+
+def test_discontinued_generation_stops_new_cohorts_but_keeps_replacement_demand() -> None:
+    repository = Repository()
+    repository.generation.end_month = date(2022, 12, 1)
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert {item.registration_cohort_year for item in repository.cohorts} == {
+        2020,
+        2021,
+        2022,
+    }
+    opportunity = repository.opportunities[0]
+    assert opportunity.active_fleet_p50 > 0
+    assert opportunity.p50 > 0
 
 
 def test_planning_flushes_bounded_dependency_complete_series_batches() -> None:

@@ -61,7 +61,7 @@ class GenerationPlanningService:
         self.reconciler = RegistrationReconciler()
         self.forecaster = RegistrationForecaster()
         self.survival = CohortSurvivalModel()
-        self.hazard = ReplacementHazardModel(geography_multipliers={"GB": "1.10"})
+        self.hazard = ReplacementHazardModel()
         self.uncertainty = OpportunityUncertaintyModel(draw_count=256)
 
     def apply(
@@ -187,6 +187,15 @@ class GenerationPlanningService:
                 evidence_only_series_count += 1
                 continue
             values = _fill_internal_gaps(series[series_key])
+            if generation.end_month is not None:
+                values = {
+                    year: annual
+                    for year, annual in values.items()
+                    if year <= generation.end_month.year
+                }
+            if len(values) < 3:
+                evidence_only_series_count += 1
+                continue
             all_input_ids = tuple(
                 sorted(
                     {
@@ -197,6 +206,12 @@ class GenerationPlanningService:
                 )
             )
             forecast_method, forecasts = self._forecast(values, max(horizons))
+            if generation.end_month is not None:
+                forecasts = {
+                    year: value
+                    for year, value in forecasts.items()
+                    if year <= generation.end_month.year
+                }
             for year, value in forecasts.items():
                 values[year] = _AnnualValue(value, all_input_ids, "forecast")
             for horizon in sorted(horizons):

@@ -59,11 +59,14 @@ locked holdout result.
 
 ## Remaining calibration limits
 
-This validation covers future registrations only. Cohort survival, windshield
-replacement hazard, and exact vehicle-to-windshield fitment remain explicit versioned
-assumptions. They cannot be trained or independently validated until ICOR supplies
-replacement history and fitment truth after the client meeting. The UI and API must
-continue to label final windshield-demand ranges as assumption-led planning estimates.
+This validation covers future registrations only. Windshield replacement hazard now
+uses the public French insurance-sector anchor documented in
+`docs/WINDSHIELD_DEMAND_ASSUMPTIONS.md`; it is still a cross-market planning proxy,
+not a fitted ICOR outcome model. Cohort survival and exact vehicle-to-windshield
+fitment remain explicit versioned assumptions. They cannot be trained or independently
+validated until ICOR supplies replacement history and fitment truth. The UI and API
+must continue to label final windshield-demand ranges as assumption-led planning
+estimates.
 
 When that evidence arrives, the next challenger should be a hierarchical
 gradient-boosted model with model, geography, age, weather/road exposure, vehicle parc,

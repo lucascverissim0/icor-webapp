@@ -1,18 +1,23 @@
-"""Explicit age and geography assumptions for annual windshield replacement hazard."""
+"""Evidence-anchored annual windshield replacement hazard."""
 
 from __future__ import annotations
 
 from decimal import Decimal
 
+_GLASS_CLAIM_FREQUENCY = Decimal("0.0606")
+_WINDSHIELD_REPLACEMENT_SHARE = Decimal("0.71")
+_BASE_REPLACEMENT_RATE = _GLASS_CLAIM_FREQUENCY * _WINDSHIELD_REPLACEMENT_SHARE
+_SCENARIO_SPREAD = Decimal("0.20")
+
 
 class ReplacementHazardModel:
-    method = "age-band-geography-hazard-v1"
+    method = "france-insurance-windshield-hazard-v2"
     assumption_ids = (
-        "hazard-age-0-3-0.020",
-        "hazard-age-4-7-0.035",
-        "hazard-age-8-12-0.050",
-        "hazard-age-13-plus-0.060",
-        "hazard-uncertainty-plus-minus-20pct",
+        "france-assureurs-2025-covered-glass-claim-frequency-0.0606",
+        "pacifica-2022-windshield-replacement-share-0.71",
+        "derived-windshield-replacement-rate-0.043026",
+        "hazard-scenario-band-plus-minus-20pct",
+        "no-free-age-or-cross-market-calibration",
     )
 
     def __init__(self, *, geography_multipliers: dict[str, str] | None = None) -> None:
@@ -27,16 +32,16 @@ class ReplacementHazardModel:
             raise ValueError("hazard age must be a non-negative integer")
         if not geography.strip():
             raise ValueError("hazard geography is required")
-        if age_years <= 3:
-            base = Decimal("0.020")
-        elif age_years <= 7:
-            base = Decimal("0.035")
-        elif age_years <= 12:
-            base = Decimal("0.050")
-        else:
-            base = Decimal("0.060")
-        return min(Decimal(1), base * self.geography_multipliers.get(geography, Decimal(1)))
+        return min(
+            Decimal(1),
+            _BASE_REPLACEMENT_RATE
+            * self.geography_multipliers.get(geography, Decimal(1)),
+        )
 
     def interval(self, *, age_years: int, geography: str) -> tuple[Decimal, Decimal, Decimal]:
         p50 = self.annual_probability(age_years=age_years, geography=geography)
-        return p50 * Decimal("0.8"), p50, min(Decimal(1), p50 * Decimal("1.2"))
+        return (
+            p50 * (Decimal(1) - _SCENARIO_SPREAD),
+            p50,
+            min(Decimal(1), p50 * (Decimal(1) + _SCENARIO_SPREAD)),
+        )
