@@ -36,6 +36,7 @@ from icor.infrastructure.sqlite_evidence_repository import (
     EvidenceSchemaError,
     ImmutableEvidenceError,
     SQLiteEvidenceRepository,
+    _opportunity_attribution_units,
 )
 
 
@@ -166,6 +167,25 @@ def snapshot() -> SnapshotManifest:
         observation_count=1,
         published_value_count=1,
         warnings=("candidate snapshot",),
+    )
+
+
+def test_cohort_attribution_reconciles_and_preserves_order_for_small_intervals() -> None:
+    downside, base, upside = _opportunity_attribution_units(
+        Decimal("1"),
+        Decimal("3"),
+        Decimal("4"),
+        (("z", Decimal("1")), ("a", Decimal("1")), ("b", Decimal("1"))),
+    )
+
+    assert tuple(map(sum, (downside.values(), base.values(), upside.values()))) == (
+        1,
+        3,
+        4,
+    )
+    assert all(
+        downside[identifier] <= base[identifier] <= upside[identifier]
+        for identifier in ("z", "a", "b")
     )
 
 
@@ -314,12 +334,25 @@ def test_repository_round_trips_generation_planning_records(
     assert repository.list_cohort_estimates() == (cohort,)
     assert repository.list_opportunity_estimates() == (opportunity,)
     assert repository.list_completeness_records() == (completeness,)
+    with repository._connect() as connection:
+        attribution = dict(
+            connection.execute(
+                "SELECT registration_cohort_year, downside_units, base_units, "
+                "upside_units FROM opportunity_cohort_attribution"
+            ).fetchone()
+        )
+    assert attribution == {
+        "registration_cohort_year": 2024,
+        "downside_units": 0,
+        "base_units": 0,
+        "upside_units": 0,
+    }
 
 
-def test_empty_database_initializes_schema_v5_query_contract(tmp_path: Path) -> None:
+def test_empty_database_initializes_schema_v6_query_contract(tmp_path: Path) -> None:
     repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
 
-    assert repository.schema_version == 5
+    assert repository.schema_version == 6
     with repository._connect() as connection:
         tables = {
             row["name"]
@@ -339,12 +372,14 @@ def test_empty_database_initializes_schema_v5_query_contract(tmp_path: Path) -> 
         "registration_label_aggregate",
         "evidence_release_summary",
         "planner_option",
+        "opportunity_cohort_attribution",
     } <= tables
     assert {
         "observation_registration_scope_idx",
         "observation_evidence_filter_idx",
         "canonical_vehicle_search_idx",
         "opportunity_input_cohort_idx",
+        "opportunity_cohort_year_idx",
     } <= indexes
 
 
@@ -432,7 +467,7 @@ def test_writable_schema_v2_migrates_forward_without_losing_rows(tmp_path: Path)
 
     repository = SQLiteEvidenceRepository(path, writable=True)
 
-    assert repository.schema_version == 5
+    assert repository.schema_version == 6
     with repository._connect() as connection:
         columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(observation)")
@@ -449,7 +484,7 @@ def test_writable_schema_v3_migrates_forward_with_generation_tables(tmp_path: Pa
 
     repository = SQLiteEvidenceRepository(path, writable=True)
 
-    assert repository.schema_version == 5
+    assert repository.schema_version == 6
     with repository._connect() as connection:
         tables = {
             row["name"]
@@ -471,7 +506,7 @@ def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-        connection.execute("INSERT INTO schema_version (version) VALUES (6)")
+        connection.execute("INSERT INTO schema_version (version) VALUES (7)")
 
     with pytest.raises(EvidenceSchemaError, match="newer"):
         SQLiteEvidenceRepository(path, writable=True)

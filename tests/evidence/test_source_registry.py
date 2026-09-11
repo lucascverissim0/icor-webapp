@@ -34,7 +34,7 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
     assert OFFICIAL_SOURCE_VERSIONS.identity_registry == "exact-normalized-model-family-v1"
     assert (
         OFFICIAL_SOURCE_VERSIONS.generation_registry
-        == "public-generation-registry-v1"
+        == "public-generation-registry-v2"
     )
     assert OFFICIAL_SOURCE_VERSIONS.generation_resolver == "generation-resolver-v1"
     assert OFFICIAL_SOURCE_VERSIONS.reconciliation_method == "dependency-precedence-v1"

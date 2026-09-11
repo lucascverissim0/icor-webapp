@@ -23,7 +23,7 @@ from icor.generations.public_catalog import (
     official_public_generation_catalog,
 )
 
-_GENERATION_REGISTRY = "public-generation-registry-v1"
+_GENERATION_REGISTRY = "public-generation-registry-v2"
 _EU27 = frozenset(
     {
         "AT",

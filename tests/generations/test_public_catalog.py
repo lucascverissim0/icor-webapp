@@ -24,6 +24,13 @@ def test_official_catalog_maps_only_explicit_reviewed_aliases() -> None:
         None,
         "Europe",
     )
+    historical_punctuation_alias = CanonicalVehicle(
+        "vehicle-volkswagen-comma-vw-golf-eu",
+        "VOLKSWAGEN, VW",
+        "GOLF",
+        None,
+        "Europe",
+    )
     unrelated = CanonicalVehicle(
         "vehicle-volkswagen-golf-plus-eu", "Volkswagen", "Golf Plus", None, "Europe"
     )
@@ -32,9 +39,18 @@ def test_official_catalog_maps_only_explicit_reviewed_aliases() -> None:
     alias_entries = catalog.entries_for(
         publisher_alias, registry_version="public-generations-v1"
     )
+    punctuation_entries = catalog.entries_for(
+        historical_punctuation_alias,
+        registry_version="public-generations-v1",
+    )
 
     assert [entry.display_name for entry in entries] == ["Golf Mk6", "Golf Mk7", "Golf Mk8"]
     assert [entry.display_name for entry in alias_entries] == [
+        "Golf Mk6",
+        "Golf Mk7",
+        "Golf Mk8",
+    ]
+    assert [entry.display_name for entry in punctuation_entries] == [
         "Golf Mk6",
         "Golf Mk7",
         "Golf Mk8",

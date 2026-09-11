@@ -136,7 +136,8 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
                 confidence_reasons TEXT, evidence_ids TEXT
             );
             CREATE TABLE cohort_estimate (
-                cohort_id TEXT PRIMARY KEY, registration_cohort_year INTEGER
+                cohort_id TEXT PRIMARY KEY, registration_cohort_year INTEGER,
+                active_fleet_p10 TEXT, active_fleet_p50 TEXT, active_fleet_p90 TEXT
             );
             CREATE TABLE opportunity_estimate (
                 opportunity_id TEXT PRIMARY KEY, generation_id TEXT,
@@ -172,7 +173,8 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
                 ),
             )
             connection.execute(
-                "INSERT INTO cohort_estimate VALUES (?, 2020)", (cohort_id,)
+                "INSERT INTO cohort_estimate VALUES (?, 2020, '80', '90', '95')",
+                (cohort_id,),
             )
             connection.execute(
                 "INSERT INTO opportunity_estimate VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -292,8 +294,12 @@ def test_sqlite_search_aggregates_opportunities_before_loading_page_lineage(
     assert len(page.items) == 1
     summary = next(statement for statement in statements if "candidate_count" in statement)
     assert "opportunity_input" not in summary
-    paged = next(statement for statement in statements if "first_cohort_year" in statement)
-    assert paged.index("LIMIT 1 OFFSET 0") < paged.index("FROM opportunity_input")
+    paged = next(statement for statement in statements if "LIMIT 1 OFFSET 0" in statement)
+    attribution = next(
+        statement for statement in statements if "cohort_attribution AS" in statement
+    )
+    assert "opportunity_input" not in paged
+    assert "o.opportunity_id IN ('opportunity-golf')" in attribution
 
 
 def test_sqlite_search_reuses_a_bounded_immutable_page(
@@ -349,6 +355,70 @@ def test_sqlite_opportunity_ranking_and_drill_down_are_bounded(
     rows = repository.drill_down(page.items[0].group_id, query, 1, 1)
     assert len(rows) == 1
     assert calls == [1]
+
+
+def test_model_year_opportunities_allocate_and_reconcile_every_input_cohort(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    path = sqlite_repository._ledger.path
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO cohort_estimate VALUES "
+            "('cohort-golf-2021', 2021, '20', '30', '40')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_input VALUES "
+            "('opportunity-golf', 'cohort-golf-2021', 1)"
+        )
+        connection.execute(
+            """CREATE TABLE opportunity_cohort_attribution (
+                opportunity_id TEXT, cohort_id TEXT,
+                registration_cohort_year INTEGER,
+                downside_units INTEGER, base_units INTEGER, upside_units INTEGER
+            )"""
+        )
+        connection.executemany(
+            "INSERT INTO opportunity_cohort_attribution VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                ("opportunity-golf", "cohort-golf", 2020, 8, 10, 12),
+                ("opportunity-golf", "cohort-golf-2021", 2021, 3, 3, 4),
+                ("opportunity-polo", "cohort-polo", 2020, 6, 8, 11),
+            ),
+        )
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    query = OpportunityQuery(
+        group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=10
+    )
+
+    page = repository.search(query)
+    golf = {
+        row.model_year: row
+        for row in page.items
+        if row.brand == "Volkswagen" and row.model == "Golf"
+    }
+
+    assert page.summary.base_units == 21
+    assert {
+        year: (
+            row.demand.downside_units,
+            row.demand.base_units,
+            row.demand.upside_units,
+        )
+        for year, row in golf.items()
+    } == {2020: (8, 10, 12), 2021: (3, 3, 4)}
+    detail = sqlite_repository.get("opportunity-golf")
+    assert detail is not None
+    assert sum(row.demand.base_units for row in detail.model_year_demand) == 13
+    assert [row.model_year for row in detail.model_year_demand] == [2020, 2021]
+    drill_down = repository.drill_down(golf[2021].group_id, query, 1, 10)
+    assert len(drill_down) == 1
+    assert drill_down[0].model_year_demand.model_year == 2021
+    assert drill_down[0].model_year_demand.demand.base_units == 3
 
 
 def test_sqlite_opportunity_exposes_reviewed_generation_and_legacy_icor_readiness(
@@ -431,7 +501,9 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     assert len(scored) == 1
     assert "GROUP BY o.opportunity_id" not in scored[0]
     assert "summary_total" in scored[0]
-    base_atoms = scored[0].split("), atoms AS", 1)[0]
+    base_atoms = scored[0].split("WITH base_atoms AS", 1)[1].split(
+        "), atoms AS", 1
+    )[0]
     assert "opportunity_input" not in base_atoms
 
     model_year_cte, unused = repository._scored_cte(
@@ -440,5 +512,6 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
         ),
         include_coverage=False,
     )
-    assert "i.input_position = 0" in model_year_cte
+    assert "cohort_attribution AS" in model_year_cte
+    assert "i.input_position = 0" not in model_year_cte
     assert "GROUP BY o.opportunity_id" not in model_year_cte

@@ -24,10 +24,13 @@ from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
 from icor.evidence.normalization import source_vehicle_display_label
 from icor.generations.public_catalog import official_public_generation_catalog
-from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
+from icor.infrastructure.snapshot_planner_repository import (
+    SnapshotPlannerRepository,
+    _cohort_attribution_ctes,
+)
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
-_GENERATION_REGISTRY = "public-generation-registry-v1"
+_GENERATION_REGISTRY = "public-generation-registry-v2"
 
 
 class SnapshotOpportunityRepository:
@@ -57,6 +60,16 @@ class SnapshotOpportunityRepository:
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
+        with sqlite3.connect(
+            f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
+        ) as connection:
+            self._materialized_attribution = (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'opportunity_cohort_attribution'"
+                ).fetchone()
+                is not None
+            )
 
     def search(self, query: OpportunityQuery) -> OpportunityPage:
         offset = (query.page - 1) * query.page_size
@@ -189,10 +202,11 @@ class SnapshotOpportunityRepository:
             parameters.extend(query.horizons)
         if query.group_by is OpportunityGroupBy.MODEL_YEAR:
             clauses.append(
-                "? = (SELECT MIN(c2.registration_cohort_year) "
+                "EXISTS (SELECT 1 "
                 "FROM opportunity_input i2 JOIN cohort_estimate c2 "
                 "ON c2.cohort_id = i2.cohort_id "
-                "WHERE i2.opportunity_id = opportunity.opportunity_id)"
+                "WHERE i2.opportunity_id = opportunity.opportunity_id "
+                "AND c2.registration_cohort_year = ?)"
             )
             parameters.append(identity[2])
         records = self._planner._query_sqlite(
@@ -215,6 +229,8 @@ class SnapshotOpportunityRepository:
             )
             for record in records
             for demand in record.model_year_demand
+            if query.group_by is not OpportunityGroupBy.MODEL_YEAR
+            or demand.model_year == identity[2]
         )
 
     def _coverage_for(self, records):  # type: ignore[no-untyped-def]
@@ -296,14 +312,37 @@ class SnapshotOpportunityRepository:
             or self._verified_only
             or self._model_year_catalog
         )
-        model_year = "c.registration_cohort_year" if needs_model_year else "NULL"
-        lineage_joins = (
-            """JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
-                AND i.input_position = 0
-            JOIN cohort_estimate c ON c.cohort_id = i.cohort_id"""
-            if needs_model_year
-            else ""
-        )
+        if needs_model_year:
+            cte_prefix = (
+                "WITH "
+                if self._materialized_attribution
+                else f"WITH {_cohort_attribution_ctes(where)}, "
+            )
+            model_year = "attribution.registration_cohort_year"
+            lineage_joins = (
+                "JOIN "
+                + (
+                    "opportunity_cohort_attribution"
+                    if self._materialized_attribution
+                    else "cohort_attribution"
+                )
+                + " attribution "
+                "ON attribution.opportunity_id = o.opportunity_id"
+            )
+            downside_units = "attribution.downside_units"
+            base_units = "attribution.base_units"
+            upside_units = "attribution.upside_units"
+        else:
+            cte_prefix = "WITH "
+            model_year = "NULL"
+            lineage_joins = ""
+            downside_units = (
+                "CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER)"
+            )
+            base_units = "CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER)"
+            upside_units = (
+                "CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER)"
+            )
         coverage_status = (
             """CASE
                     WHEN EXISTS (
@@ -347,16 +386,17 @@ class SnapshotOpportunityRepository:
             identity_join = """JOIN temp.reviewed_vehicle_year reviewed
                 ON reviewed.brand = LOWER(TRIM(v.make))
                 AND reviewed.model = LOWER(TRIM(v.model))
-                AND reviewed.registration_year = c.registration_cohort_year"""
+                AND reviewed.registration_year =
+                    attribution.registration_cohort_year"""
             brand_expression = "reviewed.canonical_brand"
             model_expression = "reviewed.canonical_model"
-        cte = f"""WITH base_atoms AS MATERIALIZED (
+        cte = f"""{cte_prefix}base_atoms AS MATERIALIZED (
             SELECT o.opportunity_id, {brand_expression} brand,
                 {model_expression} model,
                 {model_year} model_year,
-                CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER) downside_units,
-                CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER) base_units,
-                CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER) upside_units
+                {downside_units} downside_units,
+                {base_units} base_units,
+                {upside_units} upside_units
             FROM opportunity_estimate o
             JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
             {identity_join}

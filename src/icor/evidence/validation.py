@@ -176,6 +176,11 @@ def _database_findings(
 ) -> list[ValidationFinding]:
     findings: list[ValidationFinding] = []
     findings.extend(_evidence_quality_findings(connection, manifest))
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND name = 'opportunity_cohort_attribution'"
+    ).fetchone():
+        findings.extend(_opportunity_attribution_findings(connection))
     for row in connection.execute(
         """SELECT published_value.value_id
         FROM published_value
@@ -304,6 +309,68 @@ def _database_findings(
         )
     if not manifest.versions.generation_registry.endswith("-v0"):
         findings.extend(_generation_planning_findings(connection, manifest))
+    return findings
+
+
+def _opportunity_attribution_findings(
+    connection: sqlite3.Connection,
+) -> list[ValidationFinding]:
+    findings: list[ValidationFinding] = []
+    for row in connection.execute(
+        """SELECT o.opportunity_id
+        FROM opportunity_estimate o
+        LEFT JOIN opportunity_cohort_attribution a
+            ON a.opportunity_id = o.opportunity_id
+        GROUP BY o.opportunity_id
+        HAVING COUNT(a.cohort_id) = 0
+            OR SUM(a.downside_units) !=
+                CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER)
+            OR SUM(a.base_units) !=
+                CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER)
+            OR SUM(a.upside_units) !=
+                CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER)
+        ORDER BY o.opportunity_id LIMIT 100"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.opportunity_attribution_mismatch",
+                "Cohort attribution must reconcile to its opportunity interval.",
+                row["opportunity_id"],
+            )
+        )
+    for row in connection.execute(
+        """SELECT a.opportunity_id
+        FROM opportunity_cohort_attribution a
+        JOIN cohort_estimate c ON c.cohort_id = a.cohort_id
+        LEFT JOIN opportunity_input i
+            ON i.opportunity_id = a.opportunity_id
+            AND i.cohort_id = a.cohort_id
+        WHERE i.cohort_id IS NULL
+            OR a.registration_cohort_year != c.registration_cohort_year
+        ORDER BY a.opportunity_id LIMIT 100"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.opportunity_attribution_lineage",
+                "Cohort attribution must match exact opportunity lineage.",
+                row["opportunity_id"],
+            )
+        )
+    for row in connection.execute(
+        """SELECT i.opportunity_id
+        FROM opportunity_input i
+        LEFT JOIN opportunity_cohort_attribution a
+            ON a.opportunity_id = i.opportunity_id AND a.cohort_id = i.cohort_id
+        WHERE a.cohort_id IS NULL
+        ORDER BY i.opportunity_id LIMIT 100"""
+    ):
+        findings.append(
+            _error(
+                "snapshot.opportunity_attribution_missing",
+                "Every opportunity input must have one cohort attribution.",
+                row["opportunity_id"],
+            )
+        )
     return findings
 
 

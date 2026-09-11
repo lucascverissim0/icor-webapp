@@ -19,7 +19,7 @@ from icor.infrastructure.snapshot_store import SnapshotStore
 
 _EEA_SOURCE_ID = "eea-co2-monitoring"
 _IDENTITY_REGISTRY = "exact-normalized-model-family-v1"
-_GENERATION_REGISTRY = "public-generation-registry-v1"
+_GENERATION_REGISTRY = "public-generation-registry-v2"
 _PUBLIC_GENERATION_CATALOG = official_public_generation_catalog()
 
 

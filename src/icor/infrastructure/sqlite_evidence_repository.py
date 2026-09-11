@@ -8,7 +8,7 @@ import sqlite3
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -50,7 +50,7 @@ class ImmutableEvidenceError(RuntimeError):
     """A write would mutate the ledger or refer to unavailable evidence."""
 
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _EU27_CODES = (
     'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR',
     'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO',
@@ -72,6 +72,95 @@ _NON_PUBLISHABLE_STATUSES = frozenset(
     {MappingStatus.AMBIGUOUS.value, MappingStatus.REJECTED.value, MappingStatus.UNRESOLVED.value}
 )
 _T = TypeVar("_T")
+
+
+def _allocate_integer_units(
+    total: Decimal,
+    weights: tuple[tuple[str, Decimal], ...],
+) -> dict[str, int]:
+    rounded_total = int(total.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    weight_total = sum((weight for _, weight in weights), Decimal(0))
+    if weight_total == 0:
+        if rounded_total:
+            raise ImmutableEvidenceError(
+                "non-zero opportunity cannot have zero cohort exposure"
+            )
+        return {identifier: 0 for identifier, _ in weights}
+    raw = {
+        identifier: Decimal(rounded_total) * weight / weight_total
+        for identifier, weight in weights
+    }
+    allocated = {
+        identifier: int(value.to_integral_value(rounding=ROUND_FLOOR))
+        for identifier, value in raw.items()
+    }
+    residual = rounded_total - sum(allocated.values())
+    order = sorted(
+        (identifier for identifier, _ in weights),
+        key=lambda identifier: (
+            -(raw[identifier] - Decimal(allocated[identifier])),
+            identifier,
+        ),
+    )
+    for identifier in order[:residual]:
+        allocated[identifier] += 1
+    return allocated
+
+
+def _allocate_capped_units(
+    total: int,
+    capacities: dict[str, int],
+) -> dict[str, int]:
+    capacity_total = sum(capacities.values())
+    if not 0 <= total <= capacity_total:
+        raise ImmutableEvidenceError("bounded cohort allocation is infeasible")
+    if capacity_total == 0:
+        return {identifier: 0 for identifier in capacities}
+    raw = {
+        identifier: Decimal(total) * Decimal(capacity) / Decimal(capacity_total)
+        for identifier, capacity in capacities.items()
+    }
+    allocated = {
+        identifier: int(value.to_integral_value(rounding=ROUND_FLOOR))
+        for identifier, value in raw.items()
+    }
+    residual = total - sum(allocated.values())
+    order = sorted(
+        capacities,
+        key=lambda identifier: (
+            -(raw[identifier] - Decimal(allocated[identifier])),
+            identifier,
+        ),
+    )
+    for identifier in order:
+        if residual == 0:
+            break
+        if allocated[identifier] < capacities[identifier]:
+            allocated[identifier] += 1
+            residual -= 1
+    if residual:
+        raise ImmutableEvidenceError("bounded cohort allocation did not reconcile")
+    return allocated
+
+
+def _opportunity_attribution_units(
+    p10: Decimal,
+    p50: Decimal,
+    p90: Decimal,
+    weights: tuple[tuple[str, Decimal], ...],
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+    totals = tuple(
+        int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        for value in (p10, p50, p90)
+    )
+    base = _allocate_integer_units(Decimal(totals[1]), weights)
+    downside = _allocate_capped_units(totals[0], base)
+    extra = _allocate_integer_units(Decimal(totals[2] - totals[1]), weights)
+    upside = {
+        identifier: base[identifier] + extra[identifier]
+        for identifier, _ in weights
+    }
+    return downside, base, upside
 
 
 class SQLiteEvidenceRepository:
@@ -492,6 +581,9 @@ class SQLiteEvidenceRepository:
                     version = 4
                 if version == 4:
                     self._migrate_v4_to_v5(connection)
+                    version = 5
+                if version == 5:
+                    self._migrate_v5_to_v6(connection)
 
     def _migrate_v2_to_v3(self, connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
@@ -547,6 +639,71 @@ class SQLiteEvidenceRepository:
             connection.commit()
         self._validate_schema(connection)
 
+    def _migrate_v5_to_v6(self, connection: sqlite3.Connection) -> None:
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in self._v6_extension_statements():
+                connection.execute(statement)
+            self._backfill_opportunity_attribution(connection)
+            connection.execute("DROP TABLE schema_version")
+            connection.execute(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL CHECK (version = 6))"
+            )
+            connection.execute("INSERT INTO schema_version (version) VALUES (6)")
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        self._validate_schema(connection)
+
+    @staticmethod
+    def _backfill_opportunity_attribution(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            """SELECT o.opportunity_id, o.p10, o.p50, o.p90,
+                i.cohort_id, c.registration_cohort_year, c.active_fleet_p50
+            FROM opportunity_estimate o
+            JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
+            JOIN cohort_estimate c ON c.cohort_id = i.cohort_id
+            ORDER BY o.opportunity_id, i.input_position"""
+        ).fetchall()
+        grouped: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            grouped.setdefault(row["opportunity_id"], []).append(row)
+        records = []
+        for opportunity_rows in grouped.values():
+            first = opportunity_rows[0]
+            weights = tuple(
+                (row["cohort_id"], Decimal(row["active_fleet_p50"]))
+                for row in opportunity_rows
+            )
+            allocations = _opportunity_attribution_units(
+                Decimal(first["p10"]),
+                Decimal(first["p50"]),
+                Decimal(first["p90"]),
+                weights,
+            )
+            for row in opportunity_rows:
+                values = tuple(
+                    allocation[row["cohort_id"]] for allocation in allocations
+                )
+                if not values[0] <= values[1] <= values[2]:
+                    raise ImmutableEvidenceError(
+                        "cohort opportunity attribution is unordered"
+                    )
+                records.append(
+                    (
+                        row["opportunity_id"],
+                        row["cohort_id"],
+                        row["registration_cohort_year"],
+                        *values,
+                    )
+                )
+        connection.executemany(
+            "INSERT INTO opportunity_cohort_attribution VALUES (?, ?, ?, ?, ?, ?)",
+            records,
+        )
+
     @contextmanager
     def _connect(self) -> Any:
         if self.writable:
@@ -584,6 +741,17 @@ class SQLiteEvidenceRepository:
             connection.commit()
 
     def _migration_statements(self) -> tuple[str, ...]:
+        return self._schema_statements(
+            version=6,
+            model_year_sql="INTEGER",
+            observation_year_sql=(
+                ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
+            ),
+        ) + self._v4_extension_statements() + self._v5_extension_statements() + (
+            self._v6_extension_statements()
+        )
+
+    def _v5_migration_statements(self) -> tuple[str, ...]:
         return self._schema_statements(
             version=5,
             model_year_sql="INTEGER",
@@ -898,6 +1066,32 @@ class SQLiteEvidenceRepository:
             if statement.strip()
         )
 
+    def _v6_extension_statements(self) -> tuple[str, ...]:
+        statements = """
+                CREATE TABLE opportunity_cohort_attribution (
+                    opportunity_id TEXT NOT NULL
+                        REFERENCES opportunity_estimate(opportunity_id),
+                    cohort_id TEXT NOT NULL REFERENCES cohort_estimate(cohort_id),
+                    registration_cohort_year INTEGER NOT NULL,
+                    downside_units INTEGER NOT NULL CHECK (downside_units >= 0),
+                    base_units INTEGER NOT NULL CHECK (base_units >= 0),
+                    upside_units INTEGER NOT NULL CHECK (upside_units >= 0),
+                    CHECK (downside_units <= base_units),
+                    CHECK (base_units <= upside_units),
+                    PRIMARY KEY (opportunity_id, cohort_id),
+                    UNIQUE (opportunity_id, registration_cohort_year)
+                );
+                CREATE INDEX opportunity_cohort_year_idx
+                ON opportunity_cohort_attribution (
+                    registration_cohort_year, opportunity_id
+                );
+                """
+        return tuple(
+            statement.strip()
+            for statement in statements.split(";")
+            if statement.strip()
+        )
+
     @staticmethod
     def _enum_check(enum_type: type[Any]) -> str:
         return "(" + ", ".join(repr(member.value) for member in enum_type) + ")"
@@ -930,6 +1124,8 @@ class SQLiteEvidenceRepository:
             statements = self._v3_migration_statements()
         elif version == 4:
             statements = self._v4_migration_statements()
+        elif version == 5:
+            statements = self._v5_migration_statements()
         else:
             statements = self._migration_statements()
         self._validate_structure(connection, statements)
@@ -1391,13 +1587,15 @@ class SQLiteEvidenceRepository:
             connection,
             "cohort_estimate",
             "cohort_id",
-            "generation_id, canonical_vehicle_id, geography",
+            "generation_id, canonical_vehicle_id, geography, "
+            "registration_cohort_year, active_fleet_p50",
             tuple(
                 cohort_id for item in estimates for cohort_id in item.input_cohort_ids
             ),
         )
         opportunity_rows = []
         input_rows = []
+        attribution_rows = []
         for estimate in estimates:
             generation = generation_vehicles.get(estimate.generation_id)
             if generation is None:
@@ -1424,6 +1622,7 @@ class SQLiteEvidenceRepository:
                     self._json(estimate.reason_codes),
                 )
             )
+            cohorts = []
             for position, cohort_id in enumerate(estimate.input_cohort_ids):
                 cohort = cohort_lineage.get(cohort_id)
                 if cohort is None:
@@ -1439,6 +1638,23 @@ class SQLiteEvidenceRepository:
                 input_rows.append(
                     (estimate.opportunity_id, cohort_id, position),
                 )
+                cohorts.append((cohort_id, cohort[3], Decimal(cohort[4])))
+            weights = tuple((cohort_id, weight) for cohort_id, _, weight in cohorts)
+            allocations = _opportunity_attribution_units(
+                estimate.p10,
+                estimate.p50,
+                estimate.p90,
+                weights,
+            )
+            for cohort_id, year, _ in cohorts:
+                values = tuple(allocation[cohort_id] for allocation in allocations)
+                if not values[0] <= values[1] <= values[2]:
+                    raise ImmutableEvidenceError(
+                        "cohort opportunity attribution is unordered"
+                    )
+                attribution_rows.append(
+                    (estimate.opportunity_id, cohort_id, year, *values)
+                )
         connection.executemany(
             """INSERT INTO opportunity_estimate VALUES
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -1447,6 +1663,10 @@ class SQLiteEvidenceRepository:
         connection.executemany(
             "INSERT INTO opportunity_input VALUES (?, ?, ?)",
             input_rows,
+        )
+        connection.executemany(
+            "INSERT INTO opportunity_cohort_attribution VALUES (?, ?, ?, ?, ?, ?)",
+            attribution_rows,
         )
 
     @staticmethod

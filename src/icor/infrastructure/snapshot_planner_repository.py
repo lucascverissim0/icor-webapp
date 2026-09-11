@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from math import ceil
 from pathlib import Path
 
@@ -174,15 +174,39 @@ class SnapshotPlannerRepository:
                     {self._base_sql(where)}
                     ORDER BY {order_by}{suffix}
                 )
-                SELECT page.*, (
-                    SELECT MIN(cohort.registration_cohort_year)
-                    FROM opportunity_input input
-                    JOIN cohort_estimate cohort ON cohort.cohort_id = input.cohort_id
-                    WHERE input.opportunity_id = page.opportunity_id
-                ) AS first_cohort_year
-                FROM page ORDER BY {outer_order}""",
+                SELECT page.* FROM page ORDER BY {outer_order}""",
                 query_parameters,
             ).fetchall()
+            if rows:
+                placeholders = ", ".join("?" for _ in rows)
+                materialized = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                    "AND name = 'opportunity_cohort_attribution'"
+                ).fetchone()
+                if materialized:
+                    attribution_query = f"""SELECT opportunity_id,
+                        registration_cohort_year, downside_units, base_units,
+                        upside_units, cohort_id
+                    FROM opportunity_cohort_attribution
+                    WHERE opportunity_id IN ({placeholders})
+                    ORDER BY opportunity_id, registration_cohort_year, cohort_id"""
+                else:
+                    attribution_query = f"""WITH {_cohort_attribution_ctes(
+                            f"o.opportunity_id IN ({placeholders})"
+                        )}
+                        SELECT opportunity_id, registration_cohort_year,
+                            downside_units, base_units, upside_units, cohort_id
+                        FROM cohort_attribution
+                        ORDER BY opportunity_id, registration_cohort_year, cohort_id"""
+                attribution_rows = connection.execute(
+                    attribution_query,
+                    tuple(row["opportunity_id"] for row in rows),
+                ).fetchall()
+            else:
+                attribution_rows = ()
+        attributions: dict[str, list[sqlite3.Row]] = {}
+        for attribution in attribution_rows:
+            attributions.setdefault(attribution["opportunity_id"], []).append(attribution)
         records = []
         for row in rows:
             downside, base, upside = (
@@ -193,16 +217,24 @@ class SnapshotPlannerRepository:
             reason_codes = tuple(json.loads(row["reason_codes"]))
             identity_kind = GenerationIdentityKind(row["identity_kind"])
             identity_reasons = tuple(json.loads(row["confidence_reasons"]))
-            model_year_demand = (
+            contribution_rows = attributions.get(row["opportunity_id"], [])
+            if not contribution_rows:
+                raise ValueError("opportunity contains no cohort attribution")
+            model_year_demand = tuple(
                 ModelYearDemand(
                     configuration_id=row["opportunity_id"],
-                    model_year=row["first_cohort_year"],
+                    model_year=attribution["registration_cohort_year"],
                     forecast_horizon=row["horizon_year"],
-                    demand=DemandRange(downside, base, upside),
+                    demand=DemandRange(
+                        attribution["downside_units"],
+                        attribution["base_units"],
+                        attribution["upside_units"],
+                    ),
                     evidence_status=EvidenceStatus.VALIDATED,
                     data_version=self.snapshot_id,
                     sources=sources,
-                ),
+                )
+                for attribution in contribution_rows
             )
             records.append(
                 PlanningConfiguration(
@@ -216,7 +248,7 @@ class SnapshotPlannerRepository:
                     model_year_end=(
                         date.fromisoformat(row["end_month"]).year
                         if row["end_month"] is not None
-                        else row["first_cohort_year"]
+                        else contribution_rows[-1]["registration_cohort_year"]
                     ),
                     generation=row["display_name"],
                     facelift=row["facelift"],
@@ -356,19 +388,32 @@ class SnapshotPlannerRepository:
             downside = _units(opportunity.p10)
             base = _units(opportunity.p50)
             upside = _units(opportunity.p90)
-            first_cohort_year = min(
-                item.registration_cohort_year for item in inputs
+            inputs = tuple(
+                sorted(
+                    inputs,
+                    key=lambda item: (item.registration_cohort_year, item.cohort_id),
+                )
             )
-            model_year_demand = (
+            downside_by_cohort = _allocate_units(
+                downside, inputs, "active_fleet_p10"
+            )
+            base_by_cohort = _allocate_units(base, inputs, "active_fleet_p50")
+            upside_by_cohort = _allocate_units(upside, inputs, "active_fleet_p90")
+            model_year_demand = tuple(
                 ModelYearDemand(
                     configuration_id=opportunity.opportunity_id,
-                    model_year=first_cohort_year,
+                    model_year=cohort.registration_cohort_year,
                     forecast_horizon=opportunity.horizon_year,
-                    demand=DemandRange(downside, base, upside),
+                    demand=DemandRange(
+                        downside_by_cohort[cohort.cohort_id],
+                        base_by_cohort[cohort.cohort_id],
+                        upside_by_cohort[cohort.cohort_id],
+                    ),
                     evidence_status=EvidenceStatus.VALIDATED,
                     data_version=self.snapshot_id,
                     sources=sources,
-                ),
+                )
+                for cohort in inputs
             )
             exposure = _units(opportunity.active_fleet_p50)
             evidence_ids = tuple(
@@ -423,6 +468,78 @@ class SnapshotPlannerRepository:
 
 def _units(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _allocate_units(total: int, cohorts: tuple, attribute: str) -> dict[str, int]:
+    """Allocate rounded opportunity units while preserving the exact parent total."""
+
+    weights = tuple(Decimal(getattr(cohort, attribute)) for cohort in cohorts)
+    weight_total = sum(weights, Decimal(0))
+    if weight_total == 0:
+        if total:
+            raise ValueError("non-zero opportunity cannot have zero cohort exposure")
+        return {cohort.cohort_id: 0 for cohort in cohorts}
+    raw = tuple(Decimal(total) * weight / weight_total for weight in weights)
+    allocated = [int(value.to_integral_value(rounding=ROUND_FLOOR)) for value in raw]
+    allocated[0] += total - sum(allocated)
+    return {
+        cohort.cohort_id: allocated[index] for index, cohort in enumerate(cohorts)
+    }
+
+
+def _cohort_attribution_ctes(where: str) -> str:
+    """Return exact integer cohort attribution CTEs for filtered opportunities."""
+
+    return f"""cohort_weights AS MATERIALIZED (
+        SELECT o.opportunity_id, i.cohort_id, i.input_position,
+            c.registration_cohort_year,
+            CAST(o.p10 AS NUMERIC) opportunity_p10,
+            CAST(o.p50 AS NUMERIC) opportunity_p50,
+            CAST(o.p90 AS NUMERIC) opportunity_p90,
+            CAST(c.active_fleet_p10 AS NUMERIC) cohort_p10,
+            CAST(c.active_fleet_p50 AS NUMERIC) cohort_p50,
+            CAST(c.active_fleet_p90 AS NUMERIC) cohort_p90,
+            SUM(CAST(c.active_fleet_p10 AS NUMERIC))
+                OVER (PARTITION BY o.opportunity_id) total_p10,
+            SUM(CAST(c.active_fleet_p50 AS NUMERIC))
+                OVER (PARTITION BY o.opportunity_id) total_p50,
+            SUM(CAST(c.active_fleet_p90 AS NUMERIC))
+                OVER (PARTITION BY o.opportunity_id) total_p90
+        FROM opportunity_estimate o
+        JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
+        JOIN cohort_estimate c ON c.cohort_id = i.cohort_id
+        WHERE {where}
+    ), cohort_raw AS (
+        SELECT *,
+            CASE WHEN total_p10 = 0 THEN 0
+                ELSE opportunity_p10 * 1.0 * cohort_p10 / total_p10 END raw_p10,
+            CASE WHEN total_p50 = 0 THEN 0
+                ELSE opportunity_p50 * 1.0 * cohort_p50 / total_p50 END raw_p50,
+            CASE WHEN total_p90 = 0 THEN 0
+                ELSE opportunity_p90 * 1.0 * cohort_p90 / total_p90 END raw_p90
+        FROM cohort_weights
+    ), cohort_floor AS (
+        SELECT *,
+            CAST(raw_p10 AS INTEGER) floor_p10,
+            CAST(raw_p50 AS INTEGER) floor_p50,
+            CAST(raw_p90 AS INTEGER) floor_p90
+        FROM cohort_raw
+    ), cohort_attribution AS (
+        SELECT opportunity_id, cohort_id, registration_cohort_year,
+            floor_p10 + CASE WHEN input_position = 0 THEN
+                CAST(ROUND(opportunity_p10, 0) AS INTEGER)
+                - SUM(floor_p10) OVER (PARTITION BY opportunity_id)
+                ELSE 0 END downside_units,
+            floor_p50 + CASE WHEN input_position = 0 THEN
+                CAST(ROUND(opportunity_p50, 0) AS INTEGER)
+                - SUM(floor_p50) OVER (PARTITION BY opportunity_id)
+                ELSE 0 END base_units,
+            floor_p90 + CASE WHEN input_position = 0 THEN
+                CAST(ROUND(opportunity_p90, 0) AS INTEGER)
+                - SUM(floor_p90) OVER (PARTITION BY opportunity_id)
+                ELSE 0 END upside_units
+        FROM cohort_floor
+    )"""
 
 
 def _confidence(band: ConfidenceBand, reasons: tuple[str, ...]) -> Confidence:

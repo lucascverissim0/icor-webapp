@@ -10,7 +10,13 @@ from icor.domain.evidence import CanonicalVehicle
 from icor.domain.generations import GenerationEntry, GenerationIdentityKind
 from icor.evidence.normalization import normalize_vehicle_label, stable_evidence_id
 
-_VOLKSWAGEN_GOLF_MAKE_ALIASES = ("Volkswagen", "Volkswagen VW", "Volkswagen. VW", "VW")
+_VOLKSWAGEN_GOLF_MAKE_ALIASES = (
+    "Volkswagen",
+    "Volkswagen VW",
+    "Volkswagen. VW",
+    "Volkswagen, VW",
+    "VW",
+)
 _VOLKSWAGEN_GOLF_MODEL_ALIASES = (
     "Golf",
     "Golf GTE",

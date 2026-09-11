@@ -32,7 +32,7 @@ OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     survival_method="constant-annual-retention-v1",
     hazard_method="france-insurance-windshield-hazard-v2",
     forecast_method="validated-recency-damped-ensemble-v2",
-    generation_registry="public-generation-registry-v1",
+    generation_registry="public-generation-registry-v2",
     generation_resolver="generation-resolver-v1",
 )
 

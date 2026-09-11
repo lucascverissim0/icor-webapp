@@ -414,6 +414,7 @@ class SnapshotBuilder:
             "cohort_input",
             "opportunity_estimate",
             "opportunity_input",
+            "opportunity_cohort_attribution",
             "completeness_record",
         )
         with closing(sqlite3.connect(target.path)) as connection:

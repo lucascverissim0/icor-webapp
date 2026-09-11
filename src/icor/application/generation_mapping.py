@@ -42,7 +42,7 @@ class GenerationMappingService:
     def __init__(
         self,
         *,
-        registry_version: str = "public-generation-registry-v1",
+        registry_version: str = "public-generation-registry-v2",
         resolver_version: str = "generation-resolver-v1",
         public_catalog: ReviewedGenerationCatalog | None = None,
     ) -> None:
