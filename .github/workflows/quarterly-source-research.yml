@@ -1,0 +1,39 @@
+name: Quarterly official-source research
+
+on:
+  schedule:
+    - cron: "17 6 1 1,4,7,10 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_RESEARCH_MODEL: ${{ vars.OPENAI_RESEARCH_MODEL || 'o4-mini' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.3"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+      - name: Require the dedicated project key
+        shell: bash
+        run: test -n "$OPENAI_API_KEY" || { echo "Missing OPENAI_API_KEY repository secret"; exit 2; }
+      - name: Discover official release candidates
+        run: >-
+          uv run python scripts/run_quarterly_source_research.py
+          --model "$OPENAI_RESEARCH_MODEL"
+          --output quarterly-research
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quarterly-source-research-${{ github.run_id }}
+          path: quarterly-research/*.json
+          if-no-files-found: error
+          retention-days: 120

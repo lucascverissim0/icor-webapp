@@ -31,9 +31,10 @@ jobs:
       - run: >-
           uv run ruff check src tests scripts/audit_baseline.py
           scripts/build_evidence_snapshot.py scripts/bootstrap_codespaces_preview.py
+          scripts/audit_forecast_promotion.py
           scripts/e2e_fixture.py scripts/generate_preview_credentials.py
           scripts/run_codespaces_preview.py scripts/run_e2e_dev.py
-          scripts/run_planner_dev.py
+          scripts/run_planner_dev.py scripts/run_quarterly_source_research.py
       - run: uv run pytest
 
   planner-web:
