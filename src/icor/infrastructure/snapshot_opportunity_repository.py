@@ -5,17 +5,21 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
+from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
 from pathlib import Path
 
 from icor.application.opportunities import (
+    OpportunityContribution,
     OpportunityDrillDownRow,
+    OpportunityFleetEstimate,
     OpportunityGroupBy,
     OpportunityPage,
     OpportunityQuery,
     OpportunityRow,
     OpportunitySummary,
     _coverage_status,
+    world_region_for_market,
 )
 from icor.application.ranking import RankingStrategy
 from icor.application.worked_models import IcorWorkedModelCatalog
@@ -23,7 +27,7 @@ from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
 from icor.evidence.normalization import source_vehicle_display_label
-from icor.generations.public_catalog import official_public_generation_catalog
+from icor.generations.public_catalog import ranking_public_generation_catalog
 from icor.infrastructure.snapshot_planner_repository import (
     SnapshotPlannerRepository,
     _cohort_attribution_ctes,
@@ -54,7 +58,7 @@ class SnapshotOpportunityRepository:
         self._coverage_path = coverage.path
         self._strategy = strategy
         self._worked_models = worked_models or IcorWorkedModelCatalog.empty()
-        self._generation_catalog = official_public_generation_catalog()
+        self._generation_catalog = ranking_public_generation_catalog()
         self._verified_only = verified_only
         self._model_year_catalog = model_year_catalog
         self.snapshot_id = planner.snapshot_id
@@ -140,6 +144,116 @@ class SnapshotOpportunityRepository:
                 self._uncovered_cache.pop(next(iter(self._uncovered_cache)))
             self._uncovered_cache[query] = result
         return result
+
+    def get(self, group_id: str, query: OpportunityQuery) -> OpportunityRow | None:
+        identity = _decode_group_id(group_id, query.group_by)
+        if identity is None:
+            return None
+        with self._connect() as connection:
+            has_coverage = bool(
+                connection.execute(
+                    "SELECT EXISTS(SELECT 1 FROM coverage_db.production_coverage)"
+                ).fetchone()[0]
+            )
+            if not has_coverage:
+                for cached_query, cached_page in reversed(
+                    tuple(self._uncovered_cache.items())
+                ):
+                    if (
+                        cached_query.group_by is query.group_by
+                        and cached_query.markets == query.markets
+                        and cached_query.horizons == query.horizons
+                    ):
+                        cached_row = next(
+                            (
+                                item
+                                for item in cached_page.items
+                                if item.group_id == group_id
+                            ),
+                            None,
+                        )
+                        if cached_row is not None:
+                            return cached_row
+            cte, parameters = self._scored_cte(
+                query,
+                include_coverage=has_coverage or bool(self._worked_models.records),
+            )
+            clauses = ["brand = ?"]
+            identity_parameters: list[object] = [identity[0]]
+            if query.group_by is not OpportunityGroupBy.BRAND:
+                clauses.append("model = ?")
+                identity_parameters.append(identity[1])
+            if query.group_by is OpportunityGroupBy.MODEL_YEAR:
+                clauses.append("model_year = ?")
+                identity_parameters.append(identity[2])
+            row = connection.execute(
+                f"{cte} SELECT * FROM scored WHERE {' AND '.join(clauses)}",
+                (*parameters, *identity_parameters),
+            ).fetchone()
+        return self._row(row, query.group_by) if row is not None else None
+
+    def contributions(
+        self, group_id: str, query: OpportunityQuery
+    ) -> tuple[OpportunityContribution, ...]:
+        identity = _decode_group_id(group_id, query.group_by)
+        if identity is None:
+            return ()
+        clauses = ["LOWER(TRIM(v.make)) = LOWER(TRIM(?))"]
+        parameters: list[object] = [identity[0]]
+        if query.group_by is not OpportunityGroupBy.BRAND:
+            clauses.append("LOWER(TRIM(v.model)) = LOWER(TRIM(?))")
+            parameters.append(identity[1])
+        if query.group_by is OpportunityGroupBy.MODEL_YEAR:
+            clauses.append("a.registration_cohort_year = ?")
+            parameters.append(identity[2])
+        if query.markets:
+            clauses.append(
+                f"o.geography IN ({', '.join('?' for _ in query.markets)})"
+            )
+            parameters.extend(query.markets)
+        if query.horizons:
+            clauses.append(
+                f"o.horizon_year IN ({', '.join('?' for _ in query.horizons)})"
+            )
+            parameters.extend(query.horizons)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT o.opportunity_id configuration_id,
+                    o.geography market, o.horizon_year forecast_horizon,
+                    g.display_name generation,
+                    COALESCE(g.body_style, 'Not evidenced') body_style,
+                    SUM(a.downside_units) downside_units,
+                    SUM(a.base_units) base_units,
+                    SUM(a.upside_units) upside_units
+                FROM opportunity_estimate o
+                JOIN canonical_vehicle v
+                    ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN generation_entry g
+                    ON g.generation_id = o.generation_id
+                JOIN opportunity_cohort_attribution a
+                    ON a.opportunity_id = o.opportunity_id
+                WHERE {' AND '.join(clauses)}
+                GROUP BY o.opportunity_id, o.geography, o.horizon_year,
+                    g.display_name, g.body_style
+                ORDER BY o.horizon_year, o.geography, g.display_name,
+                    o.opportunity_id""",
+                parameters,
+            ).fetchall()
+        return tuple(
+            OpportunityContribution(
+                configuration_id=row["configuration_id"],
+                market=row["market"],
+                forecast_horizon=int(row["forecast_horizon"]),
+                generation=row["generation"],
+                body_style=row["body_style"],
+                demand=DemandRange(
+                    int(row["downside_units"]),
+                    int(row["base_units"]),
+                    int(row["upside_units"]),
+                ),
+            )
+            for row in rows
+        )
 
     def drill_down(
         self,
@@ -231,6 +345,77 @@ class SnapshotOpportunityRepository:
             for demand in record.model_year_demand
             if query.group_by is not OpportunityGroupBy.MODEL_YEAR
             or demand.model_year == identity[2]
+        )
+
+    def fleet_estimates(
+        self, group_id: str, query: OpportunityQuery
+    ) -> tuple[OpportunityFleetEstimate, ...]:
+        identity = _decode_group_id(group_id, query.group_by)
+        if identity is None:
+            return ()
+        clauses: list[str] = []
+        parameters: list[object] = []
+        brand_expression = "v.make"
+        model_expression = "v.model"
+        identity_join = ""
+        if self._verified_only:
+            identity_join = """JOIN temp.reviewed_vehicle_year reviewed
+                ON reviewed.brand = LOWER(TRIM(v.make))
+                AND reviewed.model = LOWER(TRIM(v.model))
+                AND reviewed.registration_year = c.registration_cohort_year"""
+            brand_expression = "reviewed.canonical_brand"
+            model_expression = "reviewed.canonical_model"
+        clauses.append(f"{brand_expression} = ?")
+        parameters.append(identity[0])
+        if query.group_by is not OpportunityGroupBy.BRAND:
+            clauses.append(f"{model_expression} = ?")
+            parameters.append(identity[1])
+        if query.group_by is OpportunityGroupBy.MODEL_YEAR:
+            clauses.append("c.registration_cohort_year = ?")
+            parameters.append(identity[2])
+        if query.markets:
+            clauses.append(
+                f"o.geography IN ({', '.join('?' for _ in query.markets)})"
+            )
+            parameters.extend(query.markets)
+        if query.horizons:
+            clauses.append(
+                f"o.horizon_year IN ({', '.join('?' for _ in query.horizons)})"
+            )
+            parameters.extend(query.horizons)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT o.geography market,
+                    o.horizon_year forecast_horizon,
+                    SUM(CAST(c.active_fleet_p50 AS NUMERIC)) estimated_fleet_units
+                FROM opportunity_estimate o
+                JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
+                JOIN cohort_estimate c ON c.cohort_id = i.cohort_id
+                {identity_join}
+                WHERE {' AND '.join(clauses)}
+                GROUP BY o.geography, o.horizon_year
+                ORDER BY o.horizon_year, o.geography""",
+                parameters,
+            ).fetchall()
+        totals: dict[tuple[str, int], Decimal] = {}
+        for row in rows:
+            key = (
+                world_region_for_market(row["market"]),
+                int(row["forecast_horizon"]),
+            )
+            totals[key] = totals.get(key, Decimal(0)) + Decimal(
+                str(row["estimated_fleet_units"])
+            )
+        return tuple(
+            OpportunityFleetEstimate(
+                region,
+                horizon,
+                int(units.quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+            )
+            for (region, horizon), units in sorted(
+                totals.items(), key=lambda item: (item[0][1], item[0][0])
+            )
         )
 
     def _coverage_for(self, records):  # type: ignore[no-untyped-def]
@@ -585,6 +770,7 @@ class SnapshotOpportunityRepository:
             generation_basis=(
                 "manufacturer_generation_window" if generation else None
             ),
+            generation_source_url=(generation.evidence_ids[0] if generation else None),
             icor_worked_base_units=int(row["icor_worked_units"]),
             demand=demand,
             contributing_configuration_count=int(row["configuration_count"]),

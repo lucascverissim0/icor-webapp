@@ -154,6 +154,7 @@ class VehicleForecastOptionsResponse(ApiModel):
     years: tuple[int, ...]
     generations: tuple[GenerationOptionResponse, ...]
     horizons: tuple[int, ...]
+    brands: tuple[str, ...] = ()
 
 
 class MarketVehicleForecastResponse(ApiModel):
@@ -244,6 +245,7 @@ class OpportunityRowResponse(ApiModel):
     model_year: int | None
     generation_name: str | None
     generation_basis: str | None
+    generation_source_url: str | None
     icor_worked_base_units: int
     demand: DemandRangeResponse
     contributing_configuration_count: int
@@ -260,6 +262,21 @@ class OpportunitySummaryResponse(ApiModel):
     base_units: int
     exact_covered_base_units: int
     high_demand_uncovered_base_units: int
+
+
+class OpportunityFleetEstimateResponse(ApiModel):
+    world_region: str
+    forecast_horizon: int
+    estimated_fleet_units: int
+
+
+class OpportunityContributionResponse(ApiModel):
+    configuration_id: str
+    market: str
+    forecast_horizon: int
+    generation: str
+    body_style: str
+    demand: DemandRangeResponse
 
 
 class OpportunityPageResponse(ApiModel):

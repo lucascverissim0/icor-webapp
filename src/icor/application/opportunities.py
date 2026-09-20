@@ -27,9 +27,56 @@ from icor.domain.planner import (
 )
 from icor.domain.snapshots import SnapshotVersions
 
+_CURRENT_EUROPE_MARKETS = frozenset(
+    {
+        "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "EU27",
+        "FI", "FR", "GB", "GR", "HR", "HU", "IE", "IS", "IT", "LI",
+        "LT", "LU", "LV", "MT", "NL", "NO", "PL", "PT", "RO", "SE",
+        "SI", "SK", "UK", "Europe",
+    }
+)
+_CANONICAL_WORLD_REGIONS = frozenset(
+    {
+        "Africa",
+        "Asia-Pacific",
+        "Europe",
+        "Latin America & Caribbean",
+        "Middle East",
+        "North America",
+    }
+)
+
+
+def world_region_for_market(market: str) -> str:
+    if market in _CURRENT_EUROPE_MARKETS:
+        return "Europe"
+    if market in _CANONICAL_WORLD_REGIONS:
+        return market
+    return "Other / unclassified"
+
+
+@dataclass(frozen=True, slots=True)
+class OpportunityContribution:
+    configuration_id: str
+    market: str
+    forecast_horizon: int
+    generation: str
+    body_style: str
+    demand: DemandRange
+
 
 class OpportunityRepository(Protocol):
     def search(self, query: OpportunityQuery) -> OpportunityPage: ...
+
+    def get(self, group_id: str, query: OpportunityQuery) -> OpportunityRow | None: ...
+
+    def fleet_estimates(
+        self, group_id: str, query: OpportunityQuery
+    ) -> tuple[OpportunityFleetEstimate, ...]: ...
+
+    def contributions(
+        self, group_id: str, query: OpportunityQuery
+    ) -> tuple[OpportunityContribution, ...]: ...
 
     def drill_down(
         self,
@@ -67,6 +114,24 @@ class OpportunitySummary:
 
 
 @dataclass(frozen=True, slots=True)
+class OpportunityFleetEstimate:
+    world_region: str
+    forecast_horizon: int
+    estimated_fleet_units: int
+
+    def __post_init__(self) -> None:
+        if not self.world_region.strip():
+            raise ValueError("world region is required")
+        if type(self.forecast_horizon) is not int:
+            raise ValueError("forecast horizon must be an integer")
+        if (
+            type(self.estimated_fleet_units) is not int
+            or self.estimated_fleet_units < 0
+        ):
+            raise ValueError("estimated fleet must use non-negative integer units")
+
+
+@dataclass(frozen=True, slots=True)
 class OpportunityRow:
     group_id: str
     group_by: OpportunityGroupBy
@@ -75,6 +140,7 @@ class OpportunityRow:
     model_year: int | None
     generation_name: str | None
     generation_basis: str | None
+    generation_source_url: str | None
     icor_worked_base_units: int
     demand: DemandRange
     contributing_configuration_count: int
@@ -191,6 +257,32 @@ class OpportunityService:
             pages=ceil(total / query.page_size),
         )
 
+    def get(self, group_id: str, query: OpportunityQuery) -> OpportunityRow | None:
+        if self._repository is not None:
+            return self._repository.get(group_id, query)
+        assert self._ranking_strategy is not None
+        atoms, _warnings = self._resolved_atoms(query)
+        grouped = self._group(atoms, query.group_by)
+        selected = grouped.get(group_id)
+        if selected is None:
+            return None
+        candidates = tuple(
+            OpportunityCandidate(
+                group_id=identity,
+                demand=_sum_demand(group_atoms),
+                exact_covered_base_units=_sum_coverage(group_atoms, CoverageStatus.EXACT_COVERED),
+                fallback_covered_base_units=_sum_coverage(
+                    group_atoms, CoverageStatus.FALLBACK_ONLY
+                ),
+                uncovered_base_units=_sum_coverage(
+                    group_atoms, CoverageStatus.UNCOVERED
+                ),
+            )
+            for identity, group_atoms in grouped.items()
+        )
+        scores = {score.group_id: score for score in self._ranking_strategy.score(candidates)}
+        return self._row(group_id, selected, query.group_by, scores[group_id])
+
     def drill_down(
         self,
         group_id: str,
@@ -211,6 +303,72 @@ class OpportunityService:
                 coverage_status=atom.coverage_status,
             )
             for atom in grouped.get(group_id, ())
+        )
+
+    def fleet_estimates(
+        self, group_id: str, query: OpportunityQuery
+    ) -> tuple[OpportunityFleetEstimate, ...]:
+        if self._repository is not None:
+            return self._repository.fleet_estimates(group_id, query)
+        atoms, _warnings = self._resolved_atoms(query)
+        selected = self._group(atoms, query.group_by).get(group_id, ())
+        by_configuration: dict[str, list[_DemandAtom]] = {}
+        for atom in selected:
+            by_configuration.setdefault(atom.configuration.configuration_id, []).append(
+                atom
+            )
+        totals: dict[tuple[str, int], int] = {}
+        for configuration_atoms in by_configuration.values():
+            configuration = configuration_atoms[0].configuration
+            selected_demand = sum(
+                atom.model_year_demand.demand.base_units
+                for atom in configuration_atoms
+            )
+            fleet_units = (
+                round(
+                    configuration.vehicle_exposure_units
+                    * selected_demand
+                    / configuration.demand.base_units
+                )
+                if configuration.demand.base_units
+                else 0
+            )
+            key = (
+                world_region_for_market(configuration.market),
+                configuration.forecast_horizon,
+            )
+            totals[key] = totals.get(key, 0) + fleet_units
+        return tuple(
+            OpportunityFleetEstimate(region, horizon, units)
+            for (region, horizon), units in sorted(
+                totals.items(), key=lambda item: (item[0][1], item[0][0])
+            )
+        )
+
+    def contributions(
+        self, group_id: str, query: OpportunityQuery
+    ) -> tuple[OpportunityContribution, ...]:
+        if self._repository is not None:
+            return self._repository.contributions(group_id, query)
+        atoms, _warnings = self._resolved_atoms(query)
+        selected = self._group(atoms, query.group_by).get(group_id, ())
+        by_configuration: dict[str, list[_DemandAtom]] = {}
+        for atom in selected:
+            by_configuration.setdefault(atom.configuration.configuration_id, []).append(
+                atom
+            )
+        return tuple(
+            OpportunityContribution(
+                configuration_id=configuration_id,
+                market=configuration_atoms[0].configuration.market,
+                forecast_horizon=configuration_atoms[0].configuration.forecast_horizon,
+                generation=configuration_atoms[0].configuration.generation,
+                body_style=configuration_atoms[0].configuration.body_style,
+                demand=_sum_demand(tuple(configuration_atoms)),
+            )
+            for configuration_id, configuration_atoms in sorted(
+                by_configuration.items()
+            )
         )
 
     def _resolved_atoms(
@@ -312,6 +470,7 @@ class OpportunityService:
                 if group_by is OpportunityGroupBy.MODEL_YEAR
                 else None
             ),
+            generation_source_url=None,
             icor_worked_base_units=0,
             demand=demand,
             contributing_configuration_count=len(

@@ -1,3 +1,5 @@
+import { ArrowUpRight } from 'lucide-react'
+
 import type { components } from '../../lib/api/schema'
 
 
@@ -11,11 +13,10 @@ function label(row: OpportunityRow): string {
   return [row.brand, row.model, row.model_year].filter(Boolean).join(' · ')
 }
 
-export function OpportunityRanking({ rows, selectedGroup, onSelect, clientRelease = false }: {
+export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
   rows: OpportunityRow[]
   selectedGroup: string | null
   onSelect: (groupId: string) => void
-  clientRelease?: boolean
 }) {
   return (
     <section aria-labelledby="ranking-title" className="opportunity-ranking">
@@ -33,9 +34,7 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, clientReleas
                 <div className="opportunity-card__heading">
                   <div>
                     <h3>{label(row)}</h3>
-                    <p className="generation-name">{clientRelease
-                      ? 'Official-source registration cohort'
-                      : row.generation_name ?? 'Generation not yet verified'}</p>
+                    <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>
                     <p>{row.contributing_configuration_count} contributing configurations</p>
                   </div>
                   <span className={`coverage-status coverage-status--${row.coverage_status}`}>{row.coverage_status.replaceAll('_', ' ')}</span>
@@ -54,11 +53,19 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, clientReleas
                 )}
                 <div className="opportunity-score">
                   <strong aria-describedby={descriptionId}>Score {row.score.total_points.toFixed(1)}</strong>
-                  <span id={descriptionId}>{row.score.demand_points.toFixed(0)} points from relative demand and {row.score.readiness_points.toFixed(1)} points from production readiness.</span>
-                  <span>Demand contribution: {row.score.demand_points.toFixed(1)} of 80 points ({Math.round(row.score.demand_percentile * 100)}th percentile).</span>
-                  <span>Readiness contribution: {row.score.readiness_points.toFixed(1)} of 20 points. Exact configuration coverage receives full weight; vehicle-year or legacy worked-model coverage receives half weight.</span>
+                  <span id={descriptionId}>{row.score.demand_points.toFixed(1)} demand + {row.score.readiness_points.toFixed(1)} readiness</span>
+                  <span>{Math.round(row.score.demand_percentile * 100)}th demand percentile</span>
                 </div>
-                <button aria-expanded={selectedGroup === row.group_id} onClick={() => onSelect(row.group_id)} type="button">View {label(row)} details</button>
+                <button
+                  aria-expanded={selectedGroup === row.group_id}
+                  aria-label={`View ${label(row)} details`}
+                  className="opportunity-card__details"
+                  onClick={() => onSelect(row.group_id)}
+                  type="button"
+                >
+                  <span>View details</span>
+                  <ArrowUpRight aria-hidden="true" size={16} />
+                </button>
               </div>
             </li>
           )

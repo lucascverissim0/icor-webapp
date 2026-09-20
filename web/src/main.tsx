@@ -5,6 +5,7 @@ import { RouterProvider } from '@tanstack/react-router'
 import { AppProviders } from './app/providers'
 import { router } from './app/router'
 import './app/styles.css'
+import './app/tailadmin-adaptation.css'
 
 
 const root = document.getElementById('root')

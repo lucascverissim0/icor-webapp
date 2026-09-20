@@ -89,6 +89,11 @@ export function VehicleForecastSearch({
   )
   const brand = brandInput ?? matchedVehicle?.brand ?? ''
   const model = modelInput ?? (brandInput === null ? matchedVehicle?.model : '') ?? ''
+  const modelOptions = useQuery({
+    queryKey: ['vehicle-forecasts', 'models', brand],
+    queryFn: () => apiClient.vehicleForecastOptions({ brand }),
+    enabled: Boolean(brand),
+  })
   const selectionOptions = useQuery({
     queryKey: ['vehicle-forecasts', 'selection', brand, model],
     queryFn: () => apiClient.vehicleForecastOptions({ brand, model }),
@@ -100,8 +105,14 @@ export function VehicleForecastSearch({
       ...(selectionMode === 'year' ? { year: Number(year) } : { generation }),
     }),
   })
-  const brands = useMemo(() => [...new Set((options.data?.vehicles ?? []).map((item) => item.brand))], [options.data])
-  const models = useMemo(() => (options.data?.vehicles ?? []).filter((item) => normalized(item.brand) === normalized(brand)).map((item) => item.model), [brand, options.data])
+  const brands = useMemo(
+    () => options.data?.brands?.length ? options.data.brands : [...new Set((options.data?.vehicles ?? []).map((item) => item.brand))],
+    [options.data],
+  )
+  const models = useMemo(
+    () => [...new Set((modelOptions.data?.vehicles ?? []).map((item) => item.model))],
+    [modelOptions.data],
+  )
 
   const selectedHorizon = horizon || selectionOptions.data?.horizons[0]?.toString() || ''
   const canCalculate = Boolean(brand && model && selectedHorizon && (selectionMode === 'year' ? year : generation))
@@ -124,10 +135,11 @@ export function VehicleForecastSearch({
           <div><input id="vehicle-search" type="search" value={input} onChange={(event) => setInput(event.target.value)} /><button className="primary-action" type="submit">Search vehicles</button></div>
         </form>
         {options.isError && <p role="alert">Could not load vehicle matches.</p>}
+        {modelOptions.isError && <p role="alert">Could not load models for the selected brand.</p>}
         {search && options.data && <p className="vehicle-search-feedback" role="status">{options.data.vehicles.length.toLocaleString('en-US')} forecastable matches. {directMatch(options.data.vehicles, search) ? 'Exact model selected.' : 'Type or choose the exact brand and model below.'}</p>}
         <div className="vehicle-select-grid">
-          <label>Brand<input aria-label="Brand" list="vehicle-brand-options" placeholder="Type or choose a brand" value={brand} onChange={(event) => { setBrandInput(event.target.value); setModelInput(''); setYear(''); setGeneration(''); setHorizon(''); forecast.reset() }} /><datalist id="vehicle-brand-options">{brands.map((item) => <option key={item} value={item} />)}</datalist></label>
-          <label>Model<input aria-label="Model" list="vehicle-model-options" placeholder="Type or choose a model" value={model} onChange={(event) => { setModelInput(event.target.value); setYear(''); setGeneration(''); setHorizon(''); forecast.reset() }} /><datalist id="vehicle-model-options">{models.map((item) => <option key={item} value={item} />)}</datalist></label>
+          <label>Brand<select aria-label="Brand" disabled={options.isFetching} value={brand} onChange={(event) => { setBrandInput(event.target.value); setModelInput(''); setYear(''); setGeneration(''); setHorizon(''); forecast.reset() }}><option value="">{options.isFetching ? 'Loading brands…' : 'Select brand'}</option>{brands.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label>Model<select aria-label="Model" disabled={!brand || modelOptions.isFetching} value={model} onChange={(event) => { setModelInput(event.target.value); setYear(''); setGeneration(''); setHorizon(''); forecast.reset() }}><option value="">{modelOptions.isFetching ? 'Loading models…' : 'Select model'}</option>{models.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         </div>
       </section>
       {brand && model && <section className="vehicle-search-panel" aria-labelledby="forecast-selection-heading">

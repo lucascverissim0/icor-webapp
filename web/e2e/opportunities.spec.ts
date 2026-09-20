@@ -31,6 +31,55 @@ test('opens model-year opportunities from the app home', async ({ page }) => {
   )
 })
 
+test('opens a reloadable explanation for an individual ranking', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await page.goto('/opportunities?groupBy=model_year')
+  await page.getByRole('button', { name: /View Aurora Mobility.*2025 details/i }).click()
+
+  await expect(page).toHaveURL(/\/opportunities\/model_year-/)
+  await expect(page.locator('.opportunity-detail-context')).toBeVisible()
+  await expect(page.locator('.opportunity-card--selected')).toBeVisible()
+  await expect(page.getByLabel('Selected opportunity').getByRole('heading', { name: /Aurora Mobility.*A1 Horizon.*2025/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Why this opportunity ranks here' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Estimated active fleet' })).toBeVisible()
+  await expect(page.getByText('Total estimated fleet').first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Market and horizon contributions' })).toBeVisible()
+  await page.reload()
+  await expect(page.locator('.opportunity-detail-hero').getByText('Demo generation A')).toBeVisible()
+  await expect(page.getByRole('link', { name: /Back to opportunity ranking/i })).toBeVisible()
+})
+
+test('next, last, and previous pagination follow requested route state', async ({ page }) => {
+  await page.route('**/api/v1/opportunities?**', async (route) => {
+    const response = await route.fetch()
+    const body = await response.json() as Record<string, unknown>
+    const requestedPage = Number(new URL(route.request().url()).searchParams.get('page') ?? 1)
+    if (requestedPage > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    await route.fulfill({
+      response,
+      json: { ...body, page: requestedPage, pages: 3, total: 300 },
+    })
+  })
+  await page.goto('/opportunities')
+  const pages = page.getByRole('navigation', { name: 'Opportunity pages' })
+
+  await pages.getByRole('button', { name: 'Next page' }).click()
+  await expect(page).toHaveURL(/page=2/)
+  await expect(pages).toContainText('Loading page 2')
+  await expect(pages.getByRole('button', { name: 'Next page' })).toBeDisabled()
+  await expect(pages).toContainText('Page 2 of 3')
+
+  await pages.getByRole('button', { name: 'Last page' }).click()
+  await expect(page).toHaveURL(/page=3/)
+  await expect(pages).toContainText('Page 3 of 3')
+
+  await pages.getByRole('button', { name: 'Previous page' }).click()
+  await expect(page).toHaveURL(/page=2/)
+  await expect(pages).toContainText('Page 2 of 3')
+})
+
 test('exact coverage create, edit, and delete refetches committed ranking', async ({ page }) => {
   await page.goto('/opportunities')
   await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
@@ -79,11 +128,17 @@ test('fallback coverage requires confirmation and shows lower precision', async 
   await expect(page.getByText('Production coverage deleted.')).toBeVisible()
 })
 
-for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 }]) {
+for (const viewport of [{ width: 390, height: 844 }, { width: 1100, height: 900 }, { width: 1440, height: 900 }]) {
   test(`opportunities has no page overflow at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.goto('/opportunities')
     await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
+    const firstDetailsButton = page.getByRole('button', { name: /View .* details/i }).first()
+    await expect(firstDetailsButton).toBeVisible()
+    expect(await firstDetailsButton.evaluate((button) => {
+      const bounds = button.getBoundingClientRect()
+      return bounds.left >= 0 && bounds.right <= window.innerWidth
+    })).toBe(true)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     if (process.env.ICOR_CAPTURE_REVIEW === '1') {
       await page.screenshot({
@@ -110,4 +165,22 @@ test('opportunities is keyboard reachable and has no serious accessibility viola
     )
   })
   expect(violations).toEqual([])
+})
+
+test('opportunity workspace uses the requested sharp corners', async ({ page }) => {
+  await page.goto('/opportunities')
+  await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
+
+  for (const selector of [
+    '.score-method',
+    '.dataset-coverage',
+    '.opportunity-summary > div',
+    '.opportunity-ranking',
+    '.opportunity-card button',
+  ]) {
+    const radius = await page.locator(selector).first().evaluate(
+      (element) => getComputedStyle(element).borderRadius,
+    )
+    expect(radius).toBe('0px')
+  }
 })

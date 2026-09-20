@@ -1,5 +1,5 @@
 import { Outlet } from '@tanstack/react-router'
-import { Menu } from 'lucide-react'
+import { BarChart3, Database, Download, Menu, Search, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useState, type PropsWithChildren } from 'react'
 
 import { EvidenceBadge } from '../components/EvidenceBadge'
@@ -8,16 +8,26 @@ import { EvidenceBadge } from '../components/EvidenceBadge'
 const icorLogo = new URL('../assets/icor-logo-white.svg', import.meta.url).href
 
 
+const navigationIcons: Record<string, LucideIcon> = {
+  '/opportunities': BarChart3,
+  '/planner': Search,
+  '/registrations': Database,
+  '/evidence': ShieldCheck,
+  '/completeness': ShieldCheck,
+  '/exports': Download,
+}
+
 function NavigationLink({ href, label }: { href: string; label: string }) {
   const active = globalThis.location?.pathname.startsWith(href) ?? false
+  const Icon = navigationIcons[href]
   return (
     <a
       aria-current={active ? 'page' : undefined}
       className={`navigation-link${active ? ' navigation-link--active' : ''}`}
       href={href}
     >
-      <span aria-hidden="true" className="navigation-link__marker" />
-      {label}
+      <Icon aria-hidden="true" className="navigation-link__icon" size={17} strokeWidth={1.8} />
+      <span>{label}</span>
     </a>
   )
 }
@@ -59,7 +69,10 @@ export function AppShell({
         <nav aria-label="Primary" className="desktop-navigation">
           <PrimaryLinks clientRelease={clientRelease} />
         </nav>
-        <p className="rail-caption">Forecast windshield replacement demand by model and generation.</p>
+        <div className="rail-caption">
+          <span className="rail-caption__status" aria-hidden="true" />
+          <p>Decision-grade forecasting<br />Model to generation level</p>
+        </div>
       </aside>
 
       <div className="shell-content">

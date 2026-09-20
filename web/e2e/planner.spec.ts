@@ -19,8 +19,8 @@ test('searches a model year and forecasts every requested market', async ({ page
 
 test('supports selecting a generation directly', async ({ page }) => {
   await page.goto('/planner')
-  await page.getByRole('combobox', { name: 'Brand' }).fill('Volkswagen')
-  await page.getByRole('combobox', { name: 'Model', exact: true }).fill('Golf')
+  await page.getByRole('combobox', { name: 'Brand' }).selectOption('Volkswagen')
+  await page.getByRole('combobox', { name: 'Model', exact: true }).selectOption('Golf')
   await page.getByRole('radio', { name: 'Generation directly' }).check()
   await page.getByRole('combobox', { name: 'Generation' }).selectOption('volkswagen-golf-mk8-europe')
   await page.getByRole('combobox', { name: 'Forecast year' }).selectOption('2031')

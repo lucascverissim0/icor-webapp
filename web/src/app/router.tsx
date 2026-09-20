@@ -10,6 +10,7 @@ import {
 import { AppShell } from './AppShell'
 import { RouteErrorFallback } from './ErrorBoundary'
 import { OpportunitiesPage } from '../features/opportunities/OpportunitiesPage'
+import { OpportunityDetailPage } from '../features/opportunities/OpportunityDetailPage'
 import { EvidencePage } from '../features/evidence/EvidencePage'
 import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail'
 import { PlannerPage } from '../features/planner/PlannerPage'
@@ -121,6 +122,14 @@ export const opportunitiesRoute = createRoute({
   errorComponent: RouteErrorFallback,
 })
 
+export const opportunityDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/opportunities/$groupId',
+  validateSearch: validateOpportunitySearch,
+  component: OpportunityDetailPage,
+  errorComponent: RouteErrorFallback,
+})
+
 export const evidenceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/evidence',
@@ -151,6 +160,7 @@ const routeTree = rootRoute.addChildren([
   plannerRoute,
   configurationRoute,
   opportunitiesRoute,
+  opportunityDetailRoute,
   evidenceRoute,
   completenessRoute,
   exportRoute,

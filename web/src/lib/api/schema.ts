@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/opportunities/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opportunity Detail */
+        get: operations["opportunity_detail_api_v1_opportunities__group_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/opportunities/{group_id}/configurations": {
         parameters: {
             query?: never;
@@ -115,6 +132,40 @@ export interface paths {
         };
         /** Opportunity Configurations */
         get: operations["opportunity_configurations_api_v1_opportunities__group_id__configurations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opportunities/{group_id}/contributions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opportunity Contributions */
+        get: operations["opportunity_contributions_api_v1_opportunities__group_id__contributions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opportunities/{group_id}/fleet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opportunity Fleet */
+        get: operations["opportunity_fleet_api_v1_opportunities__group_id__fleet_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -624,11 +675,34 @@ export interface components {
             /** Sources */
             sources: components["schemas"]["SourceSummaryResponse"][];
         };
+        /** OpportunityContributionResponse */
+        OpportunityContributionResponse: {
+            /** Body Style */
+            body_style: string;
+            /** Configuration Id */
+            configuration_id: string;
+            demand: components["schemas"]["DemandRangeResponse"];
+            /** Forecast Horizon */
+            forecast_horizon: number;
+            /** Generation */
+            generation: string;
+            /** Market */
+            market: string;
+        };
         /** OpportunityDrillDownResponse */
         OpportunityDrillDownResponse: {
             configuration: components["schemas"]["PlanningConfigurationResponse"];
             coverage_status: components["schemas"]["CoverageStatus"];
             model_year_demand: components["schemas"]["ModelYearDemandResponse"];
+        };
+        /** OpportunityFleetEstimateResponse */
+        OpportunityFleetEstimateResponse: {
+            /** Estimated Fleet Units */
+            estimated_fleet_units: number;
+            /** Forecast Horizon */
+            forecast_horizon: number;
+            /** World Region */
+            world_region: string;
         };
         /**
          * OpportunityGroupBy
@@ -677,6 +751,8 @@ export interface components {
             generation_basis: string | null;
             /** Generation Name */
             generation_name: string | null;
+            /** Generation Source Url */
+            generation_source_url: string | null;
             /** Group By */
             group_by: string;
             /** Group Id */
@@ -1069,6 +1145,11 @@ export interface components {
         };
         /** VehicleForecastOptionsResponse */
         VehicleForecastOptionsResponse: {
+            /**
+             * Brands
+             * @default []
+             */
+            brands: string[];
             /** Generations */
             generations: components["schemas"]["GenerationOptionResponse"][];
             /** Horizons */
@@ -1377,6 +1458,77 @@ export interface operations {
             };
         };
     };
+    opportunity_detail_api_v1_opportunities__group_id__get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["OpportunityGroupBy"];
+                market?: string[] | null;
+                horizon?: number[] | null;
+            };
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityRowResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
     opportunity_configurations_api_v1_opportunities__group_id__configurations_get: {
         parameters: {
             query?: {
@@ -1401,6 +1553,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpportunityDrillDownResponse"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    opportunity_contributions_api_v1_opportunities__group_id__contributions_get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["OpportunityGroupBy"];
+                market?: string[] | null;
+                horizon?: number[] | null;
+            };
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityContributionResponse"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    opportunity_fleet_api_v1_opportunities__group_id__fleet_get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["OpportunityGroupBy"];
+                market?: string[] | null;
+                horizon?: number[] | null;
+            };
+            header?: never;
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpportunityFleetEstimateResponse"][];
                 };
             };
             /** @description Not Found */

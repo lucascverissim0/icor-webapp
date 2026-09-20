@@ -28,6 +28,7 @@ class VehicleForecasts:
                 ),
             ),
             (2028, 2031),
+            ("Volkswagen",),
         )
 
     def forecast(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -86,6 +87,7 @@ def test_vehicle_forecast_options_and_result_are_typed() -> None:
     )
 
     assert options.status_code == 200
+    assert options.json()["brands"] == ["Volkswagen"]
     assert options.json()["vehicles"] == [{"brand": "Volkswagen", "model": "Golf"}]
     assert forecast.status_code == 200
     assert forecast.json()["generation_name"] == "Golf Mk8"

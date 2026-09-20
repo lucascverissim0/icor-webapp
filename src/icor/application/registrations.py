@@ -14,13 +14,13 @@ from pathlib import Path
 from icor.application.evidence_review import EvidenceReviewService
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
-from icor.generations.public_catalog import official_public_generation_catalog
+from icor.generations.public_catalog import ranking_public_generation_catalog
 from icor.infrastructure.snapshot_store import SnapshotStore
 
 _EEA_SOURCE_ID = "eea-co2-monitoring"
 _IDENTITY_REGISTRY = "exact-normalized-model-family-v1"
 _GENERATION_REGISTRY = "public-generation-registry-v2"
-_PUBLIC_GENERATION_CATALOG = official_public_generation_catalog()
+_PUBLIC_GENERATION_CATALOG = ranking_public_generation_catalog()
 
 
 class RegistrationUnavailableError(RuntimeError):

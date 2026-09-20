@@ -924,6 +924,44 @@
         "title": "ModelYearDemandResponse",
         "type": "object"
       },
+      "OpportunityContributionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "body_style": {
+            "title": "Body Style",
+            "type": "string"
+          },
+          "configuration_id": {
+            "title": "Configuration Id",
+            "type": "string"
+          },
+          "demand": {
+            "$ref": "#/components/schemas/DemandRangeResponse"
+          },
+          "forecast_horizon": {
+            "title": "Forecast Horizon",
+            "type": "integer"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "string"
+          },
+          "market": {
+            "title": "Market",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configuration_id",
+          "market",
+          "forecast_horizon",
+          "generation",
+          "body_style",
+          "demand"
+        ],
+        "title": "OpportunityContributionResponse",
+        "type": "object"
+      },
       "OpportunityDrillDownResponse": {
         "additionalProperties": false,
         "properties": {
@@ -943,6 +981,30 @@
           "coverage_status"
         ],
         "title": "OpportunityDrillDownResponse",
+        "type": "object"
+      },
+      "OpportunityFleetEstimateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated_fleet_units": {
+            "title": "Estimated Fleet Units",
+            "type": "integer"
+          },
+          "forecast_horizon": {
+            "title": "Forecast Horizon",
+            "type": "integer"
+          },
+          "world_region": {
+            "title": "World Region",
+            "type": "string"
+          }
+        },
+        "required": [
+          "world_region",
+          "forecast_horizon",
+          "estimated_fleet_units"
+        ],
+        "title": "OpportunityFleetEstimateResponse",
         "type": "object"
       },
       "OpportunityGroupBy": {
@@ -1088,6 +1150,17 @@
             ],
             "title": "Generation Name"
           },
+          "generation_source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Source Url"
+          },
           "group_by": {
             "title": "Group By",
             "type": "string"
@@ -1138,6 +1211,7 @@
           "model_year",
           "generation_name",
           "generation_basis",
+          "generation_source_url",
           "icor_worked_base_units",
           "demand",
           "contributing_configuration_count",
@@ -2270,6 +2344,14 @@
       "VehicleForecastOptionsResponse": {
         "additionalProperties": false,
         "properties": {
+          "brands": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Brands",
+            "type": "array"
+          },
           "generations": {
             "items": {
               "$ref": "#/components/schemas/GenerationOptionResponse"
@@ -2955,6 +3037,132 @@
         "summary": "Opportunities"
       }
     },
+    "/api/v1/opportunities/{group_id}": {
+      "get": {
+        "operationId": "opportunity_detail_api_v1_opportunities__group_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OpportunityGroupBy",
+              "default": "brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpportunityRowResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Opportunity Detail"
+      }
+    },
     "/api/v1/opportunities/{group_id}/configurations": {
       "get": {
         "operationId": "opportunity_configurations_api_v1_opportunities__group_id__configurations_get",
@@ -3106,6 +3314,266 @@
           }
         },
         "summary": "Opportunity Configurations"
+      }
+    },
+    "/api/v1/opportunities/{group_id}/contributions": {
+      "get": {
+        "operationId": "opportunity_contributions_api_v1_opportunities__group_id__contributions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OpportunityGroupBy",
+              "default": "brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OpportunityContributionResponse"
+                  },
+                  "title": "Response Opportunity Contributions Api V1 Opportunities  Group Id  Contributions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Opportunity Contributions"
+      }
+    },
+    "/api/v1/opportunities/{group_id}/fleet": {
+      "get": {
+        "operationId": "opportunity_fleet_api_v1_opportunities__group_id__fleet_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_by",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OpportunityGroupBy",
+              "default": "brand"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Horizon"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OpportunityFleetEstimateResponse"
+                  },
+                  "title": "Response Opportunity Fleet Api V1 Opportunities  Group Id  Fleet Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Opportunity Fleet"
       }
     },
     "/api/v1/planner/configurations": {

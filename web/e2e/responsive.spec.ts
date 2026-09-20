@@ -15,8 +15,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1440, height: 900 
       })
     }
 
-    await page.getByRole('combobox', { name: 'Brand' }).fill('Volkswagen')
-    await page.getByRole('combobox', { name: 'Model', exact: true }).fill('Golf')
+    await page.getByRole('combobox', { name: 'Brand' }).selectOption('Volkswagen')
+    await page.getByRole('combobox', { name: 'Model', exact: true }).selectOption('Golf')
     await page.getByRole('combobox', { name: 'Model year' }).selectOption('2020')
     await page.getByRole('button', { name: 'Calculate forecast' }).click()
     await expect(page.getByRole('heading', { name: 'Volkswagen Golf · Golf Mk8' })).toBeVisible()

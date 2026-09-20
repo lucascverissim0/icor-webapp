@@ -9,6 +9,7 @@ from icor.generations.public_catalog import (
     ReviewedGenerationCatalog,
     VehicleGenerationProfile,
     official_public_generation_catalog,
+    ranking_public_generation_catalog,
 )
 
 
@@ -76,6 +77,43 @@ def test_official_catalog_maps_only_explicit_reviewed_aliases() -> None:
         is None
     )
     assert catalog.entries_for(unrelated, registry_version="public-generations-v1") == ()
+
+
+@pytest.mark.parametrize(
+    ("make", "model", "year", "expected"),
+    (
+        ("Skoda", "Octavia", 2017, "Octavia Mk3 (5E)"),
+        ("Volkswagen", "Passat", 2015, "Passat B8 (3G)"),
+        ("Ford", "Focus", 2018, "Focus Mk4 (C519)"),
+        ("Ford", "Fiesta", 2013, "Fiesta Mk7 (B299)"),
+        ("Ford", "Kuga", 2012, "Kuga Mk2 (C520)"),
+        ("Ford", "Kuga", 2020, "Kuga Mk3 (CX482)"),
+        ("Hyundai", "I20", 2015, "i20 Mk2 (GB)"),
+        ("Citroen", "C4", 2013, "C4 Mk2 (B7)"),
+        ("Volvo", "Xc40", 2018, "XC40 Mk1 (536)"),
+        ("Skoda", "Superb", 2015, "Superb Mk3 (3V)"),
+        ("Ford", "Mondeo", 2019, "Mondeo Mk4 (CD391)"),
+        ("Volkswagen VW", "Sharan", 2016, "Sharan Mk2 (7N)"),
+        ("Audi", "A3", 2015, "A3 Mk3 (8V)"),
+        ("BMW", "Ix3", 2021, "iX3 Mk1 (G08)"),
+        ("Volvo", "V40", 2012, "V40 Mk2 (525/526)"),
+        ("Volvo", "Xc90", 2015, "XC90 Mk2 (256)"),
+        ("Opel", "Insignia", 2017, "Insignia Mk2 (B)"),
+        ("Mazda", "3", 2016, "Mazda3 Mk3 (BM/BN)"),
+        ("Honda", "Jazz", 2015, "Jazz Mk3 (GK)"),
+    ),
+)
+def test_catalog_names_each_ranked_icor_vehicle_generation(
+    make: str, model: str, year: int, expected: str
+) -> None:
+    catalog = ranking_public_generation_catalog()
+    vehicle = CanonicalVehicle("vehicle", make, model, None, "Europe")
+    selected = catalog.entry_for_year(
+        vehicle, year, registry_version="public-generations-v3"
+    )
+    assert selected is not None
+    assert selected.display_name == expected
+    assert selected.evidence_ids[0].startswith("https://")
 
 
 def test_catalog_rejects_an_alias_assigned_to_two_profiles() -> None:

@@ -25,8 +25,8 @@ test('primary planner routes have no serious accessibility violations', async ({
   await expect(page.getByRole('heading', { name: 'Search by model year or generation' })).toBeVisible()
   expect(await seriousViolations(page)).toEqual([])
 
-  await page.getByRole('combobox', { name: 'Brand' }).fill('Volkswagen')
-  await page.getByRole('combobox', { name: 'Model', exact: true }).fill('Golf')
+  await page.getByRole('combobox', { name: 'Brand' }).selectOption('Volkswagen')
+  await page.getByRole('combobox', { name: 'Model', exact: true }).selectOption('Golf')
   await page.getByRole('combobox', { name: 'Model year' }).selectOption('2020')
   await page.getByRole('button', { name: 'Calculate forecast' }).click()
   await expect(page.getByRole('heading', { name: 'Volkswagen Golf · Golf Mk8' })).toBeVisible()

@@ -70,6 +70,8 @@ class ClientReleaseMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
         if path in {"/", "/opportunities", "/planner", "/api/health"}:
             return await call_next(request)
+        if path.startswith("/opportunities/"):
+            return await call_next(request)
         if path.startswith("/assets/"):
             return await call_next(request)
         if path.startswith("/api/v1/opportunities"):

@@ -6,8 +6,14 @@ import type { OpportunitiesQuery } from '../lib/api/client'
 
 export const queryKeys = {
   opportunities: (query: OpportunitiesQuery) => ['opportunities', query] as const,
+  opportunity: (groupId: string, query: OpportunitiesQuery) =>
+    ['opportunities', groupId, query] as const,
   opportunityConfigurations: (groupId: string, query: OpportunitiesQuery) =>
     ['opportunities', groupId, 'configurations', query] as const,
+  opportunityContributions: (groupId: string, query: OpportunitiesQuery) =>
+    ['opportunities', groupId, 'contributions', query] as const,
+  opportunityFleet: (groupId: string, query: OpportunitiesQuery) =>
+    ['opportunities', groupId, 'fleet', query] as const,
   coverage: ['production-coverage'] as const,
 }
 

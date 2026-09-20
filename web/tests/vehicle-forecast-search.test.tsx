@@ -13,6 +13,7 @@ function json(body: unknown): Response {
 }
 
 const searchOptions = {
+  brands: ['Ford', 'Volkswagen'],
   vehicles: [
     { brand: 'Volkswagen', model: 'Golf' },
     { brand: 'Volkswagen', model: 'Golf Plus' },
@@ -20,6 +21,7 @@ const searchOptions = {
   years: [], generations: [], horizons: [2028, 2031],
 }
 const selectedOptions = {
+  brands: searchOptions.brands,
   vehicles: searchOptions.vehicles,
   years: [2018, 2020, 2021],
   generations: [{
@@ -111,10 +113,11 @@ describe('VehicleForecastSearch', () => {
     expect(screen.getByText(/Future sales cohorts 2026, 2027, 2028 are not added/i)).toBeVisible()
   })
 
-  it('accepts a manually typed brand and model outside the suggestion list', async () => {
+  it('provides working brand and dependent model dropdowns', async () => {
     const user = userEvent.setup()
     const fordOptions = {
-      vehicles: [], years: [2018, 2019, 2020],
+      brands: searchOptions.brands,
+      vehicles: [{ brand: 'Ford', model: 'Focus' }], years: [2018, 2019, 2020],
       generations: [{
         key: 'estimated-ford-focus', name: 'estimated Ford Focus', start_year: 2010,
         end_year: 2025, basis: 'estimated_generation_window', confidence: 'low',
@@ -132,15 +135,16 @@ describe('VehicleForecastSearch', () => {
         ? input
         : input instanceof URL ? input.href : input.url
       if (url.includes('/vehicle-forecasts?')) return Promise.resolve(json(fordForecast))
-      if (url.includes('brand=Ford') && url.includes('model=Focus')) return Promise.resolve(json(fordOptions))
+      if (url.includes('brand=Ford')) return Promise.resolve(json(fordOptions))
       return Promise.resolve(json(searchOptions))
     })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
 
     const brand = await screen.findByRole('combobox', { name: 'Brand' })
-    await user.type(brand, 'Ford')
-    await user.type(screen.getByRole('combobox', { name: 'Model' }), 'Focus')
+    expect(await screen.findByRole('option', { name: 'Ford' })).toBeVisible()
+    await user.selectOptions(brand, 'Ford')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Model' }), 'Focus')
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Model year' }), '2020')
     await user.click(screen.getByRole('button', { name: 'Calculate forecast' }))
 

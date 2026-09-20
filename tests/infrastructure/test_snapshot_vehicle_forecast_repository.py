@@ -109,8 +109,14 @@ def test_options_support_text_search_then_year_or_generation_selection(
     repository: SnapshotVehicleForecastRepository,
 ) -> None:
     matches = repository.options(search="golf")
+    brand_matches = repository.options(brand="Volkswagen")
     selected = repository.options(brand="Volkswagen", model="Golf")
 
+    assert matches.brands == ("Volkswagen",)
+    assert [(item.brand, item.model) for item in brand_matches.vehicles] == [
+        ("Volkswagen", "Golf"),
+        ("Volkswagen", "Golf Plus"),
+    ]
     assert [(item.brand, item.model) for item in matches.vehicles] == [
         ("Volkswagen", "Golf"),
         ("Volkswagen", "Golf Plus"),

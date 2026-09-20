@@ -230,7 +230,10 @@ def test_client_release_denies_internal_surfaces_and_unknown_apis(
 
         assert client.get("/planner").status_code == 200
         assert client.get("/opportunities").status_code == 200
+        assert client.get("/opportunities/model-year%3Askoda%3Aoctavia%3A2017").status_code == 200
         assert client.get("/evidence").status_code == 404
+        assert client.get("/registrations").status_code == 404
+        assert client.get("/opportunities-internal").status_code == 404
         assert client.get("/api/example").status_code == 404
 
 

@@ -8,7 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from icor.application.opportunities import OpportunityGroupBy, OpportunityQuery
+from icor.application.opportunities import (
+    OpportunityFleetEstimate,
+    OpportunityGroupBy,
+    OpportunityQuery,
+)
 from icor.application.ranking import DemandReadinessV1
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import ConfidenceBand
@@ -419,6 +423,49 @@ def test_model_year_opportunities_allocate_and_reconcile_every_input_cohort(
     assert len(drill_down) == 1
     assert drill_down[0].model_year_demand.model_year == 2021
     assert drill_down[0].model_year_demand.demand.base_units == 3
+    assert repository.fleet_estimates(golf[2021].group_id, query) == (
+        OpportunityFleetEstimate("Europe", 2028, 30),
+    )
+    contributions = repository.contributions(golf[2021].group_id, query)
+    assert [
+        (
+            row.market,
+            row.forecast_horizon,
+            row.demand.downside_units,
+            row.demand.base_units,
+            row.demand.upside_units,
+        )
+        for row in contributions
+    ] == [("DE", 2028, 3, 3, 4)]
+
+
+def test_cached_ranking_row_makes_clicked_detail_lookup_constant_time(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    listed_query = OpportunityQuery(
+        group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=100
+    )
+    page = repository.search(listed_query)
+    selected = page.items[0]
+
+    def unexpected_score(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("cached clicked row was scored again")
+
+    monkeypatch.setattr(repository, "_scored_cte", unexpected_score)
+
+    detail = repository.get(
+        selected.group_id,
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR),
+    )
+
+    assert detail == selected
 
 
 def test_sqlite_opportunity_exposes_reviewed_generation_and_legacy_icor_readiness(

@@ -20,7 +20,7 @@ from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 from icor.generations.public_catalog import (
     ReviewedGenerationCatalog,
     VehicleGenerationProfile,
-    official_public_generation_catalog,
+    ranking_public_generation_catalog,
 )
 
 _GENERATION_REGISTRY = "public-generation-registry-v2"
@@ -93,6 +93,7 @@ class VehicleForecastOptions:
     years: tuple[int, ...]
     generations: tuple[GenerationOption, ...]
     horizons: tuple[int, ...]
+    brands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,11 +158,12 @@ class SnapshotVehicleForecastRepository:
     ) -> None:
         self._path = path
         self._data_version = data_version
-        self._catalog = catalog or official_public_generation_catalog()
+        self._catalog = catalog or ranking_public_generation_catalog()
         self._verified_only = verified_only
         self._model_year_only = model_year_only
         self._hazard = ReplacementHazardModel()
         self._uncertainty = OpportunityUncertaintyModel(draw_count=2000)
+        self._all_vehicle_options: tuple[VehicleOption, ...] | None = None
 
     def options(
         self,
@@ -171,7 +173,18 @@ class SnapshotVehicleForecastRepository:
         model: str | None = None,
     ) -> VehicleForecastOptions:
         with self._connect() as connection:
-            vehicles = self._vehicle_options(connection, search)
+            brands = tuple(
+                sorted(
+                    {
+                        option.brand
+                        for option in self._vehicle_options(
+                            connection, None, include_all=True
+                        )
+                    },
+                    key=lambda value: (value.casefold(), value),
+                )
+            )
+            vehicles = self._vehicle_options(connection, search or (brand if not model else None))
             if not brand or not model:
                 horizons = tuple(
                     row[0]
@@ -180,17 +193,17 @@ class SnapshotVehicleForecastRepository:
                         "ORDER BY horizon_year"
                     )
                 )
-                return VehicleForecastOptions(vehicles, (), (), horizons)
+                return VehicleForecastOptions(vehicles, (), (), horizons, brands)
             selected_vehicle = CanonicalVehicle("selection", brand, model, None, "Europe")
             profile = self._catalog.profile_for(selected_vehicle)
             if self._verified_only and profile is None:
-                return VehicleForecastOptions(vehicles, (), (), ())
+                return VehicleForecastOptions(vehicles, (), (), (), brands)
             vehicle_ids = self._vehicle_ids(connection, brand, model, profile)
             if not vehicle_ids:
-                return VehicleForecastOptions(vehicles, (), (), ())
+                return VehicleForecastOptions(vehicles, (), (), (), brands)
             available_horizons = self._horizons(connection, vehicle_ids)
             if not available_horizons:
-                return VehicleForecastOptions(vehicles, (), (), ())
+                return VehicleForecastOptions(vehicles, (), (), (), brands)
             cohort_rows = self._cohort_rows(
                 connection, vehicle_ids, available_horizons[0]
             )
@@ -249,7 +262,7 @@ class SnapshotVehicleForecastRepository:
                     )
                 )
         return VehicleForecastOptions(
-            vehicles, years, generations, available_horizons
+            vehicles, years, generations, available_horizons, brands
         )
 
     def forecast(
@@ -508,29 +521,40 @@ class SnapshotVehicleForecastRepository:
             DemandRange(_units(interval.p10), _units(interval.p50), _units(interval.p90)),
         )
 
-    def _vehicle_options(self, connection: sqlite3.Connection, search: str | None):
+    def _vehicle_options(
+        self,
+        connection: sqlite3.Connection,
+        search: str | None,
+        *,
+        include_all: bool = False,
+    ):
         term = (search or "").strip()
         where = ""
         parameters: tuple[object, ...] = ()
         if term:
             where = "WHERE LOWER(v.make || ' ' || v.model) LIKE LOWER(?)"
             parameters = (f"%{term}%",)
+        if self._all_vehicle_options is not None:
+            options = self._all_vehicle_options
+            if term:
+                normalized_term = normalize_vehicle_label(term)
+                return tuple(
+                    option
+                    for option in options
+                    if normalized_term
+                    in normalize_vehicle_label(f"{option.brand} {option.model}")
+                )
+            return options if include_all else options[:200]
         rows = connection.execute(
-            f"""SELECT DISTINCT v.vehicle_id, v.make, v.model FROM canonical_vehicle v
+            f"""SELECT DISTINCT v.vehicle_id, v.make, v.model
+            FROM opportunity_estimate o
+            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
             {where} ORDER BY LOWER(v.make), LOWER(v.model), v.make, v.model""",
             parameters,
         ).fetchall()
-        forecastable_ids = {
-            row[0]
-            for row in connection.execute(
-                "SELECT DISTINCT canonical_vehicle_id FROM opportunity_estimate"
-            )
-        }
         values: dict[tuple[str, str], VehicleOption] = {}
         reviewed: set[tuple[str, str]] = set()
         for row in rows:
-            if row[0] not in forecastable_ids:
-                continue
             vehicle = CanonicalVehicle("option", row[1], row[2], None, "Europe")
             profile = self._catalog.profile_for(vehicle)
             if profile is None:
@@ -558,7 +582,10 @@ class SnapshotVehicleForecastRepository:
                 item.model,
             ),
         )
-        return tuple(ordered if term else ordered[:200])
+        options = tuple(ordered)
+        if not term:
+            self._all_vehicle_options = options
+        return options if term or include_all else options[:200]
 
     @staticmethod
     def _vehicle_ids(

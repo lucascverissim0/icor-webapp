@@ -147,6 +147,67 @@ def test_group_drill_down_returns_only_contributing_configurations(
     }
 
 
+def test_opportunity_contributions_return_only_the_fields_needed_by_the_detail(
+    client: TestClient,
+) -> None:
+    ranked = client.get("/api/v1/opportunities?group_by=model_year").json()
+    aurora = next(row for row in ranked["items"] if row["brand"] == "Aurora Mobility")
+
+    response = client.get(
+        f"/api/v1/opportunities/{aurora['group_id']}/contributions"
+        "?group_by=model_year"
+    )
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert rows
+    assert set(rows[0]) == {
+        "configuration_id",
+        "market",
+        "forecast_horizon",
+        "generation",
+        "body_style",
+        "demand",
+    }
+    assert sum(row["demand"]["base_units"] for row in rows) == aurora["demand"]["base_units"]
+
+
+def test_opportunity_detail_returns_the_exact_ranked_group(client: TestClient) -> None:
+    ranked = client.get("/api/v1/opportunities?group_by=model_year").json()
+    aurora = next(row for row in ranked["items"] if row["brand"] == "Aurora Mobility")
+
+    response = client.get(
+        f"/api/v1/opportunities/{aurora['group_id']}?group_by=model_year"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == aurora
+
+
+def test_opportunity_fleet_returns_horizon_totals_by_world_region(
+    client: TestClient,
+) -> None:
+    ranked = client.get("/api/v1/opportunities?group_by=brand").json()
+    northstar = next(
+        row
+        for row in ranked["items"]
+        if row["brand"] == "Northstar Automotive"
+    )
+
+    response = client.get(
+        f"/api/v1/opportunities/{northstar['group_id']}/fleet?group_by=brand"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "world_region": "Europe",
+            "forecast_horizon": 2030,
+            "estimated_fleet_units": 95_500,
+        },
+    ]
+
+
 def test_missing_group_drill_down_is_typed_404(client: TestClient) -> None:
     response = client.get(
         "/api/v1/opportunities/missing/configurations?group_by=brand"
@@ -154,3 +215,7 @@ def test_missing_group_drill_down_is_typed_404(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert response.json()["code"] == "opportunity_not_found"
+
+    fleet = client.get("/api/v1/opportunities/missing/fleet?group_by=brand")
+    assert fleet.status_code == 404
+    assert fleet.json()["code"] == "opportunity_not_found"

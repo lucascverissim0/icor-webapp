@@ -1,13 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { BadgeCheck, ChartNoAxesCombined, TriangleAlert } from 'lucide-react'
 
 import { opportunitiesRoute } from '../../app/router'
 import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
 import { serializeOpportunitySearch, type OpportunitySearch } from '../../lib/opportunity-search'
 import { CoverageManager } from './CoverageManager'
-import { OpportunityDrillDown } from './OpportunityDrillDown'
 import { OpportunityRanking } from './OpportunityRanking'
 
 
@@ -15,8 +14,10 @@ interface OpportunitiesWorkbenchProps {
   apiClient?: PlannerApiClient
   clientRelease?: boolean
   invalidKeys?: string[]
+  onOpenDetails: (groupId: string) => void
   onSearchChange: (search: OpportunitySearch) => void
   search: OpportunitySearch
+  selectedGroup?: string | null
 }
 
 function queryFromSearch(search: OpportunitySearch): OpportunitiesQuery {
@@ -25,8 +26,12 @@ function queryFromSearch(search: OpportunitySearch): OpportunitiesQuery {
     markets: search.market,
     horizons: search.horizon,
     page: search.page,
-    pageSize: 25,
+    pageSize: 100,
   }
+}
+
+function formatCount(value: string | number): string {
+  return Number(value).toLocaleString('en-US')
 }
 
 function ProblemState({ error, onRetry }: { error: Error; onRetry: () => void }) {
@@ -46,11 +51,18 @@ export function OpportunitiesWorkbench({
   apiClient = plannerApi,
   clientRelease = import.meta.env.VITE_ICOR_CLIENT_RELEASE === 'verified',
   invalidKeys = [],
+  onOpenDetails,
   onSearchChange,
   search,
+  selectedGroup = null,
 }: OpportunitiesWorkbenchProps) {
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const opportunityQuery = queryFromSearch(search)
+  const detailQuery: OpportunitiesQuery = {
+    groupBy: search.groupBy,
+    markets: search.market,
+    horizons: search.horizon,
+  }
+  const queryClient = useQueryClient()
   const ranking = useQuery({
     queryKey: queryKeys.opportunities(opportunityQuery),
     queryFn: ({ signal }) => apiClient.opportunities(opportunityQuery, signal),
@@ -58,11 +70,6 @@ export function OpportunitiesWorkbench({
   const registrationSummary = useQuery({
     queryKey: ['registrations', 'summary'],
     queryFn: () => apiClient.registrationSummary(),
-  })
-  const drillDown = useQuery({
-    queryKey: queryKeys.opportunityConfigurations(selectedGroup ?? '', opportunityQuery),
-    queryFn: () => apiClient.opportunityConfigurations(selectedGroup ?? '', opportunityQuery),
-    enabled: selectedGroup !== null,
   })
 
   return (
@@ -72,7 +79,7 @@ export function OpportunitiesWorkbench({
           <p className="eyebrow">Windshield replacement forecast</p>
           <h2>{clientRelease ? 'Prioritized vehicle-year opportunities' : 'Prioritized model and generation opportunities'}</h2>
           <p>{clientRelease
-            ? 'This client release covers every forecastable official-source make/model label and registration cohort year. Manufacturer generations appear only where independently verified; forecasts remain planning estimates.'
+            ? 'This client release covers every forecastable official-source make/model label and registration cohort year. Ranked generation names use reviewed manufacturer production windows; forecasts remain planning estimates.'
             : 'Start with the vehicle opportunities forecast for upcoming years. Demand drives up to 80 points; verified ICOR experience adds up to 20 readiness points.'}</p>
         </div>
         <span className="status-pill">{clientRelease ? 'Official vehicle-year evidence' : 'Validated snapshot'}</span>
@@ -115,7 +122,6 @@ export function OpportunitiesWorkbench({
             aria-pressed={search.groupBy === value}
             key={value}
             onClick={() => {
-              setSelectedGroup(null)
               onSearchChange({ ...search, groupBy: value, page: 1 })
             }}
             type="button"
@@ -130,40 +136,47 @@ export function OpportunitiesWorkbench({
       {ranking.isError && <ProblemState error={ranking.error} onRetry={() => void ranking.refetch()} />}
       {ranking.data && (
         <>
+          <aside className="dataset-coverage" aria-label="Available opportunity data">
+            <div><strong>{formatCount(ranking.data.total)}</strong>{' '}<span>ranked records available</span></div>
+            {registrationSummary.data && <div><strong>{formatCount(registrationSummary.data.model_count)}</strong>{' '}<span>official model labels</span></div>}
+            {registrationSummary.data && <div><strong>{formatCount(registrationSummary.data.total_registrations)}</strong>{' '}<span>registrations represented</span></div>}
+          </aside>
           <dl aria-label="Opportunity summary" className="opportunity-summary">
-            <div><dt>Forecast replacements</dt><dd>{ranking.data.summary.base_units.toLocaleString('en-US')}</dd></div>
-            <div><dt>Exact ICOR coverage</dt><dd>{ranking.data.summary.exact_covered_base_units.toLocaleString('en-US')}</dd></div>
-            <div><dt>High-demand gap</dt><dd>{ranking.data.summary.high_demand_uncovered_base_units.toLocaleString('en-US')}</dd></div>
+            <div><span aria-hidden="true" className="opportunity-summary__icon"><ChartNoAxesCombined size={21} /></span><dt>Forecast replacements</dt><dd>{ranking.data.summary.base_units.toLocaleString('en-US')}</dd></div>
+            <div><span aria-hidden="true" className="opportunity-summary__icon"><BadgeCheck size={21} /></span><dt>Exact ICOR coverage</dt><dd>{ranking.data.summary.exact_covered_base_units.toLocaleString('en-US')}</dd></div>
+            <div><span aria-hidden="true" className="opportunity-summary__icon"><TriangleAlert size={21} /></span><dt>High-demand gap</dt><dd>{ranking.data.summary.high_demand_uncovered_base_units.toLocaleString('en-US')}</dd></div>
           </dl>
           {ranking.data.integrity_warnings.map((warning) => <p className="integrity-warning" key={warning} role="alert">{warning}</p>)}
           {ranking.data.items.length === 0 ? (
             <section className="opportunity-state"><h2>No forecast candidates match this view</h2><p>Change the market or horizon filters to restore candidates.</p></section>
           ) : (
             <OpportunityRanking
-              clientRelease={clientRelease}
-              onSelect={setSelectedGroup}
+              onSelect={(groupId) => {
+                const selected = ranking.data.items.find((row) => row.group_id === groupId)
+                if (selected) {
+                  queryClient.setQueryData(
+                    queryKeys.opportunity(groupId, detailQuery),
+                    selected,
+                  )
+                }
+                onOpenDetails(groupId)
+              }}
               rows={ranking.data.items}
               selectedGroup={selectedGroup}
             />
           )}
           {ranking.data.pages > 1 && (
-            <nav aria-label="Opportunity pages" className="pagination">
-              <button disabled={ranking.data.page <= 1} onClick={() => onSearchChange({ ...search, page: ranking.data.page - 1 })} type="button">Previous page</button>
-              <span>Page {ranking.data.page} of {ranking.data.pages}</span>
-              <button disabled={ranking.data.page >= ranking.data.pages} onClick={() => onSearchChange({ ...search, page: ranking.data.page + 1 })} type="button">Next page</button>
+            <nav aria-busy={ranking.isFetching} aria-label="Opportunity pages" className="pagination">
+              <button disabled={ranking.isFetching || search.page <= 1} onClick={() => onSearchChange({ ...search, page: 1 })} type="button">First page</button>
+              <button disabled={ranking.isFetching || search.page <= 1} onClick={() => onSearchChange({ ...search, page: search.page - 1 })} type="button">Previous page</button>
+              <span aria-live="polite">{ranking.isFetching
+                ? 'Loading page ' + search.page.toLocaleString('en-US') + '…'
+                : <>Showing {((ranking.data.page - 1) * ranking.data.page_size + 1).toLocaleString('en-US')}–{Math.min(ranking.data.page * ranking.data.page_size, ranking.data.total).toLocaleString('en-US')} of {ranking.data.total.toLocaleString('en-US')} · Page {ranking.data.page} of {ranking.data.pages}</>}</span>
+              <button disabled={ranking.isFetching || search.page >= ranking.data.pages} onClick={() => onSearchChange({ ...search, page: search.page + 1 })} type="button">Next page</button>
+              <button disabled={ranking.isFetching || search.page >= ranking.data.pages} onClick={() => onSearchChange({ ...search, page: ranking.data.pages })} type="button">Last page</button>
             </nav>
           )}
         </>
-      )}
-
-      {selectedGroup && (
-        <OpportunityDrillDown
-          error={drillDown.error}
-          isPending={drillDown.isPending}
-          onClose={() => setSelectedGroup(null)}
-          onRetry={() => void drillDown.refetch()}
-          rows={drillDown.data ?? []}
-        />
       )}
 
       {!clientRelease && <details className="coverage-disclosure">
@@ -183,6 +196,11 @@ export function OpportunitiesPage() {
   return (
     <OpportunitiesWorkbench
       invalidKeys={routeSearch.invalidKeys}
+      onOpenDetails={(groupId) => void navigate({
+        to: '/opportunities/$groupId',
+        params: { groupId },
+        search,
+      })}
       onSearchChange={(nextSearch) => void navigate({ to: '/opportunities', search: nextSearch })}
       search={search}
     />

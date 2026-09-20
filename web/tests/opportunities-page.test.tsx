@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { AppProviders } from '../src/app/providers'
 import { OpportunitiesWorkbench } from '../src/features/opportunities/OpportunitiesPage'
+import { OpportunityDetailView } from '../src/features/opportunities/OpportunityDetailPage'
 import { PlannerApiClient } from '../src/lib/api/client'
 
 
@@ -44,6 +45,7 @@ export const opportunities = {
     model_year: 2025,
     generation_name: 'Generation A',
     generation_basis: 'manufacturer_generation_window',
+    generation_source_url: 'https://manufacturer.example/generation-a',
     icor_worked_base_units: 250,
     demand: { downside_units: 1700, base_units: 2150, upside_units: 2620 },
     contributing_configuration_count: 2,
@@ -87,6 +89,22 @@ const registrationSummary = {
   availability: [{ geography: 'EU27', year: 2025, status: 'provisional', evidence_kind: 'observed' }],
 }
 
+const fleetEstimates = [
+  { world_region: 'Europe', forecast_horizon: 2028, estimated_fleet_units: 50_000 },
+  { world_region: 'North America', forecast_horizon: 2028, estimated_fleet_units: 12_000 },
+  { world_region: 'Europe', forecast_horizon: 2031, estimated_fleet_units: 43_000 },
+  { world_region: 'North America', forecast_horizon: 2031, estimated_fleet_units: 10_000 },
+]
+
+export const contributions = [{
+  configuration_id: configuration.configuration_id,
+  market: configuration.market,
+  forecast_horizon: configuration.forecast_horizon,
+  generation: configuration.generation,
+  body_style: configuration.body_style,
+  demand: { downside_units: 170, base_units: 250, upside_units: 320 },
+}]
+
 export const drillDown = [{
   configuration,
   model_year_demand: {
@@ -125,6 +143,7 @@ export function renderOpportunities(fetcher: typeof fetch) {
     <AppProviders queryClient={queryClient}>
       <OpportunitiesWorkbench
         apiClient={client}
+        onOpenDetails={vi.fn()}
         onSearchChange={onSearchChange}
         search={{ groupBy: 'model_year', page: 1 }}
       />
@@ -140,7 +159,10 @@ export function successFetcher() {
       : input instanceof URL ? input.href : input.url
     if (url.includes('/planner/configurations')) return Promise.resolve(json(configurationPage))
     if (url.includes('/registrations/summary')) return Promise.resolve(json(registrationSummary))
+    if (url.includes('/opportunities/') && url.includes('/contributions')) return Promise.resolve(json(contributions))
     if (url.includes('/opportunities/') && url.includes('/configurations')) return Promise.resolve(json(drillDown))
+    if (url.includes('/opportunities/') && url.includes('/fleet')) return Promise.resolve(json(fleetEstimates))
+    if (url.includes('/opportunities/brand-aurora')) return Promise.resolve(json(opportunities.items[0]))
     if (url.includes('/opportunities')) return Promise.resolve(json(opportunities))
     if (url.includes('/production-coverage')) return Promise.resolve(json([]))
     throw new Error(`Unhandled URL: ${url}`)
@@ -156,6 +178,7 @@ describe('OpportunitiesWorkbench', () => {
         <OpportunitiesWorkbench
           apiClient={client}
           clientRelease
+          onOpenDetails={vi.fn()}
           onSearchChange={vi.fn()}
           search={{ groupBy: 'model_year', page: 1 }}
         />
@@ -164,7 +187,7 @@ describe('OpportunitiesWorkbench', () => {
 
     expect(await screen.findByText('2,150 replacements')).toBeVisible()
     expect(screen.getByText('Official vehicle-year evidence')).toBeVisible()
-    expect(screen.getByText('Official-source registration cohort')).toBeVisible()
+    expect(screen.getByText('Generation A')).toBeVisible()
     expect(screen.queryByText('Summarize ranking by')).not.toBeInTheDocument()
     expect(screen.queryByText('Manage ICOR worked-model coverage')).not.toBeInTheDocument()
   })
@@ -174,18 +197,21 @@ describe('OpportunitiesWorkbench', () => {
 
     expect(await screen.findByText('2,150 replacements')).toHaveClass('opportunity-demand__base')
     expect(screen.getByText('Score 82.3')).toHaveAccessibleDescription(
-      /80 points from relative demand and 2.3 points from production readiness/i,
+      /80.0 demand \+ 2.3 readiness/i,
     )
     expect(screen.getByRole('heading', { name: /Aurora Mobility.*A1 Horizon.*2025/i })).toBeVisible()
     expect(screen.getByText('Generation A')).toBeVisible()
     expect(screen.getByText(/ICOR has worked on this vehicle-year/i)).toBeVisible()
-    expect(screen.getByText(/Demand contribution: 80.0 of 80 points/i)).toBeVisible()
-    expect(screen.getByText(/Readiness contribution: 2.3 of 20 points/i)).toBeVisible()
+    expect(screen.getByText(/100th demand percentile/i)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'How the opportunity score is calculated' })).toBeVisible()
     expect(screen.getByText(/Demand points = demand percentile × 80/i)).toBeVisible()
     expect(screen.getByText(/Readiness points = \(exact units \+ 0.5 × fallback units\)/i)).toBeVisible()
     expect(screen.getByText(/Registration evidence through 2025.*provisional/i)).toBeVisible()
     expect(screen.getByText('Validated snapshot')).toBeVisible()
+    const availableData = screen.getByLabelText('Available opportunity data')
+    expect(availableData).toHaveTextContent('2 ranked records available')
+    expect(availableData).toHaveTextContent('100 official model labels')
+    expect(availableData).toHaveTextContent('10,800,000 registrations represented')
   })
 
   it('switches grouping without discarding market intent', async () => {
@@ -196,7 +222,7 @@ describe('OpportunitiesWorkbench', () => {
     const onSearchChange = vi.fn()
     render(
       <AppProviders queryClient={queryClient}>
-        <OpportunitiesWorkbench apiClient={client} onSearchChange={onSearchChange} search={{ groupBy: 'brand', market: ['FR'], page: 1 }} />
+        <OpportunitiesWorkbench apiClient={client} onOpenDetails={vi.fn()} onSearchChange={onSearchChange} search={{ groupBy: 'brand', market: ['FR'], page: 1 }} />
       </AppProviders>,
     )
 
@@ -211,21 +237,37 @@ describe('OpportunitiesWorkbench', () => {
     const client = new PlannerApiClient(fetcher)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const onSearchChange = vi.fn()
-    render(<AppProviders queryClient={queryClient}><OpportunitiesWorkbench apiClient={client} onSearchChange={onSearchChange} search={{ groupBy: 'model_year', market: ['FR'], page: 1 }} /></AppProviders>)
+    render(<AppProviders queryClient={queryClient}><OpportunitiesWorkbench apiClient={client} onOpenDetails={vi.fn()} onSearchChange={onSearchChange} search={{ groupBy: 'model_year', market: ['FR'], page: 1 }} /></AppProviders>)
 
-    await user.click(await screen.findByRole('button', { name: 'Next page' }))
+    await screen.findByRole('button', { name: 'Next page' })
+    expect(fetcher.mock.calls.some(([input]) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      return url.includes('page_size=100')
+    })).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(onSearchChange).toHaveBeenCalledWith({ groupBy: 'model_year', market: ['FR'], page: 2 })
+
+    await user.click(screen.getByRole('button', { name: 'Last page' }))
     expect(onSearchChange).toHaveBeenCalledWith({ groupBy: 'model_year', market: ['FR'], page: 2 })
   })
 
-  it('drills into contributing configuration and model-year demand', async () => {
+  it('opens a dedicated detail page for a ranking', async () => {
     const user = userEvent.setup()
-    renderOpportunities(successFetcher())
+    const client = new PlannerApiClient(successFetcher())
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const onOpenDetails = vi.fn()
+    render(<AppProviders queryClient={queryClient}><OpportunitiesWorkbench apiClient={client} onOpenDetails={onOpenDetails} onSearchChange={vi.fn()} search={{ groupBy: 'model_year', page: 1 }} /></AppProviders>)
 
     await user.click(await screen.findByRole('button', { name: /View Aurora Mobility.*details/i }))
-
-    expect(await screen.findByText(/DEMO-AUR-A1-CAM/)).toBeVisible()
-    expect(screen.getByText('2025')).toBeVisible()
-    expect(screen.getByText('250 replacements')).toBeVisible()
+    expect(onOpenDetails).toHaveBeenCalledWith('brand-aurora')
+    expect(queryClient.getQueryData([
+      'opportunities',
+      'brand-aurora',
+      { groupBy: 'model_year', markets: undefined, horizons: undefined },
+    ])).toMatchObject({ group_id: 'brand-aurora', brand: 'Aurora Mobility' })
   })
 
   it('has no automated accessibility violations in the ranked state', async () => {
@@ -233,5 +275,36 @@ describe('OpportunitiesWorkbench', () => {
     await screen.findByText('2,150 replacements')
 
     expect((await axe.run(container)).violations).toEqual([])
+  })
+})
+
+describe('OpportunityDetailView', () => {
+  it('explains the selected rank and its contributing forecasts on a dedicated page', async () => {
+    const client = new PlannerApiClient(successFetcher())
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders queryClient={queryClient}>
+        <OpportunityDetailView
+          apiClient={client}
+          groupId="brand-aurora"
+          search={{ groupBy: 'model_year', market: ['FR'], horizon: [2030], page: 1 }}
+        />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByRole('heading', { name: /Aurora Mobility.*A1 Horizon.*2025/i })).toBeVisible()
+    expect(screen.getByText('Generation A')).toBeVisible()
+    expect(screen.getByText('82.3')).toBeVisible()
+    expect(screen.getByText(/2,150/)).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'Estimated active fleet' })).toBeVisible()
+    expect(screen.getByText('62,000 vehicles')).toBeVisible()
+    expect(screen.getByText('53,000 vehicles')).toBeVisible()
+    expect(screen.getAllByText('North America')).toHaveLength(2)
+    expect(screen.getByRole('progressbar', { name: 'Demand score' })).toHaveAttribute('value', '80')
+    expect(await screen.findByRole('heading', { name: 'FR · 2030' })).toBeVisible()
+    expect(screen.getByRole('link', { name: /Back to opportunity ranking/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('market=FR'),
+    )
   })
 })

@@ -8,6 +8,8 @@ type PlannerPage = components['schemas']['PlannerPageResponse']
 type PlanningConfiguration = components['schemas']['PlanningConfigurationResponse']
 type OpportunityPage = components['schemas']['OpportunityPageResponse']
 type OpportunityDrillDown = components['schemas']['OpportunityDrillDownResponse']
+type OpportunityContribution = components['schemas']['OpportunityContributionResponse']
+type OpportunityFleetEstimate = components['schemas']['OpportunityFleetEstimateResponse']
 type OpportunityGroupBy = components['schemas']['OpportunityGroupBy']
 type ProductionCoverage = components['schemas']['ProductionCoverageResponse']
 type ProductionCoverageRequest = components['schemas']['ProductionCoverageRequest']
@@ -200,6 +202,30 @@ export class PlannerApiClient {
     return this.request<OpportunityPage>(`/api/v1/opportunities?${parameters}`, { signal })
   }
 
+  async opportunity(
+    groupId: string,
+    query: OpportunitiesQuery,
+    signal?: AbortSignal,
+  ): Promise<OpportunityPage['items'][number]> {
+    const parameters = opportunityParameters(query)
+    return this.request<OpportunityPage['items'][number]>(
+      `/api/v1/opportunities/${encodeURIComponent(groupId)}?${parameters}`,
+      { signal },
+    )
+  }
+
+  async opportunityContributions(
+    groupId: string,
+    query: OpportunitiesQuery,
+    signal?: AbortSignal,
+  ): Promise<OpportunityContribution[]> {
+    const parameters = opportunityParameters(query)
+    return this.request<OpportunityContribution[]>(
+      '/api/v1/opportunities/' + encodeURIComponent(groupId) + '/contributions?' + parameters.toString(),
+      { signal },
+    )
+  }
+
   async opportunityConfigurations(
     groupId: string,
     query: OpportunitiesQuery,
@@ -207,6 +233,18 @@ export class PlannerApiClient {
     const parameters = opportunityParameters(query)
     return this.request<OpportunityDrillDown[]>(
       `/api/v1/opportunities/${encodeURIComponent(groupId)}/configurations?${parameters}`,
+    )
+  }
+
+  async opportunityFleet(
+    groupId: string,
+    query: OpportunitiesQuery,
+    signal?: AbortSignal,
+  ): Promise<OpportunityFleetEstimate[]> {
+    const parameters = opportunityParameters(query)
+    return this.request<OpportunityFleetEstimate[]>(
+      `/api/v1/opportunities/${encodeURIComponent(groupId)}/fleet?${parameters}`,
+      { signal },
     )
   }
 

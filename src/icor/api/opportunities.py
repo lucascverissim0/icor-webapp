@@ -9,8 +9,11 @@ from fastapi.responses import JSONResponse
 
 from icor.api.schemas import (
     DeleteCoverageResponse,
+    OpportunityContributionResponse,
     OpportunityDrillDownResponse,
+    OpportunityFleetEstimateResponse,
     OpportunityPageResponse,
+    OpportunityRowResponse,
     ProblemResponse,
     ProductionCoverageRequest,
     ProductionCoverageResponse,
@@ -105,6 +108,114 @@ def opportunities(
         return _snapshot_unavailable(request)
     result = service.list(_query(group_by, market, horizon, page, page_size))
     return OpportunityPageResponse.model_validate(result)
+
+
+@router.get(
+    "/api/v1/opportunities/{group_id}",
+    response_model=OpportunityRowResponse,
+    responses=PROBLEM_RESPONSES,
+)
+def opportunity_detail(
+    group_id: str,
+    request: Request,
+    group_by: OpportunityGroupBy = OpportunityGroupBy.BRAND,
+    market: Annotated[list[str] | None, Query()] = None,
+    horizon: Annotated[list[int] | None, Query()] = None,
+) -> OpportunityRowResponse | JSONResponse:
+    if (
+        getattr(request.app.state, "client_release", False)
+        and group_by is not OpportunityGroupBy.MODEL_YEAR
+    ):
+        return _problem(
+            request,
+            status_code=422,
+            code="client_release_scope",
+            message="The verified client release supports model-year opportunities only.",
+        )
+    service = _opportunity_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
+    row = service.get(group_id, _query(group_by, market, horizon))
+    if row is None:
+        return _problem(
+            request,
+            status_code=404,
+            code="opportunity_not_found",
+            message="The requested opportunity was not found.",
+        )
+    return OpportunityRowResponse.model_validate(row)
+
+
+@router.get(
+    "/api/v1/opportunities/{group_id}/fleet",
+    response_model=list[OpportunityFleetEstimateResponse],
+    responses=PROBLEM_RESPONSES,
+)
+def opportunity_fleet(
+    group_id: str,
+    request: Request,
+    group_by: OpportunityGroupBy = OpportunityGroupBy.BRAND,
+    market: Annotated[list[str] | None, Query()] = None,
+    horizon: Annotated[list[int] | None, Query()] = None,
+) -> list[OpportunityFleetEstimateResponse] | JSONResponse:
+    if (
+        getattr(request.app.state, "client_release", False)
+        and group_by is not OpportunityGroupBy.MODEL_YEAR
+    ):
+        return _problem(
+            request,
+            status_code=422,
+            code="client_release_scope",
+            message="The verified client release supports model-year opportunities only.",
+        )
+    service = _opportunity_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
+    rows = service.fleet_estimates(group_id, _query(group_by, market, horizon))
+    if not rows:
+        return _problem(
+            request,
+            status_code=404,
+            code="opportunity_not_found",
+            message="The requested opportunity was not found.",
+        )
+    return [OpportunityFleetEstimateResponse.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/api/v1/opportunities/{group_id}/contributions",
+    response_model=list[OpportunityContributionResponse],
+    responses=PROBLEM_RESPONSES,
+)
+def opportunity_contributions(
+    group_id: str,
+    request: Request,
+    group_by: OpportunityGroupBy = OpportunityGroupBy.BRAND,
+    market: Annotated[list[str] | None, Query()] = None,
+    horizon: Annotated[list[int] | None, Query()] = None,
+) -> list[OpportunityContributionResponse] | JSONResponse:
+    if (
+        getattr(request.app.state, "client_release", False)
+        and group_by is not OpportunityGroupBy.MODEL_YEAR
+    ):
+        return _problem(
+            request,
+            status_code=422,
+            code="client_release_scope",
+            message="The verified client release supports model-year opportunities only.",
+        )
+    service = _opportunity_service(request)
+    if service is None:
+        return _snapshot_unavailable(request)
+    rows = service.contributions(group_id, _query(group_by, market, horizon))
+    if not rows:
+        return _problem(
+            request,
+            status_code=404,
+            code="opportunity_not_found",
+            message="The requested opportunity was not found.",
+        )
+    return [OpportunityContributionResponse.model_validate(row) for row in rows]
 
 
 @router.get(

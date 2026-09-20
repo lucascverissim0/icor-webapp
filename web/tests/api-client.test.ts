@@ -170,6 +170,24 @@ describe('PlannerApiClient', () => {
     )
   })
 
+  it('loads regional fleet estimates for an encoded opportunity id', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    await new PlannerApiClient(fetcher).opportunityFleet('model/year', {
+      groupBy: 'model_year',
+      horizons: [2028, 2031],
+    })
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      '/api/v1/opportunities/model%2Fyear/fleet?group_by=model_year&horizon=2028&horizon=2031',
+    )
+  })
+
   it('sends explicit fallback coverage as JSON', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ coverage_id: 'coverage-1' }), {

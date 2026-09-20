@@ -1,0 +1,772 @@
+/*
+ * ICOR adaptation of TailAdmin's MIT-licensed React dashboard visual language.
+ * Source and license are recorded in web/THIRD_PARTY_NOTICES.md.
+ */
+
+:root {
+  --surface: #ffffff;
+  --surface-muted: #f9fafb;
+  --line: #e4e7ec;
+  --line-strong: #d0d5dd;
+  --ink: #101828;
+  --ink-muted: #667085;
+  --accent: #465fff;
+  --accent-strong: #3641f5;
+  --focus: #465fff;
+  --template-shadow-xs: 0 1px 2px rgb(16 24 40 / 5%);
+  --template-shadow-sm: 0 1px 3px rgb(16 24 40 / 10%), 0 1px 2px rgb(16 24 40 / 6%);
+}
+
+html,
+body {
+  background: #f9fafb;
+}
+
+body {
+  color: var(--ink);
+  background: #f9fafb;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.desktop-rail {
+  width: 18.125rem;
+  padding: 0 1.25rem 1.5rem;
+  color: #344054;
+  background: #fff;
+  border-right: 1px solid #e4e7ec;
+  box-shadow: none;
+}
+
+.desktop-rail .brand-mark {
+  display: flex;
+  height: 6rem;
+  padding: 0;
+}
+
+.desktop-rail .brand-mark img {
+  width: 7.8rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  background: #101828;
+}
+
+.desktop-navigation {
+  margin-top: 0.75rem;
+}
+
+.navigation-section-label {
+  margin: 1.5rem 0.75rem 0.6rem;
+  color: #667085;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.navigation-link {
+  gap: 0.75rem;
+  min-height: 44px;
+  margin: 0.2rem 0;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.5rem;
+  color: #344054;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.navigation-link:hover {
+  color: #344054;
+  background: #f2f4f7;
+}
+
+.navigation-link--active {
+  color: #3641f5;
+  background: #ecf3ff;
+}
+
+.navigation-link--active::before {
+  display: none;
+}
+
+.navigation-link__icon,
+.navigation-link--active .navigation-link__icon {
+  color: #667085;
+}
+
+.navigation-link--active .navigation-link__icon {
+  color: #3641f5;
+}
+
+.rail-caption {
+  right: 1.25rem;
+  bottom: 1.5rem;
+  left: 1.25rem;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 0;
+  border-radius: 0.75rem;
+  color: #667085;
+  background: #f2f4f7;
+}
+
+.rail-caption__status {
+  margin-top: 0.25rem;
+  background: #12b76a;
+  box-shadow: 0 0 0 4px #d1fadf;
+}
+
+.rail-caption p {
+  color: #475467;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.shell-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  min-height: 4.75rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e4e7ec;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: none;
+  backdrop-filter: blur(8px);
+}
+
+.shell-header h1 {
+  color: #101828;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.shell-header .eyebrow,
+.eyebrow {
+  color: #667085;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.evidence-badge,
+.status-pill,
+.official-pill,
+.candidate-pill,
+.mapping-pill {
+  min-height: 1.5rem;
+  padding: 0.2rem 0.55rem;
+  border: 0;
+  border-radius: 999px;
+  color: #3641f5;
+  background: #ecf3ff;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.evidence-badge__dot {
+  background: #465fff;
+}
+
+.mobile-navigation {
+  padding: 0.75rem 1rem;
+  border-color: #e4e7ec;
+}
+
+.mobile-navigation__trigger,
+.result-controls select,
+.result-controls button,
+.pagination button,
+.opportunity-card button,
+.drilldown-heading button,
+.coverage-manager button:not(.primary-action) {
+  border-color: #d0d5dd;
+  border-radius: 0.5rem;
+  color: #344054;
+  background: #fff;
+  box-shadow: var(--template-shadow-xs);
+  font-weight: 500;
+}
+
+.primary-action {
+  border-radius: 0.5rem;
+  background: #465fff;
+  box-shadow: var(--template-shadow-xs);
+  font-weight: 500;
+}
+
+.primary-action:hover {
+  background: #3641f5;
+}
+
+.route-state,
+.planner-filters,
+.planner-results,
+.planner-state,
+.summary-strip,
+.configuration-grid,
+.score-method,
+.vehicle-search-panel,
+.vehicle-forecast-results,
+.opportunities-hero,
+.opportunity-ranking,
+.opportunity-drilldown,
+.coverage-manager,
+.opportunity-state,
+.opportunity-detail-hero,
+.detail-section,
+.identity-strip,
+.detail-metadata,
+.evidence-hero,
+.evidence-panel,
+.evidence-state,
+.evidence-boundary,
+.evidence-metrics,
+.registrations-hero,
+.registration-panel,
+.registration-state,
+.registration-summary,
+.registration-boundary {
+  border-color: #e4e7ec;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: var(--template-shadow-xs);
+}
+
+.opportunities-page {
+  gap: 1.5rem;
+}
+
+.opportunities-hero {
+  overflow: visible;
+  padding: 0.25rem 0 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.opportunities-hero::after {
+  display: none;
+}
+
+.opportunities-hero h2 {
+  margin: 0.35rem 0 0;
+  color: #101828;
+  font-size: clamp(1.65rem, 3vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.opportunities-hero p:last-child {
+  max-width: 52rem;
+  margin-top: 0.4rem;
+  color: #667085;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.forecast-freshness {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid #b9e6fe;
+  border-radius: 0.75rem;
+  color: #065986;
+  background: #f0f9ff;
+}
+
+.forecast-freshness strong,
+.forecast-freshness span {
+  color: #065986;
+  font-size: 0.8rem;
+}
+
+.score-method {
+  grid-template-columns: minmax(13rem, 0.6fr) minmax(0, 1.7fr);
+  gap: 1.5rem;
+  padding: 1.5rem;
+}
+
+.score-method h2,
+.ranking-heading h2,
+.detail-section__heading h2 {
+  color: #1d2939;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.score-method__formula {
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.score-method__formula p {
+  padding: 0.85rem 1rem;
+  border-color: #e4e7ec;
+  background: #fff;
+}
+
+.score-method__formula strong {
+  color: #344054;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.score-method__formula span {
+  color: #667085;
+  font-size: 0.72rem;
+}
+
+.grouping-label {
+  color: #344054;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.grouping-control {
+  padding: 0.25rem;
+  border-color: #e4e7ec;
+  border-radius: 0.6rem;
+  box-shadow: var(--template-shadow-xs);
+}
+
+.grouping-control button {
+  border-radius: 0.45rem;
+  color: #667085;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.grouping-control button[aria-pressed='true'] {
+  color: #344054;
+  background: #f2f4f7;
+  font-weight: 600;
+}
+
+.opportunity-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dataset-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #e4e7ec;
+  background: #fff;
+  box-shadow: var(--template-shadow-xs);
+}
+
+.dataset-coverage > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.dataset-coverage strong {
+  color: #1d2939;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.dataset-coverage span {
+  color: #667085;
+  font-size: 0.75rem;
+}
+
+.opportunity-summary > div {
+  min-height: 8.25rem;
+  padding: 1.25rem;
+  border: 1px solid #e4e7ec;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: var(--template-shadow-xs);
+}
+
+.opportunity-summary__icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-bottom: 1rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  color: #475467;
+  background: #f2f4f7;
+}
+
+.opportunity-summary dt {
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.opportunity-summary dd {
+  margin-top: 0.35rem;
+  color: #101828;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.opportunity-ranking {
+  overflow: hidden;
+  padding: 0;
+  border-radius: 1rem;
+}
+
+.ranking-heading {
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #e4e7ec;
+}
+
+.ranking-heading > p {
+  max-width: 28rem;
+  color: #667085;
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.opportunity-list {
+  gap: 0;
+  margin: 0;
+}
+
+.opportunity-card {
+  padding: 1rem 1.5rem;
+  border: 0;
+  border-bottom: 1px solid #f2f4f7;
+  border-radius: 0;
+  background: #fff;
+}
+
+.opportunity-card:hover {
+  background: #fcfcfd;
+}
+
+.opportunity-card--selected {
+  background: #f2f7ff;
+  box-shadow: inset 3px 0 #465fff;
+}
+
+.opportunity-rank {
+  border: 0;
+  border-radius: 0.5rem;
+  color: #475467;
+  background: #f2f4f7;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.opportunity-card h3 {
+  color: #1d2939;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.opportunity-card__heading p,
+.opportunity-demand span,
+.opportunity-score span {
+  color: #667085;
+  font-size: 0.72rem;
+}
+
+.opportunity-card__heading .generation-name {
+  color: #475467;
+  font-weight: 500;
+}
+
+.opportunity-demand__base {
+  color: #1d2939;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.coverage-status,
+.coverage-composition span {
+  border: 0;
+  border-radius: 999px;
+  color: #344054;
+  background: #f2f4f7;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.icor-experience {
+  border: 0;
+  border-radius: 999px;
+  color: #027a48;
+  background: #ecfdf3;
+  font-weight: 500;
+}
+
+.opportunity-score {
+  border-color: #e4e7ec;
+}
+
+.opportunity-score strong {
+  color: #1d2939;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.opportunity-card button {
+  flex-shrink: 0;
+  justify-self: end;
+  white-space: nowrap;
+  color: #344054;
+  background: #fff;
+  font-size: 0.75rem;
+}
+
+.opportunity-card button:hover {
+  border-color: #98a2b3;
+  color: #1d2939;
+  background: #f9fafb;
+}
+
+.pagination {
+  margin: 0;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e4e7ec;
+  background: #fff;
+}
+
+.opportunity-detail-page {
+  gap: 1rem;
+}
+
+.back-link {
+  color: #475467;
+  font-weight: 500;
+}
+
+.opportunity-detail-hero {
+  padding: 1.5rem;
+  border-top: 1px solid #e4e7ec;
+  background: #fff;
+}
+
+.opportunity-detail-hero h2 {
+  color: #101828;
+  font-size: 1.65rem;
+  font-weight: 600;
+}
+
+.opportunity-detail-hero .generation-name,
+.generation-source {
+  color: #465fff;
+  font-weight: 500;
+}
+
+.detail-score {
+  border: 0;
+  border-radius: 0.75rem;
+  color: #344054;
+  background: #f2f4f7;
+}
+
+.detail-score span,
+.detail-score small {
+  color: #667085;
+}
+
+.detail-score strong {
+  color: #101828;
+  font-weight: 700;
+}
+
+.detail-section {
+  padding: 1.5rem;
+}
+
+.detail-metrics {
+  border-color: #e4e7ec;
+  border-radius: 0.75rem;
+}
+
+.detail-metrics > div {
+  border-color: #e4e7ec;
+  background: #fcfcfd;
+}
+
+.detail-metrics__primary {
+  background: #f2f7ff !important;
+}
+
+.detail-metrics dt,
+.detail-contribution dt {
+  color: #667085;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.detail-metrics dd {
+  color: #101828;
+  font-weight: 700;
+}
+
+.score-bars progress::-webkit-progress-value {
+  background: #465fff;
+}
+
+.fleet-horizon,
+.detail-contribution,
+.coverage-manager form,
+.coverage-list,
+.evidence-filters,
+.release-card,
+.registration-search {
+  border-color: #e4e7ec;
+  border-radius: 0.75rem;
+  background: #fcfcfd;
+}
+
+.fleet-horizon__total > strong,
+.registration-summary code {
+  color: #3641f5;
+}
+
+@media (min-width: 768px) {
+  .shell-content {
+    margin-left: 18.125rem;
+  }
+
+  #app-content {
+    width: min(100%, 96rem);
+    padding: 1.5rem;
+  }
+}
+
+@media (min-width: 1100px) {
+  .opportunity-card__body {
+    grid-template-columns: minmax(0, 1.35fr) minmax(7.25rem, 0.9fr) minmax(0, 1fr) minmax(7.75rem, 0.8fr) auto;
+  }
+
+  .opportunity-card__body > button {
+    align-self: center;
+  }
+}
+@media (max-width: 900px) {
+  .score-method {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .forecast-freshness {
+    grid-template-columns: 1fr;
+  }
+
+  .opportunity-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .opportunity-summary > div {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .shell-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .opportunities-hero {
+    padding: 0;
+  }
+
+  .ranking-heading > p {
+    text-align: left;
+  }
+
+  .opportunity-card {
+    padding: 1rem;
+  }
+}
+
+/* Sharp-corner ICOR variant requested after template adoption. */
+:where(
+  .brand-mark img,
+  .navigation-link,
+  .rail-caption,
+  .evidence-badge,
+  .status-pill,
+  .official-pill,
+  .candidate-pill,
+  .mapping-pill,
+  .mobile-navigation__trigger,
+  .primary-action,
+  .route-state,
+  .planner-filters,
+  .planner-results,
+  .planner-state,
+  .summary-strip,
+  .configuration-grid,
+  .score-method,
+  .vehicle-search-panel,
+  .vehicle-forecast-results,
+  .opportunity-ranking,
+  .opportunity-drilldown,
+  .coverage-manager,
+  .opportunity-state,
+  .opportunity-detail-hero,
+  .detail-section,
+  .identity-strip,
+  .detail-metadata,
+  .forecast-freshness,
+  .score-method__formula,
+  .grouping-control,
+  .grouping-control button,
+  .dataset-coverage,
+  .opportunity-summary > div,
+  .opportunity-summary__icon,
+  .opportunity-rank,
+  .coverage-status,
+  .coverage-composition span,
+  .icor-experience,
+  .opportunity-card button,
+  .pagination button,
+  .detail-score,
+  .detail-metrics,
+  .detail-metrics > div,
+  .fleet-horizon,
+  .detail-contribution,
+  .coverage-disclosure,
+  .coverage-manager form,
+  .coverage-list,
+  .coverage-list article,
+  .evidence-hero,
+  .evidence-panel,
+  .evidence-state,
+  .evidence-boundary,
+  .evidence-metrics,
+  .release-card,
+  .evidence-filters,
+  .evidence-table-wrap,
+  .registrations-hero,
+  .registration-panel,
+  .registration-state,
+  .registration-summary,
+  .registration-boundary,
+  .registration-search,
+  .registration-table-wrap,
+  input,
+  select,
+  textarea,
+  button
+) {
+  border-radius: 0 !important;
+}

@@ -44,7 +44,7 @@ class E2EVehicleForecasts:
                 ),
                 (2028, 2031),
             )
-        return VehicleForecastOptions(vehicles, (), (), (2028, 2031))
+        return VehicleForecastOptions(vehicles, (), (), (2028, 2031), ("Volkswagen",))
 
     def forecast(self, **kwargs):  # type: ignore[no-untyped-def]
         names = (

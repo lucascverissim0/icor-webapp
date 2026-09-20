@@ -146,6 +146,25 @@ def test_drill_down_returns_only_contributing_model_year_rows() -> None:
     assert sum(row.model_year_demand.demand.base_units for row in rows) == 2_150
 
 
+def test_fleet_estimates_are_separated_by_region_and_horizon() -> None:
+    ranked = service().list(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
+    northstar = next(
+        row
+        for row in ranked.items
+        if row.brand == "Northstar Automotive"
+    )
+
+    estimates = service().fleet_estimates(
+        northstar.group_id,
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND),
+    )
+
+    assert [(row.world_region, row.forecast_horizon) for row in estimates] == [
+        ("Europe", 2030),
+    ]
+    assert [row.estimated_fleet_units for row in estimates] == [95_500]
+
+
 def test_service_delegates_to_a_bounded_opportunity_repository() -> None:
     expected = service().list(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
 
@@ -158,6 +177,10 @@ def test_service_delegates_to_a_bounded_opportunity_repository() -> None:
             assert (group_id, page, page_size) == ("group", 2, 10)
             return ()
 
+        def fleet_estimates(self, group_id, query):  # type: ignore[no-untyped-def]
+            assert group_id == "group"
+            return ()
+
     bounded = OpportunityService(repository=Repository())
     assert bounded.list(
         OpportunityQuery(group_by=OpportunityGroupBy.BRAND, page=2)
@@ -167,4 +190,7 @@ def test_service_delegates_to_a_bounded_opportunity_repository() -> None:
         OpportunityQuery(group_by=OpportunityGroupBy.BRAND),
         page=2,
         page_size=10,
+    ) == ()
+    assert bounded.fleet_estimates(
+        "group", OpportunityQuery(group_by=OpportunityGroupBy.BRAND)
     ) == ()
