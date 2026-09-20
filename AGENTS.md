@@ -43,6 +43,14 @@ End every final response with exactly one of these status lines:
 
 Use `SAFE TO CLEAR` only after the handoff has been updated and verified. “Clear” refers to clearing the Codex conversation/context. Clarify separately if closing a terminal would stop a running local server.
 
+## Concise completion reports
+
+- Keep final reports short and immediately scannable because Lucas is often time-constrained.
+- Lead with the outcome or verdict, then state only the most important evidence, risks, and next action.
+- Default to no more than five concise bullets or a similarly short paragraph unless Lucas explicitly asks for detail.
+- Put technical detail and exhaustive evidence in `docs/CODEX_HANDOFF.md` rather than repeating it in the final response.
+- Do not omit a material blocker, safety warning, verification result, or required context-safety footer merely to shorten the report.
+
 ## Security and Git authentication
 
 - Never place API keys, access tokens, passwords, credential material, or customer/private data in source files, documentation, commands whose output is shown, commits, or the handoff.
@@ -52,6 +60,12 @@ Use `SAFE TO CLEAR` only after the handoff has been updated and verified. “Cle
 
 ## Engineering workflow
 
+- Work for maximum practical productivity and token efficiency: continue from durable
+  context, choose the shortest reliable path, batch independent reads and checks, reuse
+  existing project patterns and artifacts, and keep output focused on decisions and
+  evidence. Scale investigation, planning, and verification to the risk of the change;
+  never trade away correctness, security, user intent, or required verification merely
+  to save time or tokens.
 - Diagnose before fixing, and address root causes rather than masking symptoms.
 - For features and bug fixes, define expected behavior and tests before implementation.
 - Keep production and local configuration clearly separated. Never use production customer data or production secrets for local demonstrations.

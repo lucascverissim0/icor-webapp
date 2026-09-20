@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-08-31
+Last updated: 2026-09-14
 
 ## Project objective
 
@@ -2312,3 +2312,1935 @@ old active state was incompatible with schema 5 and resolved unavailable before 
 promotion; treat it as a physical recovery artifact, not an application-ready rollback.
 The branch and these commits remain local and were not pushed or merged. No further
 product-code work is pending in this stabilization plan.
+
+## 2026-09-03 local review server restarted
+
+At Lucas's request, the current React/FastAPI development application was started from
+`C:\Users\LucasCravoVERISSIMO\icor-webapp-development` against the verified local
+active evidence root at `.local/evidence`. The protected production checkout and the
+older Streamlit prototype were not used or modified. A fresh ephemeral export
+capability was generated only in the server process environment and was not printed or
+persisted.
+
+The launcher is running in the background as PID 17492. The frontend is available at
+`http://127.0.0.1:5173/` and the API at `http://127.0.0.1:8000/`. Startup completed
+successfully: the frontend, `/openapi.json`, and the proxied
+`/api/v1/registrations/summary` endpoint each returned HTTP 200. The local development
+factory does not expose `/healthz` (it correctly returned 404), so readiness was
+verified through the documented OpenAPI and application endpoints instead. The app was
+opened in the Windows default browser. Logs are
+`.local/planner-20260903-164741.stdout.log` and
+`.local/planner-20260903-164741.stderr.log`. Closing the browser does not stop the
+server; ending the launcher process or restarting Windows does.
+
+No source code, snapshot, branch, remote, or production state changed. The pre-existing
+unstaged `AGENTS.md` modification remains preserved.
+
+## 2026-09-03 registration-year generation proxy slice
+
+Lucas made vehicle year/generation discoverability the immediate priority and confirmed
+that work should proceed without the unavailable proprietary ICOR catalogue, using the
+registration-year proxy. Registration year remains explicitly identified as proxy
+evidence rather than a manufacturer-confirmed model year. The example was corrected
+before implementation: Volkswagen's official history identifies Golf VIII as the
+generation since 2019, so a European Golf registered in 2024 is Mk8, not Mk7.
+
+Read-only diagnosis against active snapshot `snapshot-fcb3cdb004a4b7c4042b` showed
+that a 2024 EU27 `Volkswagen Golf` search returns 24 separately published families
+totalling 181,082 registrations because manufacturer spelling variants, trims, engines,
+and body strings remain separate exact-normalized identities. The two largest were
+`volkswagen vw / golf` (116,976) and `volkswagen / golf` (61,900). The snapshot
+contains zero sourced generations; its current entries are broad low-confidence
+estimated windows. EEA 2024 technical observations do retain useful TAN/T/Va/Ve
+identifiers, including Golf type CD/CDV, but the historical aggregate observations do
+not materialize that detail even though the immutable source artifacts retain it.
+
+The first UI/API slice is implemented but intentionally does not invent Mk/generation
+names. Every registration ranking row now carries the selected registration year in
+`model_year` together with mandatory basis `registration_year_proxy`. The
+Registrations page presents this as, for example, `2024 generation-year proxy`, and
+the explanatory boundary states that registration year is the generation reference
+while manufacturer model year remains unavailable. The summary continues to report
+`model_year_available=false` because no source supplied a true model year. The
+OpenAPI document and generated TypeScript contract include the new required basis.
+
+Changed files are `src/icor/application/registrations.py`,
+`src/icor/api/schemas.py`, their application/API tests,
+`web/src/features/registrations/RegistrationsPage.tsx`, its unit/browser tests, and
+the regenerated `web/openapi.json` and `web/src/lib/api/schema.ts`.
+
+TDD RED reported the expected three failures: the service still returned null and the
+row contract rejected `model_year_basis`. Focused GREEN reported 30 backend tests and
+7 registration-page tests passing; scoped Ruff, TypeScript, and ESLint passed. Final
+verification reported 582 backend tests passed, 14 documented skips, and four known
+characterization XFAILs; all 68 frontend tests passed; the Vite production build
+completed with 1,955 modules; OpenAPI regenerated successfully; and `git diff --check`
+passed with informational Windows line-ending warnings only. The OpenAPI drift command
+returned exit 1 only because it correctly displayed the intended checked-in contract
+change relative to HEAD. The focused Chromium registration journey then passed 3/3,
+including populated behavior and 390/1440 px reflow.
+
+This is not completion of all-brand named generation mapping. The next slice must
+create a reviewed public generation-window registry, normalize publisher aliases before
+aggregation, reuse retained EEA technical identifiers where possible, assign a named
+generation plus basis/confidence to every publishable row, and then rebuild/promote a
+validated snapshot. Do not use the repository's legacy Top-100 generation labels as
+truth: they label the 2020 Golf as Mk7 despite Volkswagen launching Mk8 in Europe by
+then. No active snapshot, remote, production, protected checkout, or deployment changed.
+
+The local review app was restarted so the API loads this new contract. Launcher PID
+30268 serves the frontend at `http://127.0.0.1:5173/` and API at
+`http://127.0.0.1:8000/`; ignored logs are
+`.local/planner-proxy-20260903-175932.stdout.log` and the matching stderr log.
+Fresh live checks returned HTTP 200 for both surfaces. A real active-snapshot EU27 2024
+`Volkswagen Golf` request returned `model_year=2024`,
+`model_year_basis=registration_year_proxy`, and 116,976 registrations for the
+highest-ranked publisher family. Stopping launcher PID 30268 and its children or
+restarting Windows stops this local app.
+
+## 2026-09-07 reviewed public generation catalog and registration UI slice
+
+Lucas authorized the next generation-mapping steps without proprietary ICOR fitment data
+and emphasized correctness and the windshield-demand product goal. The safe boundary is
+now source-backed named generation where an annual registration cohort has exactly one
+reviewed match, with the explicit registration-year proxy retained for unsupported or
+transition-year ambiguity. The app still does not claim exact windshield/SKU fitment from
+generation alone; body, facelift, trim, equipment, ADAS/camera/HUD/sensors, drive side,
+and other fitment distinctions remain required downstream.
+
+Added `src/icor/generations/public_catalog.py`, a strict in-code public catalog contract.
+It normalizes only explicitly reviewed make/model aliases, rejects duplicate aliases,
+invalid/non-HTTPS evidence URLs, duplicate/unordered windows, and a non-final open-ended
+window. Catalog entries carry stable IDs, manufacturer-confirmed identity, generation
+window, evidence URL, dependency group, confidence reason, and optional platform/body/
+facelift metadata. `entry_for_year` returns a generation only when exactly one reviewed
+window covers the annual cohort; overlapping transition years fail safely to no named
+generation instead of choosing one. `GenerationMappingService` now uses reviewed entries
+before its estimated fallback, and future official snapshots identify the changed
+semantics as `public-generation-registry-v1`.
+
+The initial reviewed profile is Volkswagen Golf for Europe: Golf Mk6 (2008-2012, PQ35),
+Golf Mk7 (September 2012-2019, MQB), and Golf Mk8 (from October 2019). The evidence is
+Volkswagen Newsroom's official Golf VI and Golf VII histories and Volkswagen's 50th-
+anniversary history, which states that Golf VIII was presented in October 2019 and that
+the 2024 update is an evolutionary stage of the eighth generation. Exact publisher
+aliases observed in the active 2024 data were reviewed for Volkswagen/VW spellings and
+Golf, GTE, engine/gearbox, Variant, Life, Style, and eHybrid labels. These aliases do not
+merge registration families or erase body/trim text. `Golf Plus` is intentionally not
+included because it is a distinct derivative.
+
+Registration ranking rows now expose `generation_name`, `generation_basis`,
+`generation_confidence`, and `generation_source_url` alongside the existing registration-
+year proxy fields. The Registrations page shows the named generation and a manufacturer
+source link when supported; otherwise it continues to show the generation-year proxy.
+Its interpretation boundary explains both paths and continues to state that manufacturer
+model year is unavailable. OpenAPI and the generated TypeScript client were regenerated.
+Tests cover explicit alias matching, exclusion of Golf Plus, catalog validation,
+transition-year ambiguity, reviewed mapping precedence, API serialization, proxy fallback,
+and both UI states.
+
+Live verification against unchanged active snapshot `snapshot-fcb3cdb004a4b7c4042b`
+returned 24 EU27 2024 families for the `Volkswagen Golf` search. Twenty-three families,
+totalling 181,080 registrations, now return `Golf Mk8`, basis
+`manufacturer_generation_window`, confidence `high`, and the Volkswagen source. The only
+proxy result is `volkswagen / golf plus`, with 2 registrations. The major
+`volkswagen vw / golf` and `volkswagen / golf` rows return 116,976 and 61,900 respectively.
+This runtime enrichment does not mutate or rebuild the active snapshot. No remote,
+production, protected checkout, push, merge, or deployment changed.
+
+Fresh verification after the final edits: focused catalog/source/mapping tests passed
+7/7; the complete backend suite passed 586 tests with the same 14 documented environment
+skips and four known characterization XFAILs in 73.91 seconds; Ruff passed; and
+`git diff --check` passed with informational CRLF warnings only. Earlier in this same
+final code slice, all 69 frontend tests passed, ESLint passed, TypeScript passed, the Vite
+production build completed with 1,955 modules, and the regenerated OpenAPI client passed
+the focused 8-test registration suite. Focused Chromium registration journeys passed
+3/3, including 390 px and 1440 px layouts.
+
+The local review app is active through launcher PID 16172. The frontend listens at
+`http://127.0.0.1:5173/` and the API at `http://127.0.0.1:8000/`. Logs are
+`.local/planner-generations-20260907-173611.stdout.log` and the matching stderr log. The
+large active snapshot required about three minutes of CPU-bound startup validation; both
+ports and the live response were verified after completion. Closing the browser or
+clearing a terminal screen does not stop it; terminating the launcher process tree or
+restarting Windows does.
+
+This is the validated foundation and first real vehicle profile, not completion of all-
+brand generation mapping. Next, expand the catalog model by model from primary
+manufacturer sources, prioritizing high-volume EU27 families; add a separate reviewed
+publisher-identity alias layer before registration aggregation so spelling variants can
+be combined without losing source lineage; use EEA technical identifiers to separate
+generation/body/facelift where supported; measure named-generation coverage and surface
+it in Completeness; then build, verify, and only explicitly promote a new immutable
+snapshot. Never bulk-infer generation names from registration year or the legacy Top-100
+labels.
+
+Lucas also asked whether to clear the terminal periodically. Clearing the visible screen
+with `cls` or `Clear-Host` is harmless but unnecessary for performance. Closing/restarting
+the terminal can stop foreground commands or discard useful scrollback; clearing the
+Codex conversation is safe only when the final response says the durable handoff is
+current.
+
+## 2026-09-08 forecasting-first workflow and ICOR readiness slice
+
+Lucas clarified that the product must lead with forecast windshield replacements by
+model/generation for upcoming years, not with data-quality review. He required the home
+route to open Opportunities, a separate vehicle/model search second, and the evidence
+pages after those decision tools. He also asked why data does not extend through today,
+what the former Generation planner does, why brand-only opportunities were not useful,
+how the score is calculated, and for the old ICOR worked-model list to improve readiness.
+
+The app shell and routes now implement that workflow. `/` redirects to `/opportunities`
+with `groupBy=model_year`; Opportunities and Model search are first under `Decision
+tools`, while Official registrations, Source evidence, and Completeness are grouped under
+`Data & audit`. The former Generation planner is now named `Model search` and explains
+that users find a brand, model, and generation and inspect its upcoming windshield
+replacement range. The shell title is `Windshield replacement forecasts` and the ICOR
+brand link also returns to Opportunities. The old `/planner` route remains stable for
+bookmarks and implementation compatibility.
+
+Opportunities now defaults to vehicle/model-year rows and visibly presents make, model,
+registration-year proxy, reviewed generation when available, forecast replacement range,
+ICOR worked status, and the score breakdown. The score remains the approved strategy:
+up to 80 points from the row's relative forecast-demand percentile plus up to 20 points
+from readiness. Exact configuration coverage receives full readiness weight; conservative
+vehicle-year fallback and the legacy worked-model list receive half weight. The coverage
+editor is retained but moved behind a `Manage ICOR worked-model coverage` disclosure so
+it does not compete with the decision view. Brand/model summary modes remain available
+as optional aggregations.
+
+Added `src/icor/application/worked_models.py`, a strict read-only line parser for
+`data/icor_supported_models.txt`. It reads source rows individually so duplicate Python-
+mapping keys such as Ford Kuga 2012 and 2020 are both preserved, normalizes explicit VW
+publisher aliases, skips the suspicious `support audi a6` label, rejects malformed rows
+with a line number, and matches only the exact recorded vehicle year. It deliberately
+does not extrapolate a legacy label across unrecorded years or treat the legacy G1/G2
+labels as authoritative public generation evidence. The snapshot opportunity repository
+loads these identities into a per-connection temporary table, applies half readiness
+credit after exact/manual fallback precedence, exposes `icor_worked_base_units`, and
+returns the reviewed public generation name/basis where the existing public catalog has
+an unambiguous match. OpenAPI and the generated TypeScript contract contain the new
+fields.
+
+The Opportunities page obtains evidence freshness from the registration summary rather
+than hard-coding a year. It currently says `Registration evidence through 2025
+(provisional)` and states that official model-level registrations are annual, not a live
+daily feed, while forecast horizons continue beyond observed releases. This is the honest
+current boundary: the EEA published 2025 provisional new-car data on 25 June 2026, but
+there is no official complete 2026 model-level microdata release as of 8 September 2026.
+No proxy method was added for 2026 YTD data.
+
+TDD covered legacy aliases, duplicate rows, strict non-extrapolation, malformed input,
+snapshot score contribution, default model-year search, home redirect, forecast-first
+shell, dynamic freshness, generation/worked badges, visible score components, and renamed
+vehicle search. Fresh verification: `uv run pytest -q` passed 589 tests with 14 documented
+Windows/optional-integration skips and four known characterization XFAILs; `uv run ruff
+check src tests` passed; all 69 Vitest tests passed; ESLint passed; the TypeScript/Vite
+production build passed with 1,955 modules; and the final complete Chromium suite passed
+21/21, including the explicit home-route test. `git diff --check` passed with
+informational CRLF warnings only.
+
+The unchanged real active snapshot `snapshot-fcb3cdb004a4b7c4042b` was validated through
+the updated API. A model-year opportunity request returned HTTP 200, 28,510 ranked groups,
+and the first result `citroen / c4 / 2010` with 46,266 ICOR-worked forecast units and 10.0
+readiness points, proving the legacy catalog affects the score conservatively. Its first
+uncached query took about 9.85 seconds and an identical cached query took 0.194 seconds.
+The registration summary reports latest year 2025. The first result has no reviewed public
+generation name, so the UI honestly displays `Generation not yet verified`; only the
+reviewed Volkswagen Golf profile currently has a manufacturer-backed Mk name. Do not
+claim all-brand named-generation completion or fill gaps with guesses. Expanding reviewed
+manufacturer generation profiles remains the next evidence task.
+
+The verified local review app was restarted from this branch. Launcher PID 28576 serves
+the frontend at `http://127.0.0.1:5173/` and API at `http://127.0.0.1:8000/`; both returned
+HTTP 200. Logs are `.local/forecast-workspace-20260908.out.log` and
+`.local/forecast-workspace-20260908.err.log`. Startup of the large real snapshot remains
+CPU-bound for roughly three minutes. Closing the browser or clearing terminal output does
+not stop it; terminating PID 28576's process tree or restarting Windows does.
+
+No active evidence snapshot, remote, protected checkout, production environment, push,
+merge, or deployment changed. The pre-existing unstaged `AGENTS.md` modification remains
+preserved. Clearing the terminal display remains harmless but provides no performance
+benefit; preserve useful scrollback when diagnosing a running command.
+
+## 2026-09-08 guided vehicle forecast and visible score formula slice
+
+Lucas asked for the score computation details to be visible and for Model search to
+support a text search followed by brand, model, model year or direct generation, then
+aggregate all cars of that generation still circulating and forecast windshield
+replacements for Europe, Belgium, France, Spain, the Netherlands, England, Germany, and
+Poland. The implementation preserves the earlier no-proxy/no-ICOR-data boundary.
+
+Opportunities now contains an always-visible `How the opportunity score is calculated`
+panel. It states the exact approved formula: demand percentile times 80; readiness equals
+`(exact units + 0.5 × fallback units) / total units × 20`; total score is their sum with
+a maximum of 100. The wording also makes clear that scoring ranks opportunities and does
+not change the underlying windshield replacement forecast.
+
+The `/planner` Model search route now uses `VehicleForecastSearch`. It provides a search
+bar, forecastable Brand and Model selectors, a mutually exclusive Model year / Generation
+directly choice, and forecast-horizon selection. Results show registration cohorts,
+surviving fleet P50 after decay, windshield replacements P50, and P10-P90 replacement
+ranges for EU27, BE, FR, ES, NL, GB, DE, and PL. GB is labelled `United Kingdom (GB;
+England is not separable)` because the active source cannot truthfully isolate England.
+Unavailable evidence is shown as `Unavailable — not zero`. The responsive table scrolls
+inside its card at 390 px and its scroll region is labelled and keyboard focusable.
+
+Added the typed read-only endpoints `GET /api/v1/vehicle-forecasts/options` and
+`GET /api/v1/vehicle-forecasts`, their Pydantic/OpenAPI/TypeScript contracts, and
+`SnapshotVehicleForecastRepository`. Search only offers canonical identities with
+opportunity data. For reviewed catalog profiles, explicit reviewed aliases are combined
+and each annual cohort is mapped independently to a manufacturer-backed generation; an
+ambiguous transition year is excluded instead of guessed. Unreviewed identities retain
+the existing estimated generation entry with explicitly low confidence and must not be
+described as manufacturer truth.
+
+The fleet calculation uses the snapshot's registration cohorts and already-computed
+active-fleet P10/P50/P90 values, which embody constant annual retention/fleet decay. It
+then applies the existing age-band and geography replacement hazard and seeded triangular
+uncertainty propagation. The result exposes the survival, hazard, uncertainty, and
+calibration methods and states that calibration is assumption-led until proprietary ICOR
+fitment and replacement-history data exist.
+
+A live-snapshot diagnostic caught and prevented a material error: the reason code
+`forecast-registration-cohort` is also used for estimates filling historical gaps, so it
+must not be treated as synonymous with a future sale. The final boundary is the latest
+observed or reconciled registration year for the selected vehicle. All cohorts through
+that year are included, including explicit historical gap estimates; only years after
+that evidence boundary are excluded and disclosed as `excluded_forecast_cohort_years`.
+The UI states this plainly. Options with no usable horizon fail safely rather than
+raising an index error.
+
+Read-only validation against unchanged active snapshot
+`snapshot-fcb3cdb004a4b7c4042b` selected Volkswagen Golf model year 2020 as Golf Mk8 and
+included cohort years 2020-2025, excluded future sales cohorts 2026-2028, and disclosed
+the only transition year relevant to Mk8, 2019. Transition year 2019 is not offered as a
+selectable reviewed model year. Its 2028 P50 results were: EU27 2,297,451
+registration-cohort units, 1,675,705 surviving fleet, 58,433 replacements; BE 37,459,
+26,473, 986; FR 92,365, 67,500, 2,343; ES 47,547, 34,324, 1,228; NL 21,126, 15,192, 542;
+GB 1, 1, 0; DE 1,714,677, 1,253,454, 43,175; and PL 30,748, 22,478, 775. These values are
+snapshot/model outputs, not independently calibrated ICOR truth.
+
+Verification: the complete backend suite passed 594 tests with the same 14 documented
+Windows/optional-integration skips and four known characterization XFAILs. After the final
+transition-year guard, its focused repository/API tests passed 5/5 against both the
+fixture and real snapshot. Ruff passed for `src`, `tests`, and changed
+`scripts/e2e_app.py`; all 70 frontend tests passed; ESLint and TypeScript passed; the
+production Vite build passed with 1,956 modules; and the final complete Chromium suite
+passed 21/21, including guided year and generation selection, all eight target market
+rows, accessibility, keyboard focus, and 390/1440 px overflow checks. OpenAPI and
+generated TypeScript types are current, and `git diff --check` passed with informational
+CRLF warnings only.
+
+The refreshed local review app is active under launcher PID 41040 using logs
+`.local/vehicle-forecast-final-20260908.out.log` and the matching stderr log. Both
+`http://127.0.0.1:5173/planner` and port 8000 returned HTTP 200. The live options endpoint
+returned Volkswagen Golf first, and the live forecast returned Golf Mk8, included years
+2020-2025, future exclusions 2026-2028, target markets EU27/BE/FR/ES/NL/GB/DE/PL, and
+EU27 replacement P50 58,433. No snapshot, remote, protected checkout, production
+environment, push, merge, or deployment changed. The pre-existing unstaged `AGENTS.md`
+modification remains preserved. Clearing the terminal display remains harmless and does
+not stop this launcher; closing its host process tree or restarting Windows does.
+
+## 2026-09-08 Model search manual-entry repair
+
+Lucas reported that manual entry did not work in Model search. The live API diagnosis
+showed that exact typed identities were already accepted by the backend; the defect was
+the frontend interaction. The main search text only refreshed suggestion dropdowns and
+never selected its exact result, while Brand and Model were non-editable `<select>`
+controls. A user who typed `Ford Focus` and pressed Search therefore still had to discover
+and choose separate dropdown entries, and could not type an identity directly.
+
+`web/src/features/planner/VehicleForecastSearch.tsx` now supports both intended paths.
+Submitting an exact full make/model such as `Ford Focus`, or an exact model such as
+`Golf`, derives the best exact result from the ordered forecastable API matches and
+selects it automatically. Brand and Model are editable, accessible inputs backed by
+suggestion datalists, so a user can also type both values directly even when they were
+not present in the initial 200 suggestions. Matching is case-insensitive for suggestions;
+the backend remains the source of truth for exact normalized identity validation.
+
+The selection query stays disabled until both fields are present. A misspelled or
+non-forecastable exact pair returns no horizons, keeps Calculate disabled, and displays
+`No forecastable vehicle matches this exact brand and model` instead of guessing. Search
+feedback reports the forecastable match count and whether an exact model was selected.
+Auto-selection is derived from the existing React Query result rather than an effect or
+a second API request, preventing cascading renders, duplicate large-snapshot queries,
+and stale-request races. Changing either identity resets year, generation, horizon, and
+any previous forecast.
+
+Added component regressions for exact search auto-selection and direct manual entry of a
+brand/model outside the suggestion list; both passed. Fresh verification reported all
+71 frontend tests passing, TypeScript and ESLint passing, the Vite production build
+passing with 1,956 modules, and the complete Chromium suite passing 21/21, including
+accessibility and 390/1440 px behavior. A headless browser against the real running local
+app confirmed `Ford Focus` auto-selected as `ford / focus` with 16 available years, and
+direct `Toyota / Corolla` entry returned 16 years and horizons 2028/2031.
+
+The existing Vite development server hot-reloaded the frontend change; launcher PID
+41040 remains the local review-app owner, with frontend/API on
+`http://127.0.0.1:5173` and `http://127.0.0.1:8000`. No backend, snapshot, remote,
+protected checkout, production environment, push, merge, or deployment changed. The
+pre-existing unstaged `AGENTS.md` modification and all earlier development changes remain
+preserved.
+
+## 2026-09-08 pre-owner review and official ICOR branding
+
+Lucas requested a deep operational review before presenting the product to ICOR's
+owner and asked for the real Belgian company's colours and logo. The identity was
+confirmed from ICOR SA's official site at `https://icor.be/`: Wavre, Belgium,
+automotive-glass accessories and tools. The official website stylesheet uses cyan
+`#00A3D9` as its dominant brand colour, and the official materials pair it with dark
+navy and white.
+
+The application shell now uses an ICOR palette: official cyan `#00A3D9`, navy
+`#152F4A`, white, blue-grey surfaces, and accessible darker blue interactive states.
+The placeholder `I` monogram was replaced on desktop and mobile by ICOR's exact
+official white wordmark/tagline. The original 151 x 45 PNG from
+`https://icor.be/images/icor-blanc.png` is embedded in a self-contained SVG wrapper so
+the demo does not depend on the public site at runtime. The embedded 21,644 bytes match
+the official source SHA-256
+`55c76bf6c858444e0eaf3889e4f737b928ffedc1fc5652563a9d585d74efd95c`.
+Provenance and preservation rules are recorded in `web/src/assets/README.md`. The
+browser title is now `ICOR | Windshield demand forecasts`, its description states the
+forecast purpose, and its theme colour matches the navy shell.
+
+The branding regression was observed RED before the official logo existed and then
+passed 5/5 after implementation. Final frontend gates passed: all 71 Vitest tests,
+TypeScript, ESLint, Vite production build with 1,956 modules, final focused shell tests
+5/5, and npm audit with zero known vulnerabilities. The complete Chromium suite passed
+21/21, including all planner/opportunity/data journeys, visible keyboard focus,
+automated serious/critical accessibility checks, and 390/1440 px overflow checks.
+
+The complete backend gates passed: `uv lock --check`, maintained Ruff, 594 tests,
+14 documented Windows/optional-integration skips, the four historical strict XFAILs,
+and pip-audit with no known third-party vulnerability (the unpublished local package
+cannot be checked against PyPI). The active pointer still identifies immutable snapshot
+`snapshot-fcb3cdb004a4b7c4042b`; the promoted `snapshot.json` SHA-256 exactly matches
+the pointer's recorded manifest digest
+`79f8b4d6fcd404219b9cfbe666819752c531c109a68389c1f32f246cca45ccf6`.
+Its manifest still records database SHA-256
+`9733d748a239a34184edce41c23df073ea0fb2fea034b7e60aead89e6fe7de65`,
+1,555,677 observations, 21 releases, zero published values, and 100 non-blocking
+generic-label warnings. A fresh full 12.8 GB status/hash scan was stopped after it
+remained I/O-bound much longer than the product checks; its exact orphaned read-only
+process tree was terminated. No candidate, pointer, snapshot, or source data changed.
+
+Live real-snapshot review passed. All six routes returned 200 with no browser console
+errors, page errors, failed network responses, or 1440 px page overflow. Opportunities
+and Model search also rendered at 390 px with the official logo visible, working mobile
+menu, no errors, and exact viewport width. The owner landing route redirected to
+model-year Opportunities, showed the score formula and 2025 provisional freshness,
+and rendered ranked vehicles. Twenty-five live opportunity rows had zero arithmetic
+or range failures: `demand_points + readiness_points = total_points` within the API's
+one-decimal serialization, with the 80/20 caps preserved. A real Volkswagen Golf 2020
+forecast returned Golf Mk8, cohorts 2020-2025, future exclusions 2026-2028, all eight
+requested markets, ordered non-negative P10/P50/P90 ranges, and HTTP 422 for an invalid
+vehicle. Live manual Ford Focus entry and direct Volkswagen Golf generation selection
+both completed without browser errors.
+
+The final exact code was restarted cleanly under hidden launcher PID `39636`. The
+frontend is `http://127.0.0.1:5173/`, the API is `http://127.0.0.1:8000/`, and logs are
+`.local/owner-demo-20260908.out.log` and `.local/owner-demo-20260908.err.log`. Snapshot
+composition took about five and a half minutes on this run. The first uncached
+model-year Opportunity API read took 19.8 seconds and the first full browser landing
+took 15.4 seconds; the warmed landing then took 2.18 seconds with no console errors.
+The live caches are currently warm. Closing the browser or clearing terminal output
+does not stop the launcher; terminating PID 39636's process tree or restarting Windows
+does.
+
+Readiness verdict: the current loopback app is ready for a controlled owner
+demonstration on this computer or by screen sharing. It is not a production-ready or
+externally shareable service: the local development composition has no user login;
+forecast calibration and fitment remain assumption-led until proprietary ICOR data is
+integrated; only Volkswagen Golf currently has reviewed manufacturer-backed generation
+names; evidence is annual through 2025 provisional rather than live through today; GB
+cannot be separated into England; and historical OpenAI-key revocation/rotation still
+requires owner confirmation. Do not call the forecasts validated ICOR demand, expose
+port 5173/8000 publicly, push, merge, or deploy without the separate approved hardening
+and release sequence.
+
+No remote, protected checkout, production environment, active snapshot, push, merge,
+or deployment changed. The pre-existing `AGENTS.md` modification and accumulated
+development changes remain preserved.
+
+## 2026-09-08 generation coverage, Odoo, global warming, and pre-2000 assessment
+
+Lucas confirmed that Great Britain can remain whole, proprietary ICOR information will
+arrive later, and every model exposed to a client must have a correct generation name.
+He also disclosed that ICOR uses Odoo and asked about future integration, globally warm
+forecast execution, trusted pre-2000 evidence, and current data quality. This checkpoint
+is analysis only; no application, data, snapshot, cache, Odoo, remote, or deployment
+state changed.
+
+Read-only active-snapshot measurement found 22,893 forecastable raw canonical vehicle
+IDs/make-model pairs, 85,543 canonical vehicles in total, 85,306 generation entries,
+1,094 distinct generation display labels, 111,600 opportunity estimates, and 1,780,398
+cohort estimates. The Model search default is not a complete catalog: its repository
+sorts the identities and returns only the first 200. All 85,306 snapshot generation
+entries have `identity_kind=estimated`; manufacturer-backed Golf names are runtime
+enrichment from the one reviewed public profile. Therefore, manually sourcing a
+generation for every raw identity is neither tractable nor correct: raw identities
+contain trims, engines, spelling variants, and publisher-specific labels. The required
+boundary is to canonicalize aliases into genuine model series first, attach reviewed
+month-precise generation windows and technical identifiers second, and expose only
+verified model/generation identities in client-facing search/opportunities until their
+coverage is complete. Annual transition cohorts must remain mixed/ambiguous unless
+technical type, VIN/type-approval, or monthly evidence can split them.
+
+Recommended generation source order is: manufacturer histories/brochures and formal
+type-approval evidence; a licensed structured aftermarket vehicle tree such as TecDoc
+with vehicle/range/design/build windows; regulatory technical identifiers; and secondary
+sources only as corroboration. TecAlliance states that TecDoc supplies standardized
+vehicle/product/linkage data and API/ERP integration, but licensing, historical depth,
+territories, redistribution rights, and the exact generation field population must be
+tested on a representative ICOR vehicle sample before selection. The public raw list
+must not be bulk-labelled through year-only guesses.
+
+Odoo integration is feasible, conditional on ICOR's edition/version, hosting, API plan,
+modules, access rights, and actual data model. Odoo 19's official JSON-2 API uses bearer
+API keys and database-specific model/field documentation; external API access is limited
+to Custom plans. Older XML-RPC/JSON-RPC interfaces are deprecated on Odoo's published
+roadmap. The safe design is a dedicated least-privilege read-only bot with a rotated
+secret outside Git, an incremental server-side sync keyed by `write_date` plus record
+ID, immutable raw pulls, and a reviewed mapping from Odoo product/SKU/order/manufacturing
+records to canonical vehicle/generation/configuration. The app must not query Odoo in a
+user request. Before implementation ICOR must define “worked on” (quoted, sold,
+invoiced, manufactured, fitted, or technically developed) and identify where vehicle,
+generation, windshield SKU/OE number, and fitment attributes are stored. If external API
+access is unavailable, a controlled Odoo export or small server-side Odoo module is the
+fallback.
+
+For worldwide low-latency use, do not rebuild “the entire world” inside page requests.
+Use scheduled acquisition/Odoo-sync jobs, versioned precomputed model-generation-market-
+horizon aggregates, candidate validation, atomic last-known-good promotion, and a fast
+serving store/cache. Check sources several times daily, rebuild only when inputs change,
+run a nightly deterministic forecast refresh if business assumptions require it, prewarm
+all published model/generation routes immediately after promotion, and retain the prior
+snapshot/cache if any stage fails. A weekly full integrity rebuild can detect drift.
+Global execution still requires a licensed global registration/VIO source; the current
+snapshot is not worldwide.
+
+Current data-quality assessment: source provenance and immutability are strong for the
+implemented official scope, but product identity and forecast calibration are not yet
+client-grade. The snapshot contains 1,555,677 observations, of which 1,555,195 are
+normalized-label usable and 1,377,325 are assigned; completeness records report 609,963
+forecastable and 945,232 evidence-only records, zero sourced generations, and 1,134,350
+source-level rejected records across loader scopes. Every 1,780,398 cohort and every
+111,600 opportunity estimate is labelled low confidence. EEA model-level evidence is
+annual from 2010 through 2024 final plus 2025 provisional and is a regulatory CO2
+monitoring source with noisy commercial labels, not a complete world sales/parc source.
+The forecast hazard, survival, and uncertainty remain assumption-led until ICOR history
+or defensible external calibration is integrated.
+
+Trusted pre-2000 evidence exists only in partial forms. The UK DfT/DVLA official
+VEH0120 stock file covers Great Britain by make/generic model/model from 1994 Q4, while
+model-level first registrations begin in 2001; current stock by old first-use/manufacture
+year can describe surviving vintage cohorts but cannot reconstruct complete historic
+annual sales. ACEA publishes European historical totals by country/manufacturer, not the
+required model detail. No reviewed free official source provides comprehensive global
+model-level pre-2000 sales/parc. The realistic route is licensed vendor evidence plus
+national-register backfills and manufacturer archives, all stored separately with scope,
+licence, revision, and confidence. S&P advertises model-level global new registrations
+but its currently described marketplace history starts in 2019; MarkLines advertises
+model-by-country sales with 99% global-sales coverage; their exact pre-2000 depth and
+redistribution terms require commercial confirmation. S&P's VIO product is especially
+relevant to aftermarket fleet exposure, while TecDoc is relevant to vehicle identity
+and fitment rather than sales counts.
+
+## 2026-09-08 verified client-release candidate
+
+Lucas authorized finishing the first build so it can be shared with the client and
+emphasized mistake avoidance. The implemented release boundary is a deliberately narrow
+authenticated Volkswagen Golf pilot, because every vehicle exposed to a client must
+have a correct generation name and Golf is currently the only manufacturer-reviewed
+profile. The broader internal workspace remains unchanged when client-release mode is
+absent.
+
+Client-release mode is enabled only when the backend uses
+ICOR_CLIENT_RELEASE_MODE=verified and the frontend bundle was compiled with
+VITE_ICOR_CLIENT_RELEASE=verified. SnapshotVehicleForecastRepository then rejects every
+unreviewed identity. SnapshotOpportunityRepository joins only explicit reviewed aliases,
+consolidates them as canonical Volkswagen Golf, and excludes annual transition cohorts
+when month-level windows overlap. The client opportunity API rejects brand/model
+groupings that cannot guarantee a generation on every row. Canonical drill-down expands
+through all reviewed publisher aliases.
+
+The authenticated preview now has a deny-by-default client allowlist. It exposes only
+read-only Opportunities, Model search, vehicle forecasts, and registration freshness.
+It returns 404 for registrations, evidence, completeness, ML export, API documentation,
+coverage management, unknown APIs, and non-login mutations. The client frontend removes
+internal/audit/admin navigation, grouping controls, and the mutable coverage editor,
+shows a Verified client preview badge, and explicitly labels the catalog and forecasts.
+The preview runner can serve a separately compiled bundle from
+ICOR_PREVIEW_ASSET_ROOT, preventing internal/client asset mixing.
+
+The release procedure, credential rules, limitations, smoke test, and shutdown
+requirements are documented in docs/CLIENT_RELEASE.md and linked from README.md. The
+verified client bundle was built in ignored .local/client-release. The existing
+web/dist directory could not be emptied on Windows because index.html returned EPERM;
+the separate output both avoided that local packaging lock and is the safer release
+boundary.
+
+Fresh verification on the final implementation:
+
+- focused RED tests first failed because verified-only constructors and client-release
+  composition did not exist; after implementation, the focused repository/API/preview
+  set passed 44 tests with one Windows symlink-privilege skip;
+- uv lock --check passed; maintained Ruff passed after one mechanical import-order fix;
+- the complete backend suite passed 599 tests, 14 documented Windows/optional-real-data
+  skips, and the four historical strict XFAILs in 65.89 seconds;
+- pip-audit found no known third-party vulnerabilities and skipped only the unpublished
+  local package;
+- all 73 Vitest tests, TypeScript, ESLint, and npm audit passed, with zero known npm
+  vulnerabilities;
+- the verified client Vite production bundle passed with 1,956 modules and was written
+  to .local/client-release;
+- the complete Chromium suite passed 21/21, including workflow, accessibility, keyboard,
+  and 390/1440 px responsive gates;
+- a real-snapshot invariant returned exactly 11 client opportunity rows, all with
+  manufacturer_generation_window identity, only Volkswagen Golf in Model search, and
+  HTTP 422 for prohibited brand grouping;
+- a final authenticated composition smoke test against the compiled client bundle and
+  active snapshot passed login, the 11 verified rows, all internal-route/API denials,
+  logout, and post-logout protection.
+
+The active snapshot remains snapshot-fcb3cdb004a4b7c4042b. The existing local internal
+owner-demo launcher PID 39636 and frontend/API processes remain active on
+http://127.0.0.1:5173 and http://127.0.0.1:8000; they are not the authenticated client
+composition and must not be exposed. No remote, protected checkout, production
+environment, active snapshot, push, merge, deployment, port visibility, or external
+sharing changed.
+
+The complete application and client-release candidate is committed on the isolated
+development branch as e284cd2 (feat: prepare verified client preview). AGENTS.md and
+this durable handoff remain the only unstaged tracked changes; they were intentionally
+excluded from the product commit. The branch has not been pushed.
+
+The release candidate is ready for an owner-controlled sharing step.
+Before any external URL is created, Lucas must confirm the historically exposed OpenAI
+key was revoked/rotated, approve the development-branch push and authenticated preview
+deployment, provide the intended reviewer identity and review window, and confirm that
+the Volkswagen Golf-only pilot scope is acceptable. Do not broaden the catalog with
+guessed generation names.
+
+## 2026-09-08 full-catalog release requirement and data dependency
+
+Lucas clarified that OpenAI-key revocation must wait until immediately after the urgent
+client review. The new React/FastAPI preview does not require that historical key, so it
+must remain absent from the client build and runtime. Rotation is still required as soon
+as the review ends.
+
+Lucas authorized merging and proceeding toward the final release, rejected the Golf-only
+pilot as the client scope, and required all models to be present with correct generation
+names. He requested reuse of the prior web-app accounts and passwords. Local inspection
+found no tracked or local credential file containing those values, which is correct.
+The earlier checkpoint records repository-scoped Codespaces secrets for the prior
+accounts. Reuse must occur by retaining those secrets in the same repository; passwords
+and hashes must not be retrieved, copied, printed, committed, or moved through chat.
+
+The full-catalog requirement is not satisfiable from current inputs without making false
+claims. The active snapshot contains 22,893 forecastable raw make/model identities. The
+legacy ICOR worked list has only 148 year records across 128 distinct noisy labels and
+includes generic values such as G1. All 85,306 snapshot generation entries are estimated,
+and only Volkswagen Golf has a reviewed manufacturer profile. Therefore neither the raw
+snapshot nor the legacy list can be presented as correct all-model generation truth.
+
+Current official-source research reconfirmed TecDoc as the appropriate acquisition
+boundary. TecAlliance describes TecDoc Reference Data/Data Package/Web Service as a
+standardized global vehicle/type/linkage source with more than 260,000 vehicle types,
+construction windows, model design identifiers, and API/bulk integration. TecDoc VIO
+adds harmonized official parc evidence across more than 75 countries linked to the
+reference vehicle tree. Access, historical depth, field population, client-display and
+derived-data rights, and windshield linkage rights require a commercial account and
+licence. NHTSA vPIC is authoritative manufacturer-submitted US/VIN evidence but cannot
+satisfy the European/global all-model generation requirement. EU type approval confirms
+type/variant/version semantics but no reviewed open comprehensive client-ready generation
+API was found.
+
+The exact vendor/Odoo intake and acceptance contract is now documented in
+docs/VEHICLE_CATALOG_INTAKE.md. Required inputs are a licensed TecDoc sample/export or
+equivalent ICOR/Odoo reference export plus rights confirmation. Until one is provided,
+do not expand the verified client mode, merge it to main, or deploy it as the requested
+all-model final version.
+
+An attempted combined non-interactive fetch/status/push command was rejected by the
+managed approval reviewer because the exact remote payload was not separately approved.
+No fetch or push ran. Although Lucas broadly authorized proceeding, a future push must
+name the development branch and GitHub repository explicitly in the approval request.
+No merge, remote, production, account secret, deployment, or active snapshot changed in
+this checkpoint.
+
+## 2026-09-08 authoritative-catalog follow-up
+
+Official ICOR-site research found a public new-articles catalogue with many useful
+vehicle/product descriptions and construction-year fragments, plus the ICOR Shop user
+guide. The catalogue is product-oriented, contains abbreviated and mixed-granularity
+vehicle labels, and is not a complete canonical all-model generation source. It may be
+used later as an ICOR fitment supplement, but it cannot satisfy the client's requirement
+that every exposed model already have a correct generation identity.
+
+The release/key timing was clarified in docs/CLIENT_RELEASE.md, and the authoritative
+TecDoc-or-Odoo field, licence, sample, and acceptance contract was added at
+docs/VEHICLE_CATALOG_INTAKE.md. Both files passed git diff --check and were committed
+locally as 3fa0b08 (docs: define authoritative vehicle catalog intake). The development
+branch is now 13 commits ahead of its last-known remote tracking state. AGENTS.md and
+this handoff remain the only uncommitted tracked files; they are intentionally excluded
+from product commits.
+
+The blocking input remains unchanged: obtain an existing ICOR TecDoc Reference
+Data/Data Package/Web Service/VIO sample or an equivalent Odoo export with the documented
+canonical vehicle fields and rights. No truthful code-only path can manufacture the
+missing all-model generation truth. No push, merge, deployment, credential, production
+checkout, active snapshot, or running-server state changed in this follow-up.
+
+## 2026-09-09 vehicle-year catalog, validated forecast, and local client review
+
+Lucas confirmed that proprietary ICOR data will not be available before the client
+meeting, asked for real names across the available vehicle years, authorized testing,
+pushing, and launching the application, and reiterated that the historical OpenAI key
+cannot be revoked until immediately after the meeting.
+
+The client-release boundary now exposes every forecastable official-source make/model
+and observed registration cohort year. The UI and API describe these truthfully as
+vehicle/registration years rather than claiming they are universal manufacturer model
+years. Direct estimated-generation selection is disabled in client mode. A forecast
+identity is source-specific, for example `Ford Focus — 2025 registration cohort`, with
+basis `official_source_registration_cohort`. Manufacturer generation names remain
+available only where independently reviewed. This does not create the missing licensed
+all-model generation/fitment truth described above.
+
+Forecasting now uses `validated-recency-damped-ensemble-v2`: a deterministic fixed
+50/50 ensemble of the latest observation and a five-year trend whose future increments
+are damped by 0.8 per step. Outputs are non-negative, and diagnostics use multi-step
+rolling WAPE. The reproducible benchmark and limitations are in
+`scripts/benchmark_registration_forecasts.py` and `docs/FORECAST_VALIDATION.md`.
+Against the promoted snapshot's 16,239 eligible series and newest-two-year outer
+holdout, production WAPE was 0.503518 versus 0.628230 for the replaced baseline, a
+19.85% relative error reduction. No claim is made that one algorithm is universally
+best; this method won the recorded same-data benchmark without introducing unvalidated
+high-capacity ML.
+
+The immutable candidate was fully validated and atomically promoted:
+`snapshot-eefbf3566f2106e5965c`, database SHA-256
+`2349509ac863995632670d40002b0f6170fe1be1dcfffaf8455a416795c6662d`,
+1,555,677 source observations, all 21 expected releases, zero published proprietary
+values, and 100 previously classified generic-label warnings. The active pointer
+manifest digest is
+`8baf20c2af9d24ac6fc4b5145f8c72ee44a59fcaaa9115697fa1bce27cd8c6e1`.
+
+Fresh release verification on the final product commit:
+
+- complete backend: 605 passed, 14 documented Windows/optional-data skips, and the four
+  historical strict XFAILs;
+- maintained changed-file Ruff, `uv lock --check`, and pip-audit passed; pip-audit
+  found no known third-party vulnerabilities and skipped only the unpublished local
+  package;
+- frontend: 15 files and all 74 Vitest tests passed; generated OpenAPI schema was
+  unchanged; TypeScript and ESLint passed;
+- verified client production bundle built successfully with 1,956 modules in
+  `.local/client-release-20260909`;
+- complete Chromium E2E passed 21/21, including workflow, accessibility, visible
+  keyboard focus, and 390/1440 px responsive checks;
+- shipped frontend runtime audit (`npm audit --omit=dev`) found zero vulnerabilities.
+  The full development-tree audit newly reports two high-severity instances of
+  GHSA-2883-xcg3-v3hh through `openapi-typescript -> @redocly/openapi-core 1.34.19 ->
+  js-yaml 4.3.1`. Both available forced overrides were tested and proved incompatible
+  with schema generation, so neither was retained. The affected generator is
+  development-only, consumes the repository-generated OpenAPI file, and is not bundled
+  into the browser release; monitor upstream for a compatible fix.
+
+The scoped product, tests, benchmark, and documentation are committed as `e7e7c94`
+(`feat: expand vehicle-year catalog and validate forecasts`). `AGENTS.md` and this
+handoff remain intentionally outside the product commit. The exact current-tree
+OpenAI-style key scan returned zero matching files. The new React/FastAPI client and
+deterministic forecast do not require OpenAI, but preserved legacy Streamlit tooling
+still has the dependency. The old key remains in four historical commits and must be
+revoked immediately after the client meeting; history rewriting cannot revoke it.
+
+The development branch was fetched and confirmed zero commits behind and 14 ahead of
+`origin/development/windshield-demand-platform`. The managed reviewer nevertheless
+rejected the push because Lucas's message did not explicitly name both
+`https://github.com/lucascverissim0/icor-webapp.git` and
+`development/windshield-demand-platform`. No workaround, push, merge, main-branch
+change, or deployment occurred. The next push requires Lucas to authorize that exact
+repository and branch in a new message.
+
+The local client-release frontend is running at `http://127.0.0.1:5173/` and was
+opened in Lucas's default browser. The client-release API is bound only to
+`http://127.0.0.1:8000/`, serves the new active snapshot, and uses explicit
+`client_release=True`. Live checks returned 28,512 opportunity rows; Ford Focus 2025
+used the official registration-cohort identity, eight markets, non-negative ordered
+intervals, and no estimated generation label. Launcher PIDs are 5536 (web) and 38060
+(API wrapper; serving child 39388); logs are
+`.local/client-web-20260909.*.log` and `.local/client-api-20260909.*.log`.
+This local development composition is unauthenticated and localhost-only: three
+internal data routes are hidden, while API docs/OpenAPI remain reachable. It is for
+Lucas's on-computer review only and must not be forwarded publicly. The existing remote
+account/password secrets were not read or changed; the authenticated client-sharing
+runner must use those repository secrets after the authorized push.
+
+## 2026-09-09 registration-cohort and forecast sanity audit
+
+Lucas questioned the unusually low Volkswagen Golf 2020 Belgium registration-cohort
+figure and asked for a careful read-only review of the numbers and forecast quality.
+No application code, active snapshot, source release, pointer, remote, production,
+protected checkout, or deployment state changed. The localhost client composition was
+still reachable on ports 5173/8000. Browser control could not initialize because the
+Windows sandbox failed with `SetTokenInformation` error 1344, so the live API and
+immutable snapshot were inspected directly outside that broken sandbox boundary.
+
+The live Volkswagen Golf 2020/horizon-2028 endpoint returned 7,653 Belgium
+registrations. This is not a clean source observation: it combines 7,401 reconciled EEA
+registrations with 251.9200 synthetic `forecast-registration-cohort` Mk7 registrations
+and a zero synthetic Mk6 row, while labelling the result
+`official_source_registration_cohort` and `source-reported`. The four observed
+components are 7,075 `volkswagen vw / golf`, 298 `volkswagen / golf`, 25
+`volkswagen vw / golf gte`, and 3 `vw / golf`, all from
+`eea-co2cars-2020-final-v22-r1`.
+
+The source itself is coherent. All Belgian EEA passenger-car rows sum to 431,922 for
+2020, only 431 (0.10%) above the 431,491 FEBIAC national total. All EEA labels
+containing Golf sum to 8,941: the 7,401 core rows, 1,538 Golf Sportsvan rows, and two
+one-unit long-form aliases. Published Belgian model totals report 8,937 Golf
+registrations. The apparent low value is therefore mainly an identity/scope problem:
+Golf Sportsvan is deliberately separate for windshield fitment, but the UI does not
+make that comparison boundary clear enough, and the reviewed Golf aliases omit
+historical punctuation variants such as `volkswagen, vw`.
+
+Historical label drift is material. The current alias set makes Belgian core-Golf
+observed totals appear as 80 in 2011, 60 in 2012, 180 in 2013, 145 in 2014, and zero in
+2015-2017, while source rows under `volkswagen, vw / golf` are 18,034, 12,345, 14,686,
+15,675, 13,652, 13,242, and 13,741. The source-specific catalog remains fragmented
+rather than a canonical cross-year model series.
+
+The more serious generation defect is in `GenerationPlanningService`: every generation
+series is forecast through 2028/2031 without enforcing the generation's end month.
+Golf Mk6 and Mk7 therefore receive registrations after discontinuation. Germany 2020
+sums 114,559 observed Golf Mk8 units, 4,234 observed Golf GTE units, and 361,690.3075
+synthetic Mk7 units, producing the implausible displayed total 480,483. In the 2028
+materialization, 287 exact canonical-vehicle/geography/year keys contain both observed
+and synthetic cohorts. Across client-selectable years through each vehicle's latest
+evidence boundary, 65,736 market/vehicle/year keys are synthetic-only but the client
+selection contract describes them as official/source-reported; 287 are mixed.
+
+The Opportunities model-year query has a separate semantic error. It joins only
+`opportunity_input.input_position = 0` and assigns the entire generation/geography/
+horizon opportunity to that first cohort year. A Belgium Golf Mk8 opportunity shown as
+2020 contains nine cohorts from 2020 through 2028; a Mk7 row shown as 2013 contains
+sixteen cohorts from 2013 through 2028. These are not cohort-year forecasts.
+
+Fresh benchmark execution against active snapshot `snapshot-eefbf3566f2106e5965c`
+reproduced 16,239 series, production WAPE 0.503518, replaced-baseline WAPE 0.628230,
+and 19.85% relative improvement. A same-holdout challenger gave last-observation WAPE
+0.516167, so production improves on that strong naive baseline by only about 2.45%.
+Production first-step WAPE was 0.357571, second-step WAPE 0.690450, signed bias was
++0.130621 of holdout demand, median per-series WAPE was 0.655179, and p90 was 2.345647.
+The registration forecaster is a reasonable conservative baseline, not a client-grade
+engine. Final windshield demand is less validated: constant survival, age-band hazards,
++/-20% hazard bounds, and triangular uncertainty remain assumptions with no empirical
+coverage test against proprietary replacement outcomes.
+
+Release verdict: do not present the current numbers as reliable client forecasts and do
+not push/deploy this release unchanged. Enforce generation windows, separate observed/
+estimated/forecast rows in every response, make model-year opportunities genuinely
+cohort-specific, complete reviewed alias canonicalization, rebuild/promote a new
+immutable snapshot, add aggregate/discontinuation invariants, rerun benchmarks with
+naive baselines/bias/interval coverage, and re-audit high-volume samples. The historical
+OpenAI key still requires revocation immediately after the client meeting as separately
+documented.
+
+## 2026-09-09 concise-report preference
+
+Lucas said the preceding audit report was too long to read under time pressure. All
+future completion reports must be brief and decision-focused: lead with the verdict,
+include only the most important evidence, risk, and next action, and keep exhaustive
+technical detail in this handoff unless Lucas asks for it. `AGENTS.md` now makes this a
+durable repository directive. No application code, data, snapshot, server, remote, or
+production state changed.
+
+## 2026-09-10 evidence-anchored windshield hazard and discontinuation correction
+
+Lucas clarified that a discontinued generation must continue producing replacement
+demand while vehicles from its historical cohorts remain in circulation, and asked for
+the strongest credible free windshield-demand assumption available. Public research
+identified the latest France Assureurs motor report as the best national frequency
+anchor: its July 2026 report for calendar 2025 gives 60.6 glass claims per 1,000 covered
+exposures for the subscribed glass guarantee among first-category vehicles outside
+fleets. A Crédit Agricole Assurances/Pacifica, BCA Expertise, Europ Assistance, and
+Institut Louis Bachelier study using 2022 operating data reports a 71% windshield-
+replacement operation frequency per glass claim, alongside 12% windshield repair and
+17% replacement of other glazed elements. It says Pacifica supplied the glass-claim
+data and their representativeness was checked against France Assureurs. The study's
+narrative separately says 15% repair, a minor internal discrepancy that does not change
+the reported 71% replacement share used here.
+
+The implemented versioned baseline is therefore 0.0606 x 0.71 = 0.043026, or 4.3026%
+annual windshield-replacement events per active vehicle, with explicit planning
+scenarios of 3.44208% / 4.30260% / 5.16312% (-20% / base / +20%). These are not
+empirically calibrated P10/P90 quantiles. The former unsupported age bands (2%-6%) and
+GB +10% multiplier are no longer used. Age and country remain accepted inputs for
+contract validation and future evidence-backed calibration, but the default hazard is
+flat because the reviewed free evidence does not support age- or country-specific
+effects. Applying insured French claim behavior to all surviving vehicles and other
+markets remains an explicit proxy limitation. Exact evidence, formula, interpretation,
+and URLs are recorded in `docs/WINDSHIELD_DEMAND_ASSUMPTIONS.md`.
+
+`GenerationPlanningService` now removes any assigned or forecast registration cohort
+after a generation's documented end year and filters forecast output at that same
+boundary. It does not remove the discontinued generation: every valid earlier cohort
+continues through the survival model to the 2028/2031 horizon and continues generating
+replacement opportunity while vehicles remain active. The hazard method is versioned
+as `france-insurance-windshield-hazard-v2` in official snapshot identity, generation
+planning, and live guided vehicle forecasts. The unsupported runtime GB multiplier was
+removed. Focused regressions cover the exact 4.3026% calculation, flat age behavior,
+the 20% scenario interval, absence of an unsupported country premium, and continued
+positive demand from a generation ending in 2022 with no post-2022 cohorts.
+The scoped implementation, tests, and source methodology are committed locally as
+`b3cd2ff` (`fix: anchor windshield demand and stop ended cohorts`). The development
+branch is 15 commits ahead of its last-known remote tracking state; nothing was pushed.
+
+Fresh verification: the focused backend set passed 15 tests; maintained Ruff passed;
+`git diff --check` passed with informational CRLF warnings only; and all 74 frontend
+Vitest tests passed. Two complete backend runs reached respectively 605 and 606 passes,
+14 documented skips, and four historical XFAILs, but each encountered one different
+known intermittent Windows `MoveFileW` access-denied race in a temporary ReleaseStore
+test. Both affected tests passed immediately in isolated reruns. No forecasting test
+failed after implementation.
+
+The corrected 12.8 GB immutable snapshot was not rebuilt or promoted. Only about
+15.3 GB remained free after verification, while this repository's canonical build can
+temporarily require both a similarly sized database and WAL before finalization; a
+capacity failure would be expected. Several old candidate copies exist, including
+candidate copies of promoted snapshots, but none was deleted because Lucas did not
+authorize material immutable-artifact cleanup. The active pointer therefore remains
+`snapshot-eefbf3566f2106e5965c`, whose persisted opportunity values still use the old
+hazard/window logic. The already-running localhost client composition was not restarted
+and must not be presented as containing this correction. No remote, push, merge,
+deployment, protected checkout, active pointer, source release, or production state
+changed. `AGENTS.md` and this accumulated handoff remain preserved user/session changes.
+
+Next: obtain explicit authorization either to remove only verified redundant candidate
+copies or provide at least 30 GB additional temporary disk space; then rebuild the exact
+21-release snapshot, require zero new blocking findings, independently verify and
+promote it atomically, re-audit high-volume discontinued generations, rerun application
+gates, and restart the local client composition. Do not push or deploy the old active
+snapshot as corrected.
+
+## 2026-09-10 corrected engine rebuilt, promoted, and cleaned
+
+Lucas requested no installation, maximum safe ICOR cleanup, and a rebuild with the
+evidence-backed windshield numbers. No software, package, dependency, or runtime was
+installed; all work used the existing `.venv`, `node_modules`, and retained local
+releases. Cleanup stayed inside this development worktree and did not touch personal
+files or unrelated processes.
+
+Verified old candidates, inactive snapshots, caches, a paused release-store duplicate,
+old client bundles, the superseded active snapshot, the promoted candidate duplicate,
+and four unreferenced diagnostic databases were permanently removed. Total reclaimed
+space was 65,828,749,237 bytes (about 61.31 GiB). The deleted generated artifacts are
+not directly recoverable but are reproducible from the preserved code and complete
+21-release store. The last material-cleanup check showed 97,460,903,936 bytes free.
+
+The exact prior 21 releases, UTC timestamp `2026-08-27T12:00:00+00:00`, and seed
+`20260827` rebuilt `snapshot-7e0eb1d25f73ee96c0f9`, database SHA-256
+`033633ecf9378a646c47214a64c3ead8965706e7362bf9914062c8432ba8b5f1`. It has
+1,555,677 observations, zero proprietary published values, all expected releases, and
+only the same 100 generic-label warnings. Atomic promotion, independent status, and
+the full repository recount all returned that exact ID, hash, and observation count.
+
+Completeness passed with 85,358 generations, 883,240 cohorts, and 111,694 opportunities.
+SQL audits found zero cohorts after generation end, zero opportunities missing the
+`0.043026` base-rate or plus/minus-20-percent assumptions, and zero negative or
+unordered intervals. All opportunity rows use `france-insurance-windshield-hazard-v2`.
+Golf Mk7 ends in 2019 and has no later cohort. Nevertheless, 111,558 positive rows and
+11,559,428.3839 P50 events remain in post-discontinuation horizons, confirming that
+surviving historical cars keep generating replacement demand. Stored opportunity P50
+is a seeded propagated median, so its ratio to fleet P50 need not equal the exact
+4.3026% underlying hazard.
+
+Fresh no-install gates passed: 15 focused backend tests, Ruff, all 74 frontend tests,
+TypeScript, and the 1,956-module Vite production build. The verified client bundle was
+rebuilt in `.local/client-release`. The loopback-only composition is running at
+`http://127.0.0.1:5173/` (launcher 26428, child 18324) and
+`http://127.0.0.1:8000/` (launcher 5168, child 18152), with logs under
+`.local/client-{web,api}-20260910.*.log`. Live HTTP checks passed, returned 28,512
+opportunity rows, and both Golf 2018 and Ford Focus 2025 reported
+`official_source_registration_cohort`, the new hazard method, and active data version
+`snapshot-7e0eb1d25f73ee96c0f9`. Golf retained positive 2028 demand while forecast sales
+cohorts were excluded.
+
+The localhost composition is unauthenticated and must not be exposed publicly. Nothing
+was pushed, merged, deployed, or changed in the protected checkout. Product code
+remains local at `b3cd2ff`; the branch remains 15 commits ahead. Preserve the existing
+`AGENTS.md` and accumulated handoff changes outside product commits.
+
+A final ignored-cache pass removed another 479,893 bytes (`.pytest_cache`,
+`.ruff_cache`, `web/.eslintcache`, and redundant internal `web/dist`) while retaining
+the verified client bundle. Total reclaimed space is 65,829,229,130 bytes (about
+61.31 GiB). The immediate cleanup reading was 115,831,685,120 bytes free; the final
+post-service/log verification settled at 114,881,503,232 bytes free.
+
+## 2026-09-11 cohort attribution production-hardening checkpoint
+
+Lucas authorized the next production-readiness steps. The opportunity engine now
+materializes and validates exact per-registration-cohort downside/base/upside units in
+schema v6 instead of assigning each generation/horizon total to input position zero.
+Planner model-year demand and opportunity model-year drill-down use those bounded
+attributions and reconcile exactly to every rounded opportunity interval. The public
+generation registry is v2 and accepts the historical `Volkswagen, VW` spelling. The
+snapshot validator fails closed on missing attribution, lineage mismatches, interval
+ordering, or total reconciliation failures. v5 remains readable; writable v5 databases
+migrate atomically to v6 with a tested deterministic constrained allocation.
+
+The exact active v5 snapshot was copied into an immutable v6 candidate because the new
+alias occurs in zero observations in this dataset; 1,377,325 assignment markers and
+85,358 generation-entry markers were safely advanced to registry v2 without changing
+assignment identities. The first full 21-release rebuild ended before canonical replay;
+its never-published scratch data was removed. A WAL packaging-order defect in the
+one-off migration path was caught by strict promotion, corrected to
+projection-then-checkpoint/DELETE/VACUUM, and a stale never-active target was removed
+only after confirming the active pointer still named the prior snapshot. No failed
+candidate was activated.
+
+`snapshot-a20e1c00232b3603c1a1` is now active. Its database SHA-256 is
+`dd6ea0338085d9d23ac55930e61419c101ac4b00c6da5a286112e48752c85f9d`, with
+1,555,677 observations and the same 100 generic-label warnings. Independent checks
+found schema 6, 111,694 opportunities, 883,240 attribution rows, zero unordered
+intervals, zero reconciliation failures, zero missing inputs, zero lineage failures,
+matching manifest identity/checksum, and a 50-row model-year query in 265.27 ms. The
+active immutable directory contains exactly the database, manifest, and validation
+report.
+
+Fresh gates passed: backend 609 passed / 14 documented environment skips / four tracked
+XFAILs; Ruff; `uv lock --check`; frontend 74/74; TypeScript plus the 1,956-module Vite
+build; ESLint; OpenAPI generation/diff; Python dependency audit; production npm audit
+with zero vulnerabilities; current tracked OpenAI-key-shape scan with zero files; HTTP
+web/API 200 with registry v2; and Chromium 21/21. The complete npm developer tree still
+fails its strict high-severity audit on the dev-only Redocly -> `js-yaml` advisory;
+`npm audit fix --dry-run` identifies patch releases, but no install/update was performed.
+The historical OpenAI key still requires owner-confirmed revocation/rotation.
+
+The refreshed client-release composition is running loopback-only at
+`http://127.0.0.1:5173/` (child PID 3296) and `http://127.0.0.1:8000/` (child PID 1416)
+with a newly generated ephemeral export token that was neither printed nor persisted.
+It must not be exposed publicly. Nothing was pushed, merged, deployed, or changed in
+the protected checkout. Product code and tests are committed locally as `089e97b`
+(`fix: attribute opportunity demand by cohort`); the branch is 16 commits ahead of its
+last-known remote state. Preserve the unrelated/pre-existing `AGENTS.md` and accumulated
+handoff modifications.
+
+## 2026-09-11 ranked generation labels and ranking-detail route
+
+Lucas requested generation names for the cars visible in the opportunity ranking and
+a dedicated explanation page for each rank. A display-only reviewed generation catalog
+now augments, but does not alter, the persisted public generation registry. Nineteen
+manufacturer/model profiles and twenty generation windows cover all 25 rows in the
+default live ranking, including both 2012 and 2020 Ford Kuga cohorts. Names, platform
+codes, year windows, source URLs, and confidence reasons were checked against official
+manufacturer history or launch material from Volkswagen, Skoda, Ford, Hyundai,
+Citroen/Stellantis, Volvo, Audi, BMW, Opel/Stellantis, Mazda, and Honda. The UI exposes
+the supporting manufacturer URL and explicitly warns that a registration-year cohort
+can include transition-year stock. The old client-side masking that hid reviewed
+non-Golf names was removed.
+
+A read-only `GET /api/v1/opportunities/{group_id}` endpoint returns the exact ranked
+row under the same grouping and filters as the list. The new reloadable
+`/opportunities/$groupId` page preserves ranking filters in its back link and explains
+the 80-point demand component, 20-point readiness component, percentile, downside/base/
+upside forecast, exact/fallback/uncovered demand, and each contributing market/horizon
+row. Typed API/schema/OpenAPI clients, error/retry states, responsive styling, unit
+tests, and Chromium coverage were added.
+
+Verification: after the final Kuga window addition the full backend suite passed 629
+tests with 14 documented environment skips and four tracked XFAILs; the isolated
+catalog and generation-mapping suite also passed 24 tests. Ruff passed.
+All 75 frontend tests passed; after the final explanatory copy change the focused
+opportunities suite passed 7/7, TypeScript and ESLint passed, and the 1,956-module Vite
+production build succeeded. The complete opportunities Chromium spec passed 7/7,
+including reload, responsive overflow, keyboard, and serious accessibility checks.
+A final live check against active `snapshot-a20e1c00232b3603c1a1` returned health
+`ok`, all 25 default ranked rows with non-null generation names and manufacturer
+source URLs, correct Kuga Mk2/Mk3 labels, and an exact list/detail identity match. The
+refreshed loopback-only app is running at `http://127.0.0.1:5173/` (PID 38396) and
+`http://127.0.0.1:8000/` (launcher 31888, worker 36424); logs are
+`.local/client-{web,api}-20260911.*.log`. Do not expose either listener publicly.
+
+No snapshot, active pointer, remote, push, merge, deployment, protected checkout, or
+production state changed. Preserve the unrelated/pre-existing `AGENTS.md` changes.
+
+## 2026-09-11 opportunity detail context and estimated fleet
+
+Lucas requested that opening a ranked Opportunity preserve the original Opportunities
+panel and show the total estimated fleet, including totals per world region. On wide
+screens the reloadable detail route now uses the established split-detail pattern: the
+ranked Opportunities workbench remains visible on the left with the selected card
+highlighted, while the selected explanation is a sticky panel on the right. Narrower
+screens retain the focused single-column detail page and back link.
+
+A new read-only `GET /api/v1/opportunities/{group_id}/fleet` contract returns estimated
+active-fleet P50 units by world region and forecast horizon under the exact same group,
+market, and horizon filters as the selected rank. Snapshot calculation uses the actual
+selected cohort inputs and sums their unrounded `active_fleet_p50` values before one
+final half-up rounding, so a model-year does not accidentally inherit the whole
+generation fleet and country-level rounding cannot drift from the region total. The UI
+shows a total and region breakdown separately for every horizon; it deliberately never
+adds 2028 and 2031 because that would double-count vehicles across time.
+
+The current governed source scope maps EU27/EEA/UK country markets to Europe. Explicit
+canonical future region labels pass through, while any not-yet-governed geography is
+shown as `Other / unclassified` instead of being guessed. The active snapshot currently
+contains Europe only, so the live breakdown has one region row per horizon. For the
+top live Skoda Octavia 2017 rank, the final endpoint returned Europe 102,209 vehicles
+for 2028 and 86,091 for 2031 from active snapshot
+`snapshot-a20e1c00232b3603c1a1`.
+
+Backend/domain/API/snapshot tests cover exact demo totals, typed 404 behavior,
+repository delegation, and cohort-specific snapshot fleet selection. Frontend tests
+cover typed URL serialization, horizon totals, region rows, and detail rendering.
+Chromium verifies that the wide left ranking remains visible, the selected card is
+highlighted, fleet totals render, reload works, mobile/desktop overflow is absent,
+keyboard access works, and no serious accessibility violations are present.
+
+Fresh verification: focused backend opportunity/snapshot suite 32/32; full backend
+631 passed, 14 documented Windows/real-snapshot skips, and four tracked XFAILs;
+maintained Ruff scope (`src tests`) passed; all 76 frontend Vitest tests passed;
+TypeScript/Vite production build passed with 1,956 modules; ESLint passed; OpenAPI was
+regenerated; full Opportunities Chromium spec passed 7/7 and the final focused detail
+scenario passed 1/1; `git diff --check` passed with informational CRLF warnings only.
+A broader `ruff check .` was also attempted and reports 507 pre-existing legacy
+Streamlit/script findings outside the maintained lint scope; none is in the modified
+`src` or `tests` files. CUA/image viewing remained unavailable because the Windows
+sandbox still fails with error 1344, but headless Chromium exercised the rendered UI
+and produced `.local/opportunity-fleet-detail.png`.
+
+The verified client bundle was rebuilt in ignored `.local/client-release`. The final
+loopback-only composition is reachable at `http://127.0.0.1:5173/` (Vite PID 38396)
+and `http://127.0.0.1:8000/` (API launcher PID 3516, worker PID 33200). The API is
+run through ignored `.local/run_client_api.py`; re-resolve process IDs in a later
+session rather than assuming they remain stable, and do not expose either listener
+publicly. No snapshot,
+active pointer, production deployment, protected checkout, remote, push, or merge was
+changed. The work remains uncommitted alongside the preceding generation-detail work;
+preserve all pre-existing modifications.
+
+## 2026-09-11 product visual-system refinement
+
+Lucas approved the opportunity-detail functionality and requested a design pass that
+no longer looked vibe-coded. The frontend now uses a restrained analyst-product system:
+a deeper neutral navigation rail with consistent Lucide icons and a clear active state;
+warm neutral page surfaces; a single teal decision accent; stronger type hierarchy;
+tabular numerals; compact rectangular evidence/status treatments; subtle borders and
+shadows; and a consistent reduced-radius component language. The browser theme color
+was aligned with the new navigation rail.
+
+The Opportunities experience received the most focused refinement. The hero and
+methodology areas now have deliberate information hierarchy, summary metrics read as
+a compact KPI strip, and the former stack of generic rounded cards is presented as a
+dense ranked decision table. Selected rows use an inset state instead of a glow. Row
+actions use consistent iconography, and repeated paragraph-length scoring copy was
+reduced to a concise demand/readiness split plus percentile; the complete transparent
+method remains in the methodology section and dedicated detail page. The detail panel
+uses the same restrained surface, metric, score, progress, fleet, and contribution
+patterns. Mobile retains the single-column flow and desktop retains the established
+wide split-detail behavior.
+
+Changed for this pass: `web/src/app/AppShell.tsx`, `web/src/app/styles.css`,
+`web/src/features/opportunities/OpportunityRanking.tsx`, `web/index.html`, and the
+corresponding concise-score expectations in `web/tests/opportunities-page.test.tsx`.
+No API, forecast, snapshot, data, routing, or production behavior changed.
+
+Fresh verification: all 76 frontend Vitest tests passed; focused app-shell and
+opportunity tests passed 13/13; TypeScript plus both normal and ignored client-release
+Vite builds passed with 1,956 modules; ESLint passed; the three-test cross-page
+responsive Chromium suite passed at 390px and 1440px; the opportunity Chromium suite
+initially passed six functional/responsive cases and found one 4.34:1 freshness-note
+contrast issue, which was corrected by darkening the muted text token; the focused
+keyboard/WCAG rerun then passed with zero serious or critical violations. Playwright
+captured `.local/review/opportunities-mobile.png` and
+`.local/review/opportunities-desktop.png`; both were reviewed for hierarchy and
+overflow. Native CUA remained unavailable because of the known Windows sandbox error
+1344, so browser automation and captured renders were used instead. `git diff --check`
+passed with informational CRLF warnings only. After the final score-copy tightening,
+the focused 13 tests and the refreshed 1,956-module client-release build passed again.
+
+The ignored `.local/client-release` bundle was refreshed. The loopback-only development
+frontend remains reachable at `http://127.0.0.1:5173/` and hot-reloads these source
+changes; the API remains healthy at `http://127.0.0.1:8000/`. Re-resolve process IDs in
+a later session and do not expose either listener publicly. Nothing was pushed, merged,
+deployed, committed, or changed in the protected checkout, active snapshot, or remote.
+
+## 2026-09-11 TailAdmin human-template redesign
+
+Lucas found the custom refinement still visibly AI-designed and explicitly asked to use
+a suitable human template from the internet. The prior custom visual direction is now
+superseded by a selective adaptation of TailAdmin's free React dashboard template,
+referenced at upstream commit `21dc917cb6cb22b5f1d12e5af57359a849d19aa8`.
+TailAdmin was selected because its published free template is made for React 19,
+TypeScript, and Tailwind CSS 4 (matching ICOR's frontend stack), has a public Figma
+community design, and is MIT-licensed. The source reference remains ignored under
+`.local/template-reference/tailadmin`; no dependency or demo application was imported.
+
+`web/src/app/tailadmin-adaptation.css` maps the template's actual gray and brand scales,
+shadows, radii, white sidebar/sticky-header shell, navigation states, panel anatomy,
+KPI-card proportions, badge/button treatments, table-like ranking rows, and responsive
+spacing onto ICOR's existing semantic components. `OpportunitiesPage.tsx` now uses
+meaningful Lucide icons in the three KPI cards, following the template's metric-card
+pattern. `web/src/main.tsx` loads the adaptation after the legacy stylesheet so the
+licensed template layer is isolated and reviewable. `web/THIRD_PARTY_NOTICES.md`
+records the upstream source, exact revision, copyright, and full MIT license. Existing
+ICOR content, forecast logic, API contracts, routing, and interactions remain intact.
+
+Fresh verification: all 76 frontend Vitest tests passed and the final focused shell/
+opportunity rerun passed 13/13; TypeScript and the 1,957-module Vite production build
+passed; ESLint passed. The combined opportunity and cross-page responsive Chromium run
+passed nine functional/responsive cases at 390px, 1440px, and the wide split-detail
+layout, then reported only two template-palette contrast classes (small sidebar section
+labels and the active navigation blue). Both were darkened; the focused keyboard/WCAG
+rerun passed with zero serious or critical violations. Desktop and mobile template
+renders were captured and the desktop render was visually inspected. The final ignored
+`.local/client-release` bundle was refreshed successfully.
+
+The loopback-only frontend remains at `http://127.0.0.1:5173/` and the API remains at
+`http://127.0.0.1:8000/`; do not expose them publicly. Nothing was committed, pushed,
+merged, deployed, or changed in the protected checkout, active snapshot, or remote.
+
+## 2026-09-11 sharp corners and complete governed opportunity access
+
+Lucas requested sharp rather than rounded corners and asked to add all data to the web
+app. The TailAdmin adaptation now applies a zero-radius visual contract across the app
+shell, panels, metric cards, tables, navigation, buttons, inputs, badges, disclosures,
+ranking/detail surfaces, and mobile equivalents. A Chromium regression explicitly
+checks representative opportunity surfaces and controls resolve to `0px` radius.
+
+For "all data," implementation follows the safe product meaning: expose the complete
+client-safe governed opportunity dataset, while retaining the existing release boundary
+around internal audit/admin diagnostics and not implying that unavailable proprietary
+fitment data exists. The Opportunities request now uses the API's supported maximum of
+100 records per page instead of 25. The page shows an explicit dataset-coverage strip
+for ranked records, official model labels, and represented registrations; pagination
+shows the exact current record range and total, and adds First/Previous/Next/Last
+navigation so every record is reachable. Targeted model lookup remains available on
+the existing Model search page rather than attempting to render the entire dataset into
+one browser DOM.
+
+Live verification against active snapshot `snapshot-a20e1c00232b3603c1a1` returned
+143,894 model-year opportunity rows across 1,439 pages at 100 rows per page, 8,007
+official model labels, 10,496,547 represented registrations, and EU27 plus 30 named
+country markets. The request returned exactly 100 real rows. These counts supersede the
+older 25-row/default-filter figures when no market or horizon filter is applied.
+
+Changed in this pass: `web/src/features/opportunities/OpportunitiesPage.tsx`,
+`web/src/app/tailadmin-adaptation.css`, `web/tests/opportunities-page.test.tsx`, and
+`web/e2e/opportunities.spec.ts`. Fresh verification: all 76 frontend Vitest tests;
+TypeScript/Vite production build; ESLint; the combined ten-test opportunity/responsive
+Chromium run at 390px, 1440px, and wide split detail; keyboard/WCAG checks; and the
+new focused sharp-corner browser regression all passed. The final ignored
+`.local/client-release` bundle was rebuilt with 1,957 modules. Desktop sharp-corner
+render was captured and visually inspected.
+
+The local development frontend is listening only on `127.0.0.1:5173` (PID 38396), and
+the restarted active-snapshot API is listening only on `127.0.0.1:8000` (worker PID
+32068). Logs are `.local/api-sharp-data.{stdout,stderr}.log`. Do not expose either
+listener publicly. Nothing was committed, pushed, merged, deployed, or changed in the
+protected checkout, active pointer, snapshot contents, or remote.
+## 2026-09-12 pagination, detail latency, vehicle dropdown, and launch audit
+
+Lucas requested repairs for non-working First/Previous/Next/Last opportunity
+pagination, slow opportunity detail loading, and a Model Research Brand control whose
+native datalist arrow did not produce a reliable dropdown. He also requested a full
+web-app review and launch preparation, while explicitly deferring deployment-method
+instructions until later.
+
+The pagination defect was a route/data race: React Query deliberately retained the
+previous page as placeholder data, but button targets and disabled states were derived
+from that stale response. Navigation now derives exclusively from requested route
+state, prevents concurrent page changes while fetching, and announces the requested
+loading page. A Chromium regression exercises Next -> Last -> Previous with delayed
+responses and verifies pages 2, 1,439, and 1,438 rather than only testing a single
+button.
+
+Opportunity details now seed the selected ranking row into the exact detail query cache
+before navigation, so the detail shell and explanation render immediately. The former
+configuration endpoint reconstructed and serialized full planning records (about 584
+KB and 11.5 seconds for a representative 54-row result) although the page needed only
+six fields. A typed read-only `/api/v1/opportunities/{group_id}/contributions` endpoint
+now performs a bounded aggregate and returns compact contribution rows. Against active
+`snapshot-a20e1c00232b3603c1a1`, the isolated production-sized query returned 54 rows
+in about 0.72 seconds. Detail, contribution, and fleet requests use AbortSignals so
+navigation cancels stale work. Snapshot repository detail lookup also reuses a cached
+ranking page when safe (no manual coverage) instead of recalculating the full score CTE.
+
+Model Research Brand and Model controls are now real dependent HTML selects rather
+than browser-dependent datalists. The API supplies all 464 governed forecastable
+brands; selecting a brand requests its model options. Because the snapshot is
+immutable for the process lifetime, the complete canonical option set is cached after
+its initial load. The active-snapshot Volkswagen dependent lookup fell from roughly
+1.2 seconds to 0.11 seconds. The UI retains a fallback for an empty/older brand catalog,
+and the deterministic browser fixture plus every prior text-input journey was updated
+to the typed select contract.
+
+The broader review found and fixed stale cross-page browser journeys, the missing E2E
+brand fixture, request cancellation, empty-catalog compatibility, and actual mojibake
+in opportunity pagination/test copy. No additional serious/critical accessibility,
+responsive overflow, dependency vulnerability, contract drift, maintained-code lint,
+or secret-in-current-tree finding remains. The release checklist now correctly treats
+the historically exposed OpenAI key as a mandatory pre-internet-launch revocation and
+rotation action; deleting it from the current tree is insufficient because it remains
+in Git history.
+
+Fresh final gates on the finished code: backend 633 passed, 14 documented Windows or
+real-snapshot skips, and four tracked characterization XFAILs; frontend 76/76 passed;
+full Chromium 25/25 passed, including pagination, detail reload, both dropdown paths,
+keyboard access, WCAG serious/critical checks, and 390/1100/1440 responsive coverage.
+Ruff, ESLint, TypeScript, Vite production build (1,957 modules), OpenAPI regeneration,
+`uv lock --check`, `git diff --check`, and the broken-text scan passed. `pip-audit`
+reported no known third-party Python vulnerabilities (the local ICOR package is not on
+PyPI); production `npm audit` reported zero vulnerabilities. The required active-
+snapshot forecast benchmark passed for 16,239 series using
+`validated-recency-damped-ensemble-v2`: WAPE 0.503518 versus 0.628230, a 19.85% relative
+error reduction.
+
+A fresh verified client bundle was built with
+`VITE_ICOR_CLIENT_RELEASE=verified` at ignored `.local/client-release`. Fresh-process
+snapshot integrity verification of the 9.2 GB ledger takes roughly two minutes before
+the server binds; a future hosting plan must allow an adequate startup window and use
+persistent evidence storage. This is cold-start behavior, not per-detail latency.
+
+The stale loopback API was stopped and a current-code replacement is running under uv
+launcher PID 25792 and worker PID 10948 with logs
+`.local/api-final.{stdout,stderr}.log`. It binds only to `127.0.0.1:8000`;
+`/api/health` returned `ok`, and the new contribution endpoint returned 54 rows for the
+top Skoda Octavia 2017 opportunity. Re-resolve PIDs in a later session rather than
+assuming they persist. The frontend development listener remains loopback-only. No
+internet deployment, public port, active snapshot mutation, protected checkout change,
+commit, push, merge, or remote action was performed. The application is technically
+packaged for review, but public launch remains blocked until Lucas revokes/rotates the
+historically exposed key and explicitly authorizes a deployment approach.
+
+## 2026-09-12 final client-release blocker repair and quarterly search assessment
+
+Lucas asked whether an OpenAI API key could support a quarterly model/model-year sales
+refresh capped at 20 USD per run, requested that no refresh be run or built yet, and
+asked for the rest of the client app to be made launch-ready. Official OpenAI
+documentation checked on 2026-09-12 confirms that Responses API web search is currently
+priced at 10 USD per 1,000 calls plus search-content/model tokens, and that projects can
+have custom rate and spend limits. A quarterly run below 20 USD is technically
+practical, but a platform project monthly hard limit is not by itself a per-run cap.
+Any future implementation must therefore use a dedicated project/key plus an
+application-side preflight estimate, metered counters, a conservative stop threshold
+below 20 USD, and post-run usage reconciliation. No API request or sales search was
+performed and no quarterly workflow was implemented.
+
+The model must not be treated as the source of sales truth. A trustworthy future
+workflow should use web search only for discovery, restrict retrieval to official
+registration authorities and manufacturer or other governed primary publications,
+retain every source URL/release/checksum and measure definition, reject ambiguous
+model/model-year matches, reconcile overlaps without averaging conflicts, and promote
+an immutable candidate snapshot only after automated validation and human review.
+Results can be decision-grade where official model-year evidence exists; unavailable,
+conflicting, estimated, registration-year, sales-year, and model-year values must stay
+distinct. Broad web-derived numbers without that evidence chain would not be
+trustworthy.
+
+The verified client-release deep-link blocker found in the preceding audit is repaired.
+ClientReleaseMiddleware now allows the client-facing /opportunities/{group_id} SPA
+route while continuing to deny registrations, evidence, unknown/internal routes, and
+non-read-only surfaces. The authenticated preview regression now covers a percent-
+encoded opportunity detail URL plus continued denial of /registrations,
+/opportunities-internal, and an unknown API. The active snapshot validation document
+was synchronized to snapshot-a20e1c00232b3603c1a1 and the freshly rerun benchmark:
+16,239 series, production WAPE 0.503518 versus 0.628230, a 19.85 percent relative
+improvement.
+
+Fresh post-fix verification: focused authenticated preview suite 48 passed with one
+Windows symlink skip; preview Ruff scope passed; full backend 633 passed, 14 documented
+Windows/real-snapshot skips, and four legacy characterization XFAILs; frontend 76/76
+passed; and the verified VITE_ICOR_CLIENT_RELEASE=verified bundle rebuilt successfully
+with 1,957 modules into ignored .local/client-release. The same-session pre-fix full
+Chromium suite had passed 25/25; no frontend code changed in this repair. git diff
+--check passed with informational CRLF warnings only. The loopback API and frontend
+remain on ports 8000 and 5173; the running API process predates the middleware edit, so
+restart it before any new local authenticated release smoke test. Nothing was committed,
+pushed, merged, deployed, exposed publicly, or changed in the active snapshot.
+
+The code and release bundle are now prepared for the next launch stage except for the
+owner actions already documented: revoke/rotate the historically exposed key before
+internet exposure, commit and push the reviewed development work, select and authorize
+hosting, configure named reviewer/session/export secrets, provide persistent storage
+for the 9.2 GB evidence ledger and its cold-start verification window, then perform the
+authenticated owner and public HTTPS smoke tests. Do not promise a live URL until those
+operational steps pass.
+
+## 2026-09-12 bounded quarterly official-source research implementation
+
+Lucas superseded the earlier request not to build the quarterly refresh and authorized
+implementation, with the intent that the client API key be the remaining credential. A
+new isolated discovery workflow now searches quarterly for newer EEA, UK DfT/DVLA, KBA
+FZ10, and French SDES official vehicle-registration/fleet releases. It uses one OpenAI
+Responses API request, defaults to the explicitly requested `o4-mini`, enables web search
+for discovery, requests strict structured output, and validates every returned HTTPS URL
+against the target publisher domain. It never downloads, ingests, promotes, or modifies an
+active evidence snapshot; every immutable JSON result is marked pending human review.
+
+The workflow is implemented in `src/icor/research/quarterly.py` with the CLI
+`scripts/run_quarterly_source_research.py`, focused tests in
+`tests/research/test_quarterly.py`, operating guidance in
+`docs/QUARTERLY_SOURCE_RESEARCH.md`, and the scheduled GitHub Actions workflow
+`.github/workflows/quarterly-source-research.yml`. The schedule is 06:17 UTC on January,
+April, July, and October 1 and retains each report artifact for 120 days. CI lint scope now
+includes the CLI. Actual scheduling becomes active only after this work is reviewed,
+committed, pushed/merged into the repository default branch, and the dedicated project key
+is added as the `OPENAI_API_KEY` Actions secret. No secret was created or stored.
+
+The request is bounded to one response, 40 web-search tool calls, and 16,000 output tokens;
+response storage is disabled. At official prices checked on 2026-09-12, the conservative
+single-request ceiling is USD 0.6904 against the requested USD 20 run budget. This is not
+an upstream billing guarantee: the client should use a dedicated OpenAI project with its
+own monthly budget/alerts and reconcile the report estimate with platform usage. Official
+OpenAI documentation now labels `o4-mini` deprecated and succeeded by GPT-5 mini. The
+requested model remains the default; `OPENAI_RESEARCH_MODEL` is an explicit escape hatch
+if the client project lacks access.
+
+Fresh verification: focused research tests passed 8/8; new-code Ruff passed; the no-key
+dry run reported `api_called: false` with the USD 0.6904 ceiling; an offline closed-loopback
+SDK probe reached transport timeout, proving OpenAI Python 1.109.1 accepted the full request
+shape without making an external request; full backend verification passed 641 tests with
+14 documented Windows/real-snapshot skips and the four tracked characterization XFAILs;
+and `git diff --check` passed with informational CRLF warnings only. No paid API request,
+source search, snapshot mutation, server restart, deployment, commit, push, merge, or
+protected-checkout change occurred.
+
+Forecast-quality interpretation remains unchanged: the production registration forecaster
+has newest-two-year WAPE 0.503518 versus 0.628230 for the replaced selector, a 19.85 percent
+relative improvement across 16,239 eligible series. A 50.35 percent WAPE is still not high
+accuracy, and the final windshield-demand layer remains assumption-led. A more complex ML
+challenger must not be promoted without multi-year replacement outcomes/fitment truth and a
+strict rolling-origin plus locked-holdout win over the current baseline.
+
+## 2026-09-12 exploratory country-aware ML registration benchmark
+
+Lucas asked to test an ML model that includes region. The governed snapshot contains
+country/model registration outcomes but no country-level windshield replacement
+outcomes, weather/road exposure, mileage, or fitment outcomes. The experiment therefore
+tested geographic signal for registration forecasting only; it did not claim to train
+or validate a north/south windshield-breakage effect.
+
+An ignored local experiment at `.local/benchmark_regional_ml.py` used scikit-learn
+1.7.2 `HistGradientBoostingRegressor` with absolute-error loss and a fixed seed.
+Scikit-learn was installed only into the local development virtual environment and was
+not added to production dependencies. Features were country (categorical), forecast
+step, target year, history length, latest registrations, recent three- and five-year
+means, recent five-year slope, recent three-year standard deviation, log versions of
+latest/three-year mean, and the production recency/damped prediction. An ablation used
+the same features and hyperparameters without country. Training used 127,865 earlier
+rolling-origin examples. The outer test held out the newest two years, giving 32,478
+points across 16,239 series and 29 countries in active snapshot
+`snapshot-a20e1c00232b3603c1a1`.
+
+Two identical fixed-seed runs produced: production WAPE 0.503518; ML without country
+0.498622; ML with country 0.495473; and the regional model with test-country labels
+shuffled 0.498232. The regional challenger reduced WAPE by 0.008045 absolute / 1.60%
+relative versus production and by 0.003149 absolute / 0.63% relative versus ML without
+geography. It beat production in 24 of 29 country slices but worsened Germany, France,
+Cyprus, Italy, and Lithuania. The ignored result artifact is
+`.local/regional-ml-benchmark.json`, SHA-256
+`1423B2CD5434367E3E35C41106B72AE49B20F46E158301E9971F2F5603F2A570`.
+
+Do not promote this challenger: the gain is small, it is not a windshield-outcome
+validation, and it lacks a preregistered locked holdout, interval calibration, and
+production dependency/test review. Keep `validated-recency-damped-ensemble-v2` in
+production. A windshield-hazard ML test needs governed exposure and replacement events
+by geography/time plus vehicle age/model/fitment, mileage, weather/freeze-thaw/hail, and
+road/grit variables with consistent measure definitions.
+
+## 2026-09-12 complete European authority scope and residual challenger
+
+Lucas requested as many European official authorities as possible within the existing
+USD 20 quarterly run budget and asked for the best practical forecast improvement.
+The quarterly discovery registry now covers 33 governed targets: the EEA EU-level
+release, all 27 EU member states, the UK, and all four EFTA states. The former single
+broad response is replaced by four regional batches so every authority receives
+explicit search attention. Each batch permits 24 web-search calls and 12,000 output
+tokens, validates candidates only against that batch's exact publisher/domain
+allowlist, disables response storage, and is capped at 24 candidates. Reports retain
+all response IDs and batch metadata. A cumulative metered check runs after every batch.
+
+Official OpenAI documentation was rechecked on 2026-09-12: o4-mini remains USD 1.10
+per million input tokens and USD 4.40 per million output tokens, web search remains
+USD 10 per 1,000 calls plus search-content tokens, the model supports a 200,000-token
+context and 100,000 maximum output tokens, and it is deprecated/succeeded by GPT-5
+mini. The explicitly requested o4-mini default remains unchanged. The new complete-run
+conservative ceiling is USD 2.0512, leaving substantial headroom under USD 20. No paid
+API call or real quarterly search was run.
+
+The ignored regional benchmark was extended with two challengers. A dependency-free
+per-series median residual correction worsened WAPE from 0.503518 to 0.559946 and was
+rejected. A country-aware histogram-gradient-boosting residual model retained the
+production forecast as its anchor and learned only corrections from 127,865 earlier
+rolling-origin examples. On the same 32,478 newest-two-year test points it reached
+WAPE 0.468392, a 6.98 percent relative reduction versus production and materially
+better than the raw regional model's 0.495473. The result artifact is
+`.local/regional-ml-benchmark.json`, SHA-256
+`D831F1AA002B8BE762FB2225FA826D56E700FC552D90B8E4A0E48FDC3224404B`.
+
+Do not promote the residual challenger yet. The newest-two-year test has now informed
+model development, so it is no longer a pristine holdout. The required path is:
+formalize deterministic snapshot-build training/artifact handling; test multiple
+earlier temporal cutoffs; enforce country-level regression and interval-calibration
+gates; then evaluate exactly once on a newly frozen unseen source release. Registration
+accuracy is also distinct from windshield-demand accuracy. Final hazard forecasts need
+ICOR's governed replacement outcomes and fitment truth plus vehicle age, mileage,
+weather/freeze-thaw/hail, and road/grit exposures.
+
+Fresh verification: focused research tests passed 8/8; focused new-code Ruff passed;
+the no-key dry run reported 33 targets, four batches, `api_called: false`, and the USD
+2.0512 ceiling; full backend verification passed 641 tests with 14 documented
+Windows/real-snapshot skips and four tracked characterization XFAILs; and `git diff
+--check` passed with informational CRLF warnings only. A broad `ruff check src scripts
+tests` additionally exposed 486 pre-existing legacy-script lint findings outside the
+maintained CI scope; none were introduced or modified in this work. No snapshot,
+production forecaster, server, deployment, commit, push, merge, protected checkout, or
+remote state was changed. Existing loopback server state was not revalidated.
+
+## 2026-09-12 strict market-context ML validation, compact free data, and cleanup
+
+Lucas asked to improve the machine-learning model, identify needed data and acquire
+free compact inputs, and reclaim app-related disk space. Production remains on
+`validated-recency-damped-ensemble-v2`: changing it would have been scientifically
+unsafe because the newest holdout had already influenced earlier challenger
+development and the active snapshot is precomputed. A new ignored local experiment,
+`.local/benchmark_market_context_ml.py`, instead tested a country-aware histogram
+gradient-boosting residual correction with a conservative 50 percent blend. Its
+features use only forecast-origin information: each series' history, country-market
+history, cross-country vehicle history, and country/vehicle market shares.
+
+The benchmark initially used relative series endpoints; review caught that this mixed
+calendar periods, and that result was discarded. The corrected evaluation uses strict
+global folds in which all training targets precede the test period. Across 16,239
+eligible series, the 50 percent market-context blend improved WAPE versus production
+in every fold: 0.611754 versus 0.654037 (6.46 percent) for 2020-2021; 0.356360 versus
+0.375763 (5.16 percent) for 2022-2023; and 0.351307 versus 0.360313 (2.50 percent) for
+2024-2025. The immutable result is
+`.local/market-context-ml-benchmark.json`, SHA-256
+`E9D5326095337AA5B1AE295601015D8679312CC5114AE4D58710E952BBCF8BBC`.
+This is a materially better registration challenger, not proof of better windshield
+replacement forecasts. It must remain out of production until it wins once on a
+newly frozen unseen official release and receives deterministic training/artifact,
+interval-calibration, dependency, and snapshot-build integration review.
+
+Four compact World Bank World Development Indicators were downloaded keylessly for
+the 29 forecast countries and 1995-2025 into ignored
+`.local/external-features/world-bank-wdi-20260912`: constant-price GDP per capita,
+population, unemployment, and consumer inflation. The four official JSON responses
+total 804,448 bytes. WDI is public and CC BY 4.0; only lagged/origin-available values
+were tested. The WDI augmentation did not consistently beat the internal
+market-context model (at the chosen 50 percent blend: 5.96, 4.72, and 2.43 percent
+fold improvements versus 6.46, 5.16, and 2.50 percent without WDI), so it was
+correctly rejected from the challenger rather than adding complexity.
+
+The decisive missing data for windshield-demand ML remains multiple years of governed
+replacement events joined to vehicle generation/model year and exact windshield
+configuration/SKU, with exposure denominators. Useful covariates are vehicle age,
+mileage, geography/date, weather/freeze-thaw/hail, and road/grit exposure. Official
+registrations, macro indicators, and climate aggregates are free or low-cost and can
+be compactly aggregated, but no free public dataset located provides the necessary
+vehicle-to-windshield replacement outcome truth. ICOR's one reliable proprietary year
+is suitable for limited calibration and a future temporal holdout, not long-run
+training by itself.
+
+Disk cleanup verified that candidate
+`.local/evidence/candidates/snapshot-a20e1c00232b3603c1a1` had the same snapshot ID
+and database SHA-256 as the active snapshot copy, then removed only that duplicate,
+reclaiming 9,239,546,168 bytes (8.605 GiB). The active 8.6 GiB snapshot and older
+rollback snapshot were preserved. Removing 82 regenerable pytest/E2E/lint/build
+directories reclaimed another 231,645,208 bytes (220.9 MiB). Total `.local` usage
+fell from 26.559 GiB to 17.740 GiB.
+
+Fresh verification: production benchmark still reports 16,239 series, WAPE 0.503518
+versus legacy 0.628230, and 19.85 percent relative reduction on active
+`snapshot-a20e1c00232b3603c1a1`; focused registration forecast tests passed 4/4;
+the corrected challenger script compiled; and both loopback listeners returned HTTP
+200 at `127.0.0.1:8000/api/health` and `127.0.0.1:5173/`. No production source,
+active snapshot, remote, protected checkout, deployment, commit, push, or merge was
+changed.
+
+
+## 2026-09-12 strict ICOR registration model race
+
+Lucas instructed Codex to obtain the best possible ML forecast using free data. A
+repository-selection error initially sent one isolated commit to the unrelated Trading
+repository; it was immediately neutralized there by revert commit `2469069`. No Trading
+application behavior or live state remains changed by that work. All subsequent work
+was anchored exclusively to `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`.
+
+The existing ignored market-context experiment was extended with a preregistered race
+across six scikit-learn residual learners: three absolute-error histogram-gradient
+boosters of different capacity, one squared-error histogram booster, Extra Trees, and
+Random Forest. Candidate parameters and residual blend values (0.25, 0.50, 0.75, 1.00)
+were declared before reading the 2024-2025 confirmation. Selection used pooled
+2020-2023 WAPE and required every eligible candidate to beat production in both
+development folds.
+
+The selected model was the flexible country-aware absolute-error histogram booster
+(`learning_rate=0.035`, `max_iter=400`, `max_leaf_nodes=63`,
+`min_samples_leaf=50`, `l2_regularization=5`) blended at 75 percent with the production
+anchor. It improved WAPE from 0.654037 to 0.587175 in 2020-2021 (10.22 percent), from
+0.375763 to 0.360766 in 2022-2023 (3.99 percent), and, only after selection, from
+0.360313 to 0.350763 on the 14,448-point 2024-2025 confirmation (2.65 percent). It won
+23 of 29 country slices; regressions remained in ES, HR, IE, IT, LT, and SI.
+
+The reproducible ignored script is `.local/benchmark_model_race.py`. Its immutable
+result is `.local/model-race-benchmark.json`, SHA-256
+`27E7F866FDCBC48DB6D8CBC427CBE8D86ABEA1DADD2A4B9980554658D5C6C991`.
+The script compiled successfully. It read the active snapshot in SQLite read-only mode
+and did not mutate source data, the active pointer, production code, forecasts, servers,
+the protected checkout, or any remote.
+
+This is the strongest strictly selected registration challenger measured so far, not a
+validated windshield-replacement model. No free public data found supplies the missing
+vehicle/configuration/SKU-level replacement outcomes and exposure denominators. The
+challenger was not promoted because the confirmation fold is now consumed and six
+country regressions remain. The next safe gate is a newly frozen official snapshot,
+followed by deterministic model-artifact integration, prediction-interval calibration,
+and explicit country-level non-regression policy. Existing loopback server state was
+not changed or revalidated in this pass.
+
+## 2026-09-12 model-trust audit
+
+Lucas asked what remains to make the ICOR model the best possible with available data
+while making it trustworthy. A read-only audit confirmed that the system is a chain,
+not one validated windshield ML model: registration forecasting is backtested, while
+survival is constant-retention, replacement hazard is a French fleet-average proxy,
+and the displayed demand interval propagates assumption bands rather than empirically
+calibrated forecast errors.
+
+The audit found a blocking validation defect in the ignored ML challenger. Its folds
+are created from the current `cohort_estimate` snapshot, which already contains linear
+interpolations made with values on both sides of a gap. The benchmark excludes future
+forecast rows but does not exclude estimated rows or reconstruct data from source
+release vintages. Consequently, an origin-period aggregate feature or held-out target
+can contain an interpolation informed by a later year, and records may include source
+revisions unavailable at the simulated forecast date. Exact fold composition was:
+2020-2021, 4,162 of 19,636 targets estimated; 2022-2023, 3,707 of 19,386 estimated;
+and 2024-2025, 1,008 of 14,448 estimated. The reported challenger WAPE therefore must
+not be treated as promotion-grade evidence until the benchmark is rebuilt as-of each
+release date using reconciled observed targets only.
+
+Coverage and identity checks exposed additional trust limits. The benchmark's 16,239
+eligible contiguous series represent only 29.1% of the 55,847 non-forecast series in
+the snapshot, while production forecasts series with materially shorter histories.
+The snapshot has 1,373,185 low-confidence generation assignments versus 4,140 high-
+confidence assignments; low-confidence weights are mostly 0.35, but the challenger
+loads materialized cohorts without applying assignment training weights. Validation
+must therefore report performance and coverage by identity confidence, history length,
+country, volume decile, horizon, and observed-versus-estimated status, and evaluate at
+the finest identity level genuinely supported by source data.
+
+No code, active snapshot, production model, server, remote, deployment, commit, push,
+or merge was changed. A temporary ignored read-only audit helper was removed after
+use. The next recommended implementation is a promotion-gate benchmark that uses
+publication-date
+vintages, observed-only targets, full-population coverage cohorts, multiple metrics,
+country/segment non-regression checks, and empirically calibrated intervals. Only then
+should the residual challenger be rerun and evaluated once on a newly frozen release.
+
+## 2026-09-12 promotion-grade forecast safeguards and corrected validation
+
+Lucas instructed Codex to follow the ICOR recommendations and maximize application
+quality and forecast accuracy without making unsupported claims. The recommended
+promotion safeguards are now maintained code. `src/icor/forecasting/promotion_gate.py`
+defines a fail-closed contract requiring an observed-only, as-of-origin benchmark on
+a newly frozen unseen snapshot; at least 80% evaluated target volume; at least 2%
+relative overall WAPE improvement and improvement at every horizon; no material
+greater-than-two-point WAPE regressions by country, identity confidence, history
+length, or volume decile; and empirically measured 80% interval coverage within five
+points. Contract validation also requires every segment family to partition the exact
+evaluated volume. A challenger passing these gates is eligible for review, not
+automatically promoted and not proof of windshield-replacement accuracy.
+
+`src/icor/forecasting/snapshot_readiness.py` and
+`scripts/audit_forecast_promotion.py` add a read-only active-snapshot readiness
+audit. Against active `snapshot-a20e1c00232b3603c1a1`, it found 757,883 mapped
+observed registration rows and the same number assigned, but only 4,140 high-confidence
+versus 753,743 low-confidence generation assignments. The materialized snapshot has
+95,176 interpolated and 139,770 forecast cohort rows. Interpolation is now an explicit
+warning rather than a claim that the raw observations are unusable. The blocking fact
+is publication history: only annual release years 2024 and 2025 were published within
+the allowed historical-origin window. EEA 2010-2024 is primarily a 2026 backfill and
+UK history is a cumulative 2026 release, so multiple genuine as-of forecast origins
+cannot be reconstructed. The audit correctly exits nonzero with
+`insufficient_as_of_publication_vintages`.
+
+`scripts/benchmark_registration_forecasts.py` now excludes interpolated and
+forecast targets, uses only reconciled observed-source cohorts, splits every history
+at real gaps, and requires five observed annual values so three remain for training
+and two for holdout. The corrected diagnostic retained 24,466 contiguous runs.
+Production `validated-recency-damped-ensemble-v2` reported WAPE 0.697648 versus
+0.829732 for the replaced mean/linear selector, a 15.92% relative reduction. This
+supersedes the earlier 0.503518 versus 0.628230 result contaminated by interpolation.
+`docs/FORECAST_VALIDATION.md` now states the corrected evidence and explicitly
+marks prior residual-ML scores as ineligible. Production predictions were not changed:
+the existing deterministic ensemble still wins its honest available baseline, while
+the residual ML candidate lacks release vintages, an unseen holdout, calibrated
+intervals, and segment non-regression evidence. Promoting it would reduce trust rather
+than establish better accuracy.
+
+New focused coverage comprises 25 forecasting tests. Fresh complete backend verification
+passed 654 tests, with 14 documented Windows/optional-real-snapshot skips and the four
+tracked characterization XFAILs. Maintained Ruff and `uv lock --check` passed;
+`pip-audit` found no known vulnerability and skipped only the unpublished local
+package. Frontend verification passed 76 Vitest tests, TypeScript, ESLint, the
+1,957-module production build, and all 25 Chromium E2E/responsive/accessibility tests.
+OpenAPI artifacts regenerated twice to identical SHA-256 values:
+`E4774BE673B54A63C135CAD07A2FF00031255CB10A0FC7328DE75E566510C9D9`
+for `web/openapi.json` and
+`FA6B09AA4949B23F51D03CC0E75AA9C802D2742E883A84272768B7FDD06EBBD1`
+for the TypeScript schema. The normal drift command remains nonzero only because the
+required generated API artifacts are intentionally uncommitted relative to HEAD.
+
+The complete npm audit initially found the development-only Redocly/js-yaml advisory.
+`npm audit fix` updated only the compatible locked transitive tree; the full
+audit now reports zero vulnerabilities, 76 frontend tests and the production build
+still pass. A clean `npm ci` could not replace the native Rolldown binary held
+by the running local Vite process (Windows EPERM); `npm install` restored the
+exact lockfile tree without stopping the user's app. The verified client-mode bundle
+was rebuilt in ignored `.local/client-release`.
+
+The loopback app is healthy: `http://127.0.0.1:5173/` returned 200 and is owned
+by PID 38396; `http://127.0.0.1:8000/api/health` returned 200 and is owned by
+PID 10948. Do not expose these development listeners publicly. Nothing was committed,
+pushed, merged, deployed, or changed in the protected checkout, active snapshot,
+source releases, or remote. The decisive next accuracy input is historical release
+vintages plus a newly frozen official release; final windshield-demand calibration
+still requires governed multi-year ICOR replacement outcomes and fitment truth.
+
+## 2026-09-12 free-data survival challenger and model-improvement research
+
+Lucas authorized the best safe accuracy work possible from free internet data. The
+deep-research skill was used to review authoritative public sources and produce the
+cited, self-contained `docs/FREE_DATA_MODEL_IMPROVEMENT.md`. The research covers DfT
+vehicle licensing, EEA passenger-car registrations/attributes, Eurostat traffic,
+Copernicus ERA5-Land, current and historical France Assureurs glass frequency,
+CASdatasets historical windscreen claims, and EU 2026/699 repair/maintenance access.
+The report separates usable targets from contextual covariates and data whose reuse or
+transfer rights are insufficient for production.
+
+The strongest immediate free-data result is UK fleet survival. The official DfT
+`df_VEH0160_UK.csv` was downloaded to ignored local path
+`.local/downloads/df_VEH0160_UK-20260715.csv`: 10,092,936 bytes, SHA-256
+`F5390DFB66087B4299FFFA2FE77C32FE35CF2DCBDFB0DB70D38C6D4926F7ABCE`, official URL
+`https://assets.publishing.service.gov.uk/media/6a54d2eca6586e258d371d71/df_VEH0160_UK.csv`.
+Cars first registrations for complete calendar years 2015-2025 were paired with the
+active snapshot's governed UK DfT `df_VEH0124` end-of-year licensed-stock cohorts.
+
+New `src/icor/forecasting/survival_calibration.py` implements a fail-closed,
+exposure-weighted licensed-stock curve: age one is anchored to registrations, later
+ages use same-cohort longitudinal transitions, administrative growth is capped so the
+curve stays monotone, zero-registration cohorts cannot affect transitions, unsupported
+ages fail, and complete cohorts can be excluded from calibration. New
+`scripts/benchmark_survival_calibration.py` validates the CP1252 source schema and all
+quarter values, uses Cars only, reads the active snapshot read-only, records the source
+hash, and runs leave-one-registration-cohort-out scoring against production's constant
+0.9444 retention. Tests are in `tests/forecasting/test_survival_calibration.py` and
+`tests/forecasting/test_survival_benchmark.py`.
+
+The completed benchmark on active snapshot `snapshot-a20e1c00232b3603c1a1` evaluated
+54 aggregate UK cohort-age points at ages 1-9 covering 115,051,473 actual vehicle-years.
+The candidate WAPE was 0.006715 versus 0.127699 for constant retention, a 94.74%
+relative error reduction; weighted bias improved from -0.126372 to -0.004368. Exact
+candidate versus baseline WAPE by age was: age 1, 0.004560/0.004255; age 2,
+0.004466/0.045217; age 3, 0.006569/0.070691; age 4, 0.009267/0.130284; age 5,
+0.009132/0.177136; age 6, 0.008377/0.218630; age 7, 0.006615/0.254588; age 8,
+0.006360/0.287710; age 9, 0.007282/0.317497. A later defensive change excluding
+zero-registration transitions cannot alter this dataset because all 2015-2025
+registration totals are positive. A final redundant full benchmark rerun was manually
+stopped after prolonged Windows snapshot verification; the earlier completed run is
+the recorded benchmark.
+
+This result is research-only and production was deliberately unchanged. It aggregates
+all UK Cars across makes/models, uses one current revised publication rather than
+historical as-of vintages, predicts administrative licensed stock rather than physical
+survival, and proves neither generation-level performance nor transfer to another
+country. Required promotion work is governed DfT vintage retention, chronological
+as-of validation, high-volume make/model checks, and equivalent local-country stock
+evidence or an explicit low-confidence transfer policy. The report proposes ICOR
+operating labels of <=10% WAPE strong, <=20% useful/accurate aggregate, 20-30%
+directional, 30-50% weak, and >50% not decision-grade; these are governance thresholds,
+not an industry universal, and never replace bias, baseline skill or segment checks.
+
+Fresh verification passed 9 focused new tests and all 31 forecasting tests. The full
+backend suite passed 663 tests with 14 documented Windows/optional-real-snapshot skips
+and four pre-existing characterization XFAILs. Maintained Ruff and `git diff --check`
+passed; the latter emitted only existing LF-to-CRLF informational warnings. No active
+snapshot, governed release, runtime service, production forecast, protected checkout,
+remote, commit, push, merge, or deployment was changed.
+
+## 2026-09-14 client WAPE check
+
+Lucas asked for the current ICOR WAPE and whether it could be improved before a client
+message. A fresh read-only run of
+`scripts/benchmark_registration_forecasts.py --root .local/evidence` reproduced the
+active snapshot result exactly: production registration WAPE 0.697648 versus 0.829732
+for the replaced baseline, a 15.92% relative error reduction across 24,466 contiguous
+observed-source cohort series with the newest two years held out. Snapshot and method
+remain `snapshot-a20e1c00232b3603c1a1` and
+`validated-recency-damped-ensemble-v2`. The benchmark still lacks sufficient
+as-of-publication vintages and is diagnostic rather than promotion-grade.
+
+There remains no validated end-to-end WAPE for windshield replacements. Registration
+WAPE, UK aggregate licensed-stock survival WAPE, and final replacement-demand accuracy
+measure different components and must not be blended or presented as one number. The
+best survival result remains the research-only 0.006715 WAPE versus 0.127699 for the
+constant-retention baseline on 54 UK aggregate cohort-age points; a redundant fresh
+rerun was stopped after the active snapshot scan took several minutes because the
+immutable prior result and source hash were already recorded. The final demand rate
+remains the documented French 4.3026% fleet-average planning proxy with +/-20%
+scenarios, not calibrated P10/P90 intervals.
+
+The safe client wording is therefore to call the current output an evidence-backed,
+assumption-led planning estimate and avoid claiming a validated windshield-demand
+accuracy percentage. Improving the headline WAPE honestly requires new frozen official
+release vintages for registration validation and governed multi-year ICOR replacement
+outcomes plus exact fitment/SKU truth for final-demand calibration. The local API and
+Vite development UI both returned HTTP 200 on 2026-09-14. They remain loopback-only and
+must not be shared as client URLs. No code, active snapshot, governed source, release
+bundle, protected checkout, remote, deployment, commit, push, or merge was changed.
+## 2026-09-20 Claude audit and modelling plan (no code changed)
+
+Lucas returned to this project via Claude Code after prior Codex work and asked for a full
+verification, a running local app, and a plan to improve fleet size and windshield-replacement
+forecasting. A stale third clone at `OneDrive - EPSA DEV\Desktop\Lucas\icor-webapp` (branch
+`main`, 170 commits behind, the abandoned Streamlit app) was audited first by mistake and is
+not the product; this worktree is.
+
+Verified this session, with evidence:
+
+- Full backend suite `uv run pytest`: **665 passed, 14 skipped, 4 xfailed** (Windows symlink
+  and optional-real-snapshot skips; the four xfails are the existing characterization markers).
+  `uv run python -m pytest tests/forecasting -q` passed 36.
+- The local API and Vite UI were already running from an earlier session on PIDs 10948 (uvicorn
+  :8000) and 38396 (vite :5173), in client-release mode — `/api/v1/opportunities` rejects any
+  `group_by` other than `model_year` with `client_release_scope`. A fresh
+  `run_planner_dev.py` attempt exited 1 with "Port 5173 is already in use"; the pre-existing
+  processes were left untouched. Loopback only; never to be shared as a client URL.
+- Live ranking sample: 143,894 rows, summary `base_units` 11,677,269,
+  `exact_covered_base_units` **0**, snapshot `snapshot-a20e1c00232b3603c1a1`.
+- `production_coverage` in `.local/production-coverage.sqlite3` holds **zero rows** and nothing
+  seeds it, so exact ICOR readiness is structurally 0 for every row and the opportunity score
+  reduces to a fleet-size percentile. Score is a rank transform
+  (`demand_points = demand_percentile * 80`), so a constant hazard change cannot reorder rows.
+- Generation coverage: only 525 of 143,894 groups resolve to a reviewed generation (19
+  hard-coded profiles in `public_catalog.py` against 85,543 canonical vehicles).
+- `uncertainty.py` feeds P10/P90 into `random.triangular(low, high, mode)` as support bounds,
+  so the propagated interval is systematically **narrower** than its inputs. Build path uses 256
+  draws, query path 2000; the snapshot the ranking UI reads is the 256-draw one.
+- `snapshot_vehicle_forecast_repository.py:337` hardcodes
+  `survival_method="constant-annual-retention-v1"` instead of reading it, so the vehicle-forecast
+  API will misreport the method after any version bump. The planner channel reads the manifest
+  correctly.
+- Eurostat `road_eqs_carage` was fetched live and is usable free with no API key: 42 geographies,
+  6 age categories, 2013-2025; **25 geographies have at least 10 years across 5 age bands**,
+  including BE, DE, FR, IT, ES, NL, PL and EU27. Belgian parc 6,136,034 in 2025 reconciles with
+  ACEA. It has **no make/model dimension**, so it cannot become `observation` rows
+  (`original_make`/`original_model` are NOT NULL and the finalizer fails the build on any
+  unassigned usable observation); it must be a checksum-pinned research/calibration input, the
+  same classification already given to `road_tf_vehage`.
+- Repository state: `github.com/lucascverissim0/icor-webapp` was **public**; 16 commits unpushed
+  on this branch, 42 modified files (+5,022/-134) and ~19 untracked paths including
+  `survival_calibration.py`, `promotion_gate.py`, `snapshot_readiness.py` and `src/icor/research/`.
+  A scan of the full pending diff and all untracked files found **no secrets**; `.local/` is
+  gitignored so the snapshot will not be pushed.
+
+Decisions taken by Lucas this session: make the GitHub repository **private and then push** the
+local work as a backup; improve **fleet size first, then demand**; and **acquire additional
+publication vintages** so `audit_forecast_promotion.py` can exit 0 instead of 3. He confirmed the
+historical OpenAI key will be rotated but not immediately, so it remains compromised and every
+internet-launch gate stays closed.
+
+The full approved plan lives outside the repository at
+`C:\Users\LucasCravoVERISSIMO\.claude\plans\ok-as-you-can-mossy-shannon.md`. Its ordered next
+actions are: (1) make the repo private, commit the pending work as three logical units
+(opportunity drill-down; forecasting governance; quarterly source research) and push; (2) add
+real tests for `CohortSurvivalModel`, add a survival injection point to
+`GenerationPlanningService`, and fix the hardcoded `survival_method` literal; (3) acquire extra
+EEA/DfT vintages until the readiness audit passes; (4) give the calibrated curve a monotone
+parametric tail beyond its ~9-age support and a P10/P90 band derived from the
+leave-one-cohort-out error distribution; (5) add Eurostat as a pinned calibration input plus a
+fleet-validation harness scoring modelled parc against published national parc; (6) promote
+through the gate and rebuild the snapshot; (7) fix the uncertainty propagation bug and the
+256/2000 draw split; (8) decompose the hazard and anchor the European total against Belron's
+published job volume; (9) integrate ICOR's real product catalogue once the client supplies it.
+
+No code, test, snapshot, release, remote, commit, push, or deployment was changed this session.
+The two development processes described above remain running and are unaffected by clearing the
+conversation; stopping them requires closing their terminal or killing those PIDs.
+
+## 2026-09-20 Part 0 execution: three commits made, push and privacy blocked on account access
+
+Lucas asked Claude to execute the approved plan at
+`C:\Users\LucasCravoVERISSIMO\.claude\plans\ok-as-you-can-mossy-shannon.md` end to end,
+including making the GitHub repository private. Part 0 was executed as far as local work
+allows; the two remote actions are blocked and were not attempted beyond a read-only check.
+
+Fresh verification before committing, on the exact tree that was committed:
+
+- `uv run pytest`: **665 passed, 14 skipped, 4 xfailed in 43.95s** (Windows symlink and
+  optional-real-snapshot skips; the four xfails are the existing characterization markers).
+- `cd web && npm test`: **15 test files passed, 76 tests passed** (vitest 4.1.11, 45.57s).
+- `uv run ruff check` over the CI file list plus the three benchmark/e2e scripts:
+  **All checks passed!**
+- `git diff --cached --check`: clean for every commit. One real defect was found and fixed
+  while staging: `.github/workflows/quarterly-source-research.yml` ended with a blank line at
+  EOF; the trailing newline was normalised before it was committed.
+
+The 42 modified and 21 untracked paths were committed as three logical units, on
+`development/windshield-demand-platform`:
+
+- `d5a2758 feat: add opportunity drill-down and ranking catalog` — 39 files. The opportunity
+  detail channel (API, schemas, service, snapshot opportunity repository, React
+  `OpportunityDetailPage`), the TailAdmin styling pass and `web/THIRD_PARTY_NOTICES.md`, the
+  switch from `official_public_generation_catalog` to `ranking_public_generation_catalog` in
+  `registrations.py` and `snapshot_vehicle_forecast_repository.py`, the new planner brand
+  filter, and the `/opportunities/` path allowance in `ClientReleaseMiddleware`.
+- `af3847f feat: add forecasting promotion gate and survival calibration` — 14 files.
+  `promotion_gate.py`, `snapshot_readiness.py`, `survival_calibration.py`, their tests,
+  `audit_forecast_promotion.py`, `benchmark_survival_calibration.py`, the corrected
+  `benchmark_registration_forecasts.py` (reconciled observed-source rows only, contiguous-run
+  splitting, minimum five observed years, fail-closed on an empty denominator),
+  `FREE_DATA_MODEL_IMPROVEMENT.md`, `FORECAST_VALIDATION.md`, and the restored
+  `CLIENT_RELEASE.md` gate #1 requiring key revocation before any internet launch.
+- `4716722 feat: add quarterly source research package` — 7 files. `src/icor/research/`,
+  `run_quarterly_source_research.py`, `tests/research/`, `QUARTERLY_SOURCE_RESEARCH.md`, the
+  scheduled workflow, and the `ci.yml` lint-list registration of both new scripts. `ci.yml` was
+  deliberately placed in this commit rather than the previous one so CI never references
+  `run_quarterly_source_research.py` before that file exists.
+
+`docs/CLIENT_RELEASE.md` and `.github/workflows/ci.yml` each carry hunks belonging to two of
+the three units. They were kept whole and assigned to the unit that owns their dominant change
+rather than split mid-file, so every commit is a complete, buildable tree.
+
+**Blocked: the repository is still public and nothing has been pushed.** The cause is account
+identity, not permissions policy:
+
+- `github.com/lucascverissim0/icor-webapp` still returns HTTP 200 unauthenticated, so it
+  remains **public**.
+- This machine's Chrome is signed into GitHub as **`lverissimo-01`**, not `lucascverissim0`.
+  `https://github.com/lucascverissim0/icor-webapp/settings` returns "Page not found" for that
+  session, so the visibility control is unreachable from this browser.
+- The Git Credential Manager credential is the same wrong account.
+  `git push --dry-run origin development/windshield-demand-platform` returned
+  `remote: Permission to lucascverissim0/icor-webapp.git denied to lverissimo-01.` and
+  `error: 403`. No objects were transferred; a dry run writes nothing.
+- `gh` is not installed on this machine and no `GH_TOKEN`/`GITHUB_TOKEN` is set. Reading the
+  stored credential directly was refused by the harness, which is correct.
+
+Unblocking requires Lucas to sign in as `lucascverissim0` (in Chrome, so the visibility change
+can be made, and for Git, so the push is authorised) or to grant `lverissimo-01` admin and push
+rights on that repository. Until then the 20 local commits (16 pre-existing plus the four made here) are the only
+copy of this work and
+the leaked-key exposure window stays open.
+
+The `.local/` snapshot remains gitignored and was not committed. The earlier no-secrets scan of
+this diff still holds: the three commits contain no credentials. No snapshot, release, remote,
+push, deployment, or history rewrite occurred. The development API and Vite processes from the
+earlier session were not touched.
