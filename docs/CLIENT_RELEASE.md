@@ -23,11 +23,11 @@ The internal development app remains unchanged when client-release mode is absen
 
 Before sharing a build, confirm all of the following:
 
-1. The historically exposed OpenAI key is not used by this preview and is never copied
-   into its environment. Lucas has deferred revocation/rotation until immediately after
-   the client review; complete that owner action as soon as the review ends. Never place
-   the old or replacement secret in Git, chat, a command shown to another person, or
-   this runbook.
+1. Revoke the historically exposed OpenAI key and rotate every environment that may
+   still reference it **before any internet launch**. Do not treat removing the key from
+   the current tree as sufficient because it remains in Git history. Never place the old
+   or replacement secret in Git, chat, a command shown to another person, or this
+   runbook.
 2. The active snapshot ID and release-check results match the durable handoff.
 3. The frontend was built with VITE_ICOR_CLIENT_RELEASE=verified.
 4. The authenticated server runs with ICOR_CLIENT_RELEASE_MODE=verified and serves
@@ -87,8 +87,9 @@ After signing in over HTTPS:
 3. Confirm every opportunity is labelled by make, source-reported model, and
    registration year;
    no `estimated-generation-*` label is visible.
-4. Search for at least Volkswagen Golf and an unreviewed model such as Ford Focus,
-   select a registration year, and calculate 2028 and 2031 forecasts.
+4. Search for at least Volkswagen Golf and Ford Focus, confirm their reviewed
+   generation labels, select a registration year, and calculate 2028 and 2031
+   forecasts.
 5. Confirm the eight configured market rows render and unavailable evidence is never
    displayed as zero.
 6. Confirm /evidence, /registrations, /completeness, /exports, /docs, and

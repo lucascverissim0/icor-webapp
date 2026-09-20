@@ -14,6 +14,7 @@ from icor.forecasting.registration_forecast import RegistrationForecaster
 from icor.infrastructure.snapshot_store import SnapshotStore
 
 _HOLDOUT_YEARS = 2
+_MINIMUM_OBSERVED_YEARS = 5
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -38,16 +39,31 @@ def _series(root: Path) -> tuple[str, tuple[dict[int, Decimal], ...]]:
             AND registration_cohort_year <= 2025"""
         )
         for generation_id, vehicle_id, geography, year, value, reasons in rows:
-            if "forecast-registration-cohort" in reasons:
+            if "reconciled-registration-cohort" not in reasons:
                 continue
             grouped[generation_id, vehicle_id, geography][int(year)] = Decimal(value)
     eligible = tuple(
-        history
+        run
         for history in grouped.values()
-        if len(history) >= 8
-        and sorted(history) == list(range(min(history), max(history) + 1))
+        for run in _contiguous_runs(history)
+        if len(run) >= _MINIMUM_OBSERVED_YEARS
     )
     return manifest.snapshot_id, eligible
+
+
+def _contiguous_runs(history: dict[int, Decimal]) -> tuple[dict[int, Decimal], ...]:
+    runs: list[dict[int, Decimal]] = []
+    current: dict[int, Decimal] = {}
+    previous: int | None = None
+    for year in sorted(history):
+        if previous is not None and year != previous + 1:
+            runs.append(current)
+            current = {}
+        current[year] = history[year]
+        previous = year
+    if current:
+        runs.append(current)
+    return tuple(runs)
 
 
 def _legacy_forecast(history: dict[int, Decimal], horizon_year: int) -> dict[int, Decimal]:
@@ -123,6 +139,8 @@ def main() -> int:
             production_error += abs(production_values[year] - actual)
             baseline_error += abs(baseline_values[year] - actual)
             denominator += max(actual, Decimal(1))
+    if denominator == 0:
+        raise RuntimeError("no eligible observed-only contiguous series were found")
     production_wape = production_error / denominator
     baseline_wape = baseline_error / denominator
     print(
@@ -131,6 +149,7 @@ def main() -> int:
                 "snapshot_id": snapshot_id,
                 "method": production.method,
                 "holdout_years": _HOLDOUT_YEARS,
+                "minimum_observed_years": _MINIMUM_OBSERVED_YEARS,
                 "series_evaluated": len(histories),
                 "production_wape": str(production_wape.quantize(Decimal("0.000001"))),
                 "replaced_baseline_wape": str(
@@ -140,6 +159,12 @@ def main() -> int:
                     (
                         (Decimal(1) - production_wape / baseline_wape) * Decimal(100)
                     ).quantize(Decimal("0.01"))
+                ),
+                "target_policy": (
+                    "reconciled observed-source cohort rows only; no interpolated targets"
+                ),
+                "validation_limit": (
+                    "current snapshot lacks sufficient as-of publication vintages"
                 ),
             },
             sort_keys=True,
