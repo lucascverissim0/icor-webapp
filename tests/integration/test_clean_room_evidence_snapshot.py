@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import socket
@@ -638,3 +639,19 @@ def test_posix_root_substitution_uses_pinned_operation_root_without_external_wri
         / RELEASE_ID
         / "artifact.csv"
     ).read_bytes() == SAMPLE_ARTIFACT.read_bytes()
+
+
+def test_the_sample_artifact_still_matches_its_manifest_checksum() -> None:
+    """Release staging verifies these exact bytes, so Git must not rewrite them.
+
+    Git for Windows defaults to core.autocrlf=true. Without the `.gitattributes`
+    entry this fixture is checked out with CRLF, growing from 128 to 131 bytes,
+    and every staging call fails with ReleaseIntegrityError (exit 2). This test
+    names that cause instead of leaving a bare `assert 2 == 0`.
+    """
+    manifest = json.loads(SAMPLE_MANIFEST.read_text(encoding="utf-8"))
+    payload = SAMPLE_ARTIFACT.read_bytes()
+
+    assert b"\r\n" not in payload, "fixture checked out with CRLF; see .gitattributes"
+    assert len(payload) == manifest["artifact_bytes"]
+    assert hashlib.sha256(payload).hexdigest() == manifest["sha256"]

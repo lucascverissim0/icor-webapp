@@ -1,0 +1,8 @@
+# Byte-exact test fixtures.
+#
+# `stage-release` verifies the artifact's size and SHA-256 against its manifest,
+# so Git must never rewrite these bytes on checkout. Git for Windows defaults to
+# core.autocrlf=true, which turned the 128-byte LF artifact into 131 bytes of
+# CRLF and failed every windows-latest CI run with ReleaseIntegrityError
+# (exit 2) while ubuntu-latest passed.
+tests/fixtures/** -text
