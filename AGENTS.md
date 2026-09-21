@@ -66,6 +66,16 @@ Use `SAFE TO CLEAR` only after the handoff has been updated and verified. “Cle
   evidence. Scale investigation, planning, and verification to the risk of the change;
   never trade away correctness, security, user intent, or required verification merely
   to save time or tokens.
+- Do all the work a task actually requires, to the best standard available, and never report
+  it complete while any part is unfinished, unverified, or silently narrowed. If a requirement
+  is blocked, finish everything else and state plainly what was left undone and why.
+- Before each unit of work, judge whether a cheaper model would produce materially the same
+  result. When it would, delegate that unit to a subagent on the cheapest adequate model:
+  `haiku` for lookups, greps, file inventories, diff checks, and retrieval; `sonnet` for
+  bounded implementation, test authoring, and review passes. Reserve the strongest model for
+  design, method, security, and correctness decisions. Delegation must never lower the quality
+  of the result; when a cheaper model's output could not be trusted without redoing it, do the
+  work directly.
 - Diagnose before fixing, and address root causes rather than masking symptoms.
 - For features and bug fixes, define expected behavior and tests before implementation.
 - Keep production and local configuration clearly separated. Never use production customer data or production secrets for local demonstrations.
