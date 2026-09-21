@@ -4358,3 +4358,130 @@ until Part F rebuilds and promotes a snapshot. Until then the ranking still show
 
 No snapshot, release, remote, push, deployment, or history rewrite occurred this session. No
 long-running local process was started.
+
+## 2026-09-21 Part A pushed, Windows CI root-caused, survival provenance fixed
+
+Lucas asked for a Git auth pop-up, then confirmation that the web app works, then the
+forecasts made as accurate as possible including ingesting more data. Deployment stays
+deferred; `flyctl` cannot be installed on this machine. The approved plan for this session
+is outside the repository at
+`C:\Users\LucasCravoVERISSIMO\.claude\plans\ok-give-me-the-cozy-crab.md`.
+
+Decisions Lucas took this session:
+
+- ICOR's proprietary fitment catalogue and replacement history are **not available yet**,
+  so the windshield hazard stays explicitly assumption-led.
+- The generation catalogue is taken to **volume-weighted coverage** (~80% of forecast
+  volume), not the unreachable full raw-group coverage.
+- The deploy host is **decided later**; only host-agnostic readiness work is in scope.
+- **Push first, make the repository private afterwards.** The repository was still public
+  at the time of the push and remains so.
+
+### No auth pop-up was needed; the earlier 403 was misdiagnosed
+
+`git-credential-manager github list` returns **both** `lucascverissim0` and
+`lverissimo-01`. The recorded
+`Permission to lucascverissim0/icor-webapp.git denied to lverissimo-01` was caused by the
+remote URL carrying no username, so Git offered the wrong account's token - not by a
+missing or expired credential. `GCM_INTERACTIVE=never git push --dry-run
+https://lucascverissim0@github.com/...` succeeded with no prompt.
+
+`origin` is now `https://lucascverissim0@github.com/lucascverissim0/icor-webapp.git` so the
+account is pinned. **27 commits are pushed**; the branch is level with
+`origin/development/windshield-demand-platform` at `f1c0582`. The work is no longer a
+single local copy.
+
+`api.github.com/repos/lucascverissim0/icor-webapp` still returns 200 unauthenticated:
+the repository is **still public**, and the leaked key remains in commits `cbef0ed`,
+`d557aef`, `d444ea2`, `50fafd3`. Changing visibility needs Chrome signed in as
+`lucascverissim0`; it is currently signed in as `lverissimo-01`.
+
+### Root cause of the windows-latest CI failure, red since at least 2026-09-01
+
+Verified, not inferred. `stage-release` verifies
+`tests/fixtures/sources/sample-registration.csv` against its manifest's `artifact_bytes`
+(128) and `sha256` (`098d71a1...f715fb`). The repository had **no `.gitattributes`**, and
+Git for Windows defaults to `core.autocrlf=true`, so `actions/checkout` on windows-latest
+rewrites that artifact as **131 bytes** of CRLF with digest `b4e126ea...a954ff`. Staging
+then raises `ReleaseIntegrityError`, which `build_evidence_snapshot.py:323` maps to
+**exit code 2** - exactly the `assert 2 == 0` seen in three clean-room integration tests
+(`test_build_rejects_unregistered_parser_with_typed_safe_output`,
+`test_failed_snapshot_validation_exits_three`,
+`test_loader_failure_is_sanitized_without_raw_row_output`).
+
+It never reproduced locally because this worktree predates `core.autocrlf` being set:
+`git ls-files --eol` still reports `i/lf w/lf` for the fixture.
+
+Fixed in `3d53ac3` by pinning only `tests/fixtures/** -text`. A repository-wide
+`text=auto` was rejected: twelve legacy `data/*.txt` files are stored with CRLF in the
+index and feed the legacy Streamlit scripts. A regression test now checks the fixture's
+bytes against its manifest so a future CRLF checkout names its own cause.
+
+### Survival provenance defect, fixed in `f1c0582`
+
+`CohortSurvivalModel.method` and `.assumption_ids` were **class** attributes, so every
+instance reported the default 0.92/0.9444/0.965 retentions whatever it was constructed
+with. `assumption_ids` is written into `opportunity_estimate` in the immutable snapshot
+and surfaced through the API, so promoting a calibrated curve would have stamped
+provably false provenance onto client-visible evidence. Both are now per-instance and the
+IDs are derived from the retentions themselves. This is a prerequisite for C1.
+
+`test_survival_method_is_read_from_the_model_not_a_literal` patched the class attribute,
+which an instance now shadows; it patches the repository's own model instead, which is a
+stronger check.
+
+### Verification, fresh output on this tree
+
+- `uv run pytest`: **690 passed, 14 skipped, 4 xfailed** in 165.72s. Baseline was 683; the
+  seven added tests are the survival provenance set plus the fixture-integrity test.
+- `cd web && npm run typecheck && npm run lint && npm test -- --run && npm run build &&
+  npm run openapi:check`: all pass, **15 files / 76 tests**, exit 0.
+- `uv run ruff check src tests` and the full CI script list: **All checks passed!**
+- `uv lock --check`: clean. `uv run pip-audit`: **no known vulnerabilities**.
+- `uv run python scripts/audit_baseline.py`: exit 0.
+- `git diff --cached --check`: clean for both commits.
+
+A first local `npm run e2e` attempt was invoked through `timeout`, which this shell
+refuses; it exited 0 without running Playwright at all. Do not read that as a pass. A
+genuine local run was started afterwards and its result is recorded separately.
+
+### Still open
+
+1. **`npm run e2e` hangs on CI.** In run 35585580069 the `Planner web (Linux)` job sat in
+   `Run npm run e2e` for over an hour with every prior step green; the 2026-09-01 runs show
+   the same step `cancelled`. This is unresolved and blocks a green CI.
+2. The repository is still public and the key is still unrotated.
+3. Parts C, D and E of the plan are not started. The active snapshot
+   `snapshot-a20e1c00232b3603c1a1` still predates the current uncertainty method, so the
+   ranking page still serves the 45%-too-narrow bands.
+
+### Free-data research completed this session (read-only, no code)
+
+**Publication vintages, for `audit_forecast_promotion.py` (`_MINIMUM_TEMPORAL_ORIGINS = 3`,
+currently 2 eligible).** EEA's legacy per-year ZIPs are dead on the live site, and the
+Wayback captures return the wrapper page rather than the binary. The usable route is EEA's
+public unauthenticated **Discodata SQL API**, which still serves every year/status table
+(`co2cars_2020Fv22`, `co2cars_2021Fv24`, `co2cars_2022Fv26`, `co2cars_2023Fv28`,
+`co2cars_2024Fv30`, `co2cars_2025Pv31`), each with its own `sdi.eea.europa.eu` catalogue
+publication date: 2022 Final published **2024-02-01** (lag ~397 days, inside the 550-day
+rule), 2023 Provisional published **2024-05-29** (lag ~150 days). That supplies the third
+and fourth genuine origin. Licence CC-BY 4.0. KBA FZ10 has stable per-year URLs
+(`fz10_n_<YEAR>.html`, 2018 and 2023 verified live) but its reuse terms were not verified.
+UK DfT keeps permanent dated quarterly release pages back to ~2014 under OGL v3.0, but
+whether the attached data actually differs per release is unverified.
+
+**Non-UK survival calibration.** Only three countries publish cohort stock at a
+granularity that supports a per-age, per-make retention curve from free data:
+**Netherlands** (RDW `opendata.rdw.nl/.../m9d7-ebf2`, per-vehicle microdata, CC0 - richer
+than UK VEH0124 because it is not pre-binned; the "from 2017" note needs clarifying),
+**Norway** (SSB Statbank table **08581**, age x make, 2008-2024, NLOD), and **Switzerland**
+(BFS `px-x-1103020100_108`, make x year of first registration, ~1990-2024 - existence
+corroborated but not cleanly fetched, verify before committing effort). Denmark (DST BIL8)
+and Belgium (Statbel) give per-age national aggregates without make. **Germany, France,
+Italy, Spain and Austria cannot**: their stock data is broad age bands, or never crossed
+with make, or access-restricted (France's RSVERO is CASD-gated). Sweden has no free path.
+Eurostat `road_eqs_carage` is confirmed live with exactly five age bands
+(<2, 2-5, 5-10, 10-20, >=20) and no make dimension: a cross-country sanity check, **not** a
+calibration source, which matches the classification already recorded for `road_tf_vehage`.
+
+No snapshot, release, deployment, merge or history rewrite occurred.
