@@ -62,7 +62,7 @@ class GenerationPlanningService:
         self.forecaster = RegistrationForecaster()
         self.survival = CohortSurvivalModel()
         self.hazard = ReplacementHazardModel()
-        self.uncertainty = OpportunityUncertaintyModel(draw_count=256)
+        self.uncertainty = OpportunityUncertaintyModel()
 
     def apply(
         self,

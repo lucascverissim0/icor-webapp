@@ -5,8 +5,40 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from decimal import Decimal
+from statistics import NormalDist
 
 _QUANTUM = Decimal("0.0001")
+_STANDARD_NORMAL = NormalDist()
+_DECILE_Z = _STANDARD_NORMAL.inv_cdf(0.9)
+_UNIT_GUARD = 1e-12
+
+# Both the offline build path and the live query path must draw the same number of
+# samples, or the ranking page and the forecast page disagree about the same vehicle.
+DEFAULT_DRAW_COUNT = 2000
+
+
+class _SplitNormalQuantiles:
+    """Draw from a distribution whose P10, P50 and P90 are the given values.
+
+    Two half-normals share a median, one spread below it and one above, so an
+    asymmetric input interval is reproduced exactly rather than approximated.
+    Support is clamped at zero because neither a fleet count nor a hazard rate
+    can be negative.
+    """
+
+    __slots__ = ("_median", "_lower_spread", "_upper_spread")
+
+    def __init__(self, p10: Decimal, p50: Decimal, p90: Decimal) -> None:
+        self._median = float(p50)
+        self._lower_spread = float(p50 - p10) / _DECILE_Z
+        self._upper_spread = float(p90 - p50) / _DECILE_Z
+
+    def draw(self, generator: random.Random) -> float:
+        probability = min(max(generator.random(), _UNIT_GUARD), 1.0 - _UNIT_GUARD)
+        deviate = _STANDARD_NORMAL.inv_cdf(probability)
+        spread = self._lower_spread if probability <= 0.5 else self._upper_spread
+        value = self._median + spread * deviate
+        return value if value > 0.0 else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,9 +49,9 @@ class OpportunityInterval:
 
 
 class OpportunityUncertaintyModel:
-    method = "seeded-triangular-propagation-v1"
+    method = "quantile-matched-split-normal-propagation-v2"
 
-    def __init__(self, *, draw_count: int = 2000) -> None:
+    def __init__(self, *, draw_count: int = DEFAULT_DRAW_COUNT) -> None:
         if type(draw_count) is not int or draw_count < 100:
             raise ValueError("uncertainty draw count must be at least 100")
         self.draw_count = draw_count
@@ -40,21 +72,10 @@ class OpportunityUncertaintyModel:
         if type(seed) is not int:
             raise ValueError("uncertainty seed must be an integer")
         generator = random.Random(seed)
+        fleet = _SplitNormalQuantiles(active_fleet_p10, active_fleet_p50, active_fleet_p90)
+        hazard = _SplitNormalQuantiles(hazard_p10, hazard_p50, hazard_p90)
         samples = sorted(
-            Decimal(
-                str(
-                    generator.triangular(
-                        float(active_fleet_p10),
-                        float(active_fleet_p90),
-                        float(active_fleet_p50),
-                    )
-                    * generator.triangular(
-                        float(hazard_p10),
-                        float(hazard_p90),
-                        float(hazard_p50),
-                    )
-                )
-            )
+            Decimal(str(fleet.draw(generator) * hazard.draw(generator)))
             for _ in range(self.draw_count)
         )
         return OpportunityInterval(

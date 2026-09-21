@@ -164,7 +164,7 @@ class SnapshotVehicleForecastRepository:
         self._model_year_only = model_year_only
         self._hazard = ReplacementHazardModel()
         self._survival = CohortSurvivalModel()
-        self._uncertainty = OpportunityUncertaintyModel(draw_count=2000)
+        self._uncertainty = OpportunityUncertaintyModel()
         self._all_vehicle_options: tuple[VehicleOption, ...] | None = None
 
     def options(
