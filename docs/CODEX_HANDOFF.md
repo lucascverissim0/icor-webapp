@@ -4244,3 +4244,117 @@ The `.local/` snapshot remains gitignored and was not committed. The earlier no-
 this diff still holds: the three commits contain no credentials. No snapshot, release, remote,
 push, deployment, or history rewrite occurred. The development API and Vite processes from the
 earlier session were not touched.
+
+## 2026-09-21 Part B and Part C complete: directives, three model fixes, four commits
+
+Lucas asked for the last run's results and what remained before deploying to a real host, and
+asked for a directives rule about doing all necessary work and delegating to cheaper models.
+The approved plan for this session lives outside the repository at
+`C:\Users\LucasCravoVERISSIMO\.claude\plans\ok-great-what-are-vivid-parnas.md`.
+
+Decisions Lucas took this session:
+
+- **Release gate #1 is waived**: deploy to the internet with the historically exposed OpenAI
+  key not yet rotated. It stays compromised; this is an explicit authorization, not a skipped
+  gate, and rotation remains the only real fix.
+- **Host: Fly.io**, region `ams`, deployed end to end by Claude. `flyctl` is not installed and
+  `fly auth login` is blocked on Lucas.
+- **Ordering: modelling first, deploy when correct.** Lucas accepted that this rules out
+  shipping today; revised span is roughly 3-5 weeks.
+- **Generation catalogue in scope now, sourced from Wikidata (CC0)**, chosen because
+  `docs/VEHICLE_CATALOG_INTAKE.md` forbids invented labels and requires per-generation licence
+  and provenance metadata. `scripts/wikipedia_gen.py` is kept as a manual spot-check fallback
+  only and must never be wired into the snapshot build.
+- **GitHub**: Lucas will sign in as `lucascverissim0`; the repo is then made private and the
+  branch pushed. Still not done - see blockers.
+
+### The OpenAI key is not needed by the web app (verified, not assumed)
+
+- Every `OPENAI_API_KEY` reader is the legacy Streamlit app (`ui/app.py:215`,
+  `ui/pages/02_Model_Researcher.py:310`, `scripts/script1.py:41-48`, `scripts/script2.py:36-38`)
+  or the offline quarterly research module (`src/icor/research/quarterly.py:472-474`).
+- `src/icor/api/` and `src/icor/preview/` never import `icor.research` - zero grep hits.
+- `src/icor/` imports no `openai`. The only `openai` imports in the tree are
+  `scripts/run_quarterly_source_research.py:11` and `scripts/script1.py:36`.
+- A tracked-file scan for an `sk-` prefixed key literal returns no hits. The key exists only in
+  commits `cbef0ed`, `d557aef`, `d444ea2`, `50fafd3`.
+- Therefore the realistic path to the host is the image build copying `.git` in, and
+  **`.dockerignore` does not exist**. Part G of the plan now carries five containment measures,
+  including a COPY allowlist and moving `openai` out of the runtime dependency set so the SDK is
+  physically absent from the container.
+
+### Commits made this session, on `development/windshield-demand-platform`
+
+- `9f7d362 docs: require complete work and cheapest-adequate-model delegation` - two
+  `AGENTS.md` Engineering workflow bullets. The section already covered token efficiency in its
+  top bullet, so this extends rather than duplicates; there was no prior rule on model choice,
+  delegation, or a general completeness mandate.
+- `3c91add fix: report the real survival method on the vehicle-forecast channel` -
+  `snapshot_vehicle_forecast_repository.py:337` hardcoded
+  `survival_method="constant-annual-retention-v1"`. It now holds a `CohortSurvivalModel` and
+  reads `.method`, matching what `generation_planning.py:244` already did. Without this the two
+  API channels would have disagreed after the Part D version bump.
+- `45c54fe fix: propagate P10/P90 as quantiles and unify the draw count` - the important one.
+  `uncertainty.py` passed input P10/P90 to `random.triangular` as the *support* of the
+  distribution. A triangular's own 10th percentile sits inside its lower bound, so every
+  propagated interval was narrower than its inputs: measured, with a fixed hazard and a fleet
+  interval of relative width 0.222, the propagated width was **0.122, 45% too narrow**. Every
+  opportunity band shown to date has been overconfident. Replaced with a split-normal quantile
+  function (two half-normals sharing a median), which reproduces asymmetric input intervals
+  exactly, clamped at zero. No new dependency; `statistics.NormalDist` is stdlib.
+  The build path drew 256 samples and the live query path 2000, so the ranking page and the
+  forecast page disagreed about the same vehicle; both now read `DEFAULT_DRAW_COUNT = 2000`.
+  Measured cost of that choice: **2.13 ms/estimate at 256 draws, 16.21 ms at 2000**, i.e. about
+  **4 min versus 30 min across 111,694 opportunities** in an offline build, and 16 ms on a live
+  request. Correctness was chosen over build speed; the value is one constant if Lucas wants it
+  revisited. `method` bumped to `quantile-matched-split-normal-propagation-v2`.
+- `ab4d396 test: cover the survival model and make it injectable` - `CohortSurvivalModel` had
+  two tests and no coverage of age zero, compounding, monotonicity, interval bracketing or any
+  of its four validation paths. Added those, plus an optional `survival=` argument on
+  `GenerationPlanningService` so a calibrated curve can replace the assumed one without editing
+  the service.
+
+### Verification (fresh output, this tree)
+
+- `uv run pytest`: **683 passed, 14 skipped, 4 xfailed** in 191.43s. Baseline was 665 passed;
+  the 18 new tests are the ones listed above and no existing test regressed.
+- `cd web && npm test`: **15 test files passed, 76 tests passed** (vitest 4.1.11).
+- `uv run ruff check` on every file touched: all checks passed.
+- `git diff --cached --check` clean for all four commits.
+
+### Snapshot consequence
+
+`uncertainty.method` changed, so the active snapshot `snapshot-a20e1c00232b3603c1a1` now
+predates the current application method. The corrected, wider intervals do **not** reach the UI
+until Part F rebuilds and promotes a snapshot. Until then the ranking still shows the
+45%-too-narrow bands. Do not show the current build to a client as if the intervals were fixed.
+
+### Blockers, unchanged and both on Lucas
+
+1. **The repository is still public and nothing is pushed - now 24 local commits.** This
+   machine is signed in as `lverissimo-01`; the repo belongs to `lucascverissim0`. These 24
+   commits remain the only copy of the work.
+2. **`flyctl` is not installed and `fly auth login` has not been run.** Docker and `gh` are also
+   absent; Fly's `--remote-only` build means Docker is not needed.
+
+### Next actions, in order
+
+1. Part A: Lucas signs in as `lucascverissim0`; make the repo private; push the 24 commits.
+2. Part D: acquire EEA/DfT vintages until `scripts/audit_forecast_promotion.py` exits 0; add the
+   monotone tail and the leave-one-cohort-out P10/P90 band; pin Eurostat `road_eqs_carage` as a
+   calibration input; build the fleet-validation harness.
+3. Part E: Wikidata generation catalogue. Revised estimate **9-16 working days**, dominated by
+   manual curation. A design pass established that the root cause of "Golf needed 20 spellings"
+   is that `identity.py` never splits engine/trim tokens, so a tokenization tier goes in the
+   matcher and the identity-layer fix is recorded as accepted debt. **Open question for Lucas
+   before curation starts:** re-baseline the success target as volume-weighted coverage rather
+   than raw group count, because intake gate 1 is not reachable against 143,894 raw groups by
+   any free source.
+4. Part F: rebuild and promote a snapshot; confirm the new `survival_method` and
+   `uncertainty_method` appear in both API channels.
+5. Part G: `.dockerignore`, Dockerfile, `fly.toml`, host-agnostic runner replacing the
+   `CODESPACES` gate at `src/icor/preview/runner.py:22`, HSTS and `X-Robots-Tag` headers, then
+   deploy.
+
+No snapshot, release, remote, push, deployment, or history rewrite occurred this session. No
+long-running local process was started.
