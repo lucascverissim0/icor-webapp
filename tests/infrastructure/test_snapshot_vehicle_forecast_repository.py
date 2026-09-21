@@ -225,8 +225,14 @@ def test_survival_method_is_read_from_the_model_not_a_literal(
     repository: SnapshotVehicleForecastRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A survival version bump must reach this channel, not only the planner channel."""
-    monkeypatch.setattr(CohortSurvivalModel, "method", "calibrated-cohort-retention-v2")
+    """A survival version bump must reach this channel, not only the planner channel.
+
+    Provenance is per-instance, so this patches the model the repository actually
+    holds. Patching the class would pass even if the channel read a literal.
+    """
+    assert repository._survival.method == CohortSurvivalModel().method
+
+    monkeypatch.setattr(repository._survival, "method", "calibrated-cohort-retention-v2")
 
     result = repository.forecast(
         brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028

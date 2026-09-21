@@ -15,13 +15,19 @@ class SurvivalInterval:
     p90: Decimal
 
 
+def _assumption_id(quantile: str, retention: Decimal) -> str:
+    """Name the retention actually in use, so provenance cannot drift from the value."""
+
+    return f"survival-retention-{quantile}-{format(retention.normalize(), 'f')}"
+
+
 class CohortSurvivalModel:
-    method = "constant-annual-retention-v1"
-    assumption_ids = (
-        "survival-retention-p10-0.92",
-        "survival-retention-p50-0.9444",
-        "survival-retention-p90-0.965",
-    )
+    """Constant annual retention compounded by cohort age.
+
+    `method` and `assumption_ids` are per-instance: a calibrated model must never
+    inherit the default model's provenance, because these strings are written into
+    the immutable evidence record and shown to the client.
+    """
 
     def __init__(
         self,
@@ -35,6 +41,12 @@ class CohortSurvivalModel:
         self.retention_p10 = retention_p10
         self.retention_p50 = retention_p50
         self.retention_p90 = retention_p90
+        self.method = "constant-annual-retention-v1"
+        self.assumption_ids = (
+            _assumption_id("p10", retention_p10),
+            _assumption_id("p50", retention_p50),
+            _assumption_id("p90", retention_p90),
+        )
 
     def remaining(self, registrations: Decimal, *, age_years: int) -> Decimal:
         return self._remaining(registrations, age_years, self.retention_p50)

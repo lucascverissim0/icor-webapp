@@ -94,3 +94,59 @@ def test_the_planning_service_accepts_an_injected_survival_model() -> None:
 
     assert GenerationPlanningService(survival=calibrated).survival is calibrated
     assert isinstance(GenerationPlanningService().survival, CohortSurvivalModel)
+
+
+def test_assumption_ids_report_the_retentions_actually_used() -> None:
+    """A calibrated model must not inherit the default model's provenance strings."""
+    model = CohortSurvivalModel(
+        retention_p10=Decimal("0.80"),
+        retention_p50=Decimal("0.90"),
+        retention_p90=Decimal("0.95"),
+    )
+
+    assert model.assumption_ids == (
+        "survival-retention-p10-0.8",
+        "survival-retention-p50-0.9",
+        "survival-retention-p90-0.95",
+    )
+
+
+def test_the_default_model_keeps_its_published_assumption_ids() -> None:
+    assert CohortSurvivalModel().assumption_ids == (
+        "survival-retention-p10-0.92",
+        "survival-retention-p50-0.9444",
+        "survival-retention-p90-0.965",
+    )
+
+
+def test_provenance_is_per_instance_not_shared_by_the_class() -> None:
+    """Two models must never report each other's assumptions."""
+    default = CohortSurvivalModel()
+    calibrated = CohortSurvivalModel(retention_p50=Decimal("0.93"))
+
+    assert calibrated.assumption_ids != default.assumption_ids
+    assert default.assumption_ids == CohortSurvivalModel().assumption_ids
+
+
+def test_assumption_ids_are_unique_when_retentions_coincide() -> None:
+    """Equal retentions are legal, and the evidence record rejects duplicate IDs."""
+    model = CohortSurvivalModel(
+        retention_p10=Decimal("0.9"),
+        retention_p50=Decimal("0.9"),
+        retention_p90=Decimal("0.9"),
+    )
+
+    assert len(set(model.assumption_ids)) == 3
+
+
+def test_assumption_ids_are_valid_evidence_identifiers() -> None:
+    from re import fullmatch
+
+    from icor.domain.cohorts import _IDENTIFIER
+
+    for identifier in CohortSurvivalModel(retention_p50=Decimal("0.9375")).assumption_ids:
+        assert fullmatch(_IDENTIFIER, identifier) is not None
+
+
+def test_the_method_is_readable_from_the_instance() -> None:
+    assert CohortSurvivalModel().method == "constant-annual-retention-v1"
