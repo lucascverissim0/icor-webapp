@@ -16,6 +16,7 @@ from icor.evidence.normalization import (
     source_vehicle_display_label,
 )
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
+from icor.forecasting.survival import CohortSurvivalModel
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 from icor.generations.public_catalog import (
     ReviewedGenerationCatalog,
@@ -162,6 +163,7 @@ class SnapshotVehicleForecastRepository:
         self._verified_only = verified_only
         self._model_year_only = model_year_only
         self._hazard = ReplacementHazardModel()
+        self._survival = CohortSurvivalModel()
         self._uncertainty = OpportunityUncertaintyModel(draw_count=2000)
         self._all_vehicle_options: tuple[VehicleOption, ...] | None = None
 
@@ -334,7 +336,7 @@ class SnapshotVehicleForecastRepository:
             excluded_ambiguous_years=tuple(sorted(ambiguous_years)),
             excluded_forecast_cohort_years=tuple(sorted(forecast_years)),
             markets=markets,
-            survival_method="constant-annual-retention-v1",
+            survival_method=self._survival.method,
             hazard_method=self._hazard.method,
             uncertainty_method=self._uncertainty.method,
             calibration_status="assumption_led_without_proprietary_fitment_or_hazard_calibration",

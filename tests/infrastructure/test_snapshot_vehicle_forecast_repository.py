@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from icor.forecasting.survival import CohortSurvivalModel
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
     SnapshotVehicleForecastRepository,
     VehicleForecastSelectionError,
@@ -218,3 +219,17 @@ def test_transition_year_is_not_silently_assigned_to_a_reviewed_generation(
         repository.forecast(
             brand="Volkswagen", model="Golf", year=2019, generation=None, horizon=2028
         )
+
+
+def test_survival_method_is_read_from_the_model_not_a_literal(
+    repository: SnapshotVehicleForecastRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A survival version bump must reach this channel, not only the planner channel."""
+    monkeypatch.setattr(CohortSurvivalModel, "method", "calibrated-cohort-retention-v2")
+
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+    )
+
+    assert result.survival_method == "calibrated-cohort-retention-v2"
