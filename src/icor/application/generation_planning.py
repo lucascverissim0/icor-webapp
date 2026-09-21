@@ -54,13 +54,20 @@ class _AnnualValue:
 class GenerationPlanningService:
     """Create one reproducible cohort/opportunity baseline from assigned evidence."""
 
-    def __init__(self, *, batch_size: int = _BATCH_SIZE) -> None:
+    def __init__(
+        self,
+        *,
+        batch_size: int = _BATCH_SIZE,
+        survival: CohortSurvivalModel | None = None,
+    ) -> None:
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("planning batch size must be a positive integer")
         self.batch_size = batch_size
         self.reconciler = RegistrationReconciler()
         self.forecaster = RegistrationForecaster()
-        self.survival = CohortSurvivalModel()
+        # Injectable so a calibrated retention curve can replace the assumed one
+        # without editing this service. Its .method flows into every cohort record.
+        self.survival = survival or CohortSurvivalModel()
         self.hazard = ReplacementHazardModel()
         self.uncertainty = OpportunityUncertaintyModel()
 
