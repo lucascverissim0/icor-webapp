@@ -4447,11 +4447,23 @@ genuine local run was started afterwards and its result is recorded separately.
 
 ### Still open
 
-1. **`npm run e2e` hangs on CI.** In run 35585580069 the `Planner web (Linux)` job sat in
-   `Run npm run e2e` for over an hour with every prior step green; the 2026-09-01 runs show
-   the same step `cancelled`. This is unresolved and blocks a green CI.
-2. The repository is still public and the key is still unrotated.
-3. Parts C, D and E of the plan are not started. The active snapshot
+1. **`npm run e2e` hangs on CI, but passes locally.** A clean local run with nothing else
+   loading the machine: **25 passed, exit 0, 1.1m**. An earlier local run made while the
+   pytest suite was running reported 3 failures (planner, opportunities, accessibility),
+   all bare 30s timeouts; that was machine contention, not a defect, and must not be
+   recorded as a failing suite. On CI, run 35585580069's `Planner web (Linux)` job sat in
+   `Run npm run e2e` for over an hour with every prior step green, and the 2026-09-01 runs
+   show the same step `cancelled`. Unresolved, and it blocks a green CI.
+2. **windows-latest `uv run pytest` still failed on `f1c0582`**, after the `.gitattributes`
+   fix. `git -c core.autocrlf=true checkout-index` with the new attributes does produce the
+   correct 128-byte LF artifact, so the CRLF mechanism is genuinely fixed; the remaining
+   Windows failure is therefore something else and is **not yet identified**. Its log could
+   not be read: the API log endpoint returns 403 unauthenticated, and the Actions job page
+   streams while a job is running so it never reaches document_idle for the browser tools.
+   Lucas chose to skip CI for now and keep verifying locally. Reading job logs later needs
+   a fine-grained PAT with Actions: read.
+3. The repository is still public and the key is still unrotated.
+4. Parts C, D and E of the plan are not started. The active snapshot
    `snapshot-a20e1c00232b3603c1a1` still predates the current uncertainty method, so the
    ranking page still serves the 45%-too-narrow bands.
 
