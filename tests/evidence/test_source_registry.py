@@ -39,7 +39,7 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
     assert OFFICIAL_SOURCE_VERSIONS.generation_resolver == "generation-resolver-v1"
     assert OFFICIAL_SOURCE_VERSIONS.reconciliation_method == "dependency-precedence-v1"
     assert OFFICIAL_SOURCE_VERSIONS.estimation_method == "linear-gap-interpolation-v1"
-    assert OFFICIAL_SOURCE_VERSIONS.survival_method == "constant-annual-retention-v1"
+    assert OFFICIAL_SOURCE_VERSIONS.survival_method == "uk-dft-licensed-stock-band-v1"
     assert (
         OFFICIAL_SOURCE_VERSIONS.hazard_method
         == "france-insurance-windshield-hazard-v2"

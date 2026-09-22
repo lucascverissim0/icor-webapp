@@ -38,6 +38,8 @@ class SnapshotVersions:
     survival_method: str
     hazard_method: str
     forecast_method: str
+    # Defaulted so snapshots written before this field can still be read back.
+    uncertainty_method: str = "uncertainty-method-v0"
     generation_registry: str = "generation-registry-v0"
     generation_resolver: str = "generation-resolver-v0"
 

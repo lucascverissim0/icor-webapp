@@ -187,11 +187,15 @@ def test_the_calibrated_model_separates_measurement_from_transfer() -> None:
     """A UK curve applied to Germany is a transfer and must say so."""
     from icor.forecasting.survival import CalibratedCohortSurvivalModel
 
-    model = CalibratedCohortSurvivalModel(_band(), calibrated_geography="GB")
+    model = CalibratedCohortSurvivalModel(_band(), calibrated_geography="UK")
 
-    assert model.reason_code("GB") == "licensed-stock-calibrated-survival"
-    assert model.reason_code("gb") == "licensed-stock-calibrated-survival"
-    assert model.reason_code("DE") == "licensed-stock-calibrated-survival-transferred"
+    assert model.reason_code("UK") == "licensed-stock-calibrated-survival-uk"
+    assert model.reason_code("uk") == "licensed-stock-calibrated-survival-uk"
+    assert (
+        model.reason_code("DE")
+        == "licensed-stock-calibrated-survival-transferred-from-uk"
+    )
+    assert model.reason_code("GB").endswith("transferred-from-uk")
 
 
 def test_the_assumed_model_still_reports_itself_as_uncalibrated() -> None:

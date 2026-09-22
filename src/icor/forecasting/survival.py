@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 
-from icor.forecasting.survival_calibration import LicensedStockSurvivalBand
+from icor.forecasting.survival_calibration import (
+    LicensedStockSurvivalBand,
+    LicensedStockSurvivalCurve,
+)
 
 _QUANTUM = Decimal("0.0001")
 
@@ -92,7 +97,7 @@ class CalibratedCohortSurvivalModel:
         self,
         band: LicensedStockSurvivalBand,
         *,
-        calibrated_geography: str = "GB",
+        calibrated_geography: str = "UK",
         method: str = "uk-dft-licensed-stock-band-v1",
     ) -> None:
         if not calibrated_geography.strip():
@@ -122,6 +127,51 @@ class CalibratedCohortSurvivalModel:
     def reason_code(self, geography: str) -> str:
         if not geography.strip():
             raise ValueError("cohort geography is required")
-        if geography.casefold() == self.calibrated_geography.casefold():
-            return "licensed-stock-calibrated-survival"
-        return "licensed-stock-calibrated-survival-transferred"
+        source = self.calibrated_geography.casefold()
+        if geography.casefold() == source:
+            return f"licensed-stock-calibrated-survival-{source}"
+        return f"licensed-stock-calibrated-survival-transferred-from-{source}"
+
+
+PROMOTED_CURVE_PATH = Path(__file__).parent / "survival_curves" / "uk_licensed_stock.json"
+
+
+def load_promoted_survival_model(
+    path: Path | None = None,
+) -> CalibratedCohortSurvivalModel:
+    """Build the production model from the committed, reviewed curve artifact.
+
+    A snapshot build must not recalibrate. The curve it serves is whichever
+    artifact was reviewed and committed, so the model a snapshot used can be read
+    off the repository rather than reconstructed from whatever inputs happened to
+    be on disk at build time.
+    """
+
+    resolved = path or PROMOTED_CURVE_PATH
+    payload = json.loads(resolved.read_text(encoding="utf-8"))
+    support = payload["calibrated_support_age"]
+    anchors = payload["anchor_cohort_count"]
+
+    def _curve(key: str) -> LicensedStockSurvivalCurve:
+        return LicensedStockSurvivalCurve(
+            shares=tuple(Decimal(value) for value in payload["shares"][key]),
+            anchor_cohort_count=anchors,
+            transition_counts=tuple(
+                (int(age), int(count)) for age, count in payload["band_cohort_counts"]
+            ),
+            calibrated_support_age=support,
+        )
+
+    band = LicensedStockSurvivalBand(
+        p10=_curve("p10"),
+        p50=_curve("p50"),
+        p90=_curve("p90"),
+        cohort_counts=tuple(
+            (int(age), int(count)) for age, count in payload["band_cohort_counts"]
+        ),
+    )
+    return CalibratedCohortSurvivalModel(
+        band,
+        calibrated_geography=payload["calibrated_geography"],
+        method=payload["method"],
+    )

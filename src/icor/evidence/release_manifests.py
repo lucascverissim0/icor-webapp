@@ -23,9 +23,13 @@ class ManifestError(ValueError):
 _RELEASE_FIELDS = frozenset(field.name for field in fields(ReleaseManifest))
 _SNAPSHOT_FIELDS = frozenset(field.name for field in fields(SnapshotManifest))
 _VERSION_FIELDS = frozenset(field.name for field in fields(SnapshotVersions))
+# Fields added after snapshots were already being written. A manifest from
+# before a field existed must still load, so each one carries a dataclass
+# default and is excluded from the legacy required set.
 _LEGACY_VERSION_FIELDS = _VERSION_FIELDS - {
     "generation_registry",
     "generation_resolver",
+    "uncertainty_method",
 }
 
 

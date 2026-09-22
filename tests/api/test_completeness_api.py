@@ -18,9 +18,16 @@ class Completeness:
             snapshot_id="snapshot-real-v1",
             built_at=datetime(2026, 8, 28, tzinfo=UTC),
             versions=SnapshotVersions(
-                "sources-v1", "identity-v1", "reconcile-v1", "confidence-v1",
-                "estimate-v1", "survival-v1", "hazard-v1", "forecast-v1",
-                "registry-v1", "resolver-v1",
+                source_registry="sources-v1",
+                identity_registry="identity-v1",
+                reconciliation_method="reconcile-v1",
+                confidence_method="confidence-v1",
+                estimation_method="estimate-v1",
+                survival_method="survival-v1",
+                hazard_method="hazard-v1",
+                forecast_method="forecast-v1",
+                generation_registry="registry-v1",
+                generation_resolver="resolver-v1",
             ),
             items=(
                 SimpleNamespace(
