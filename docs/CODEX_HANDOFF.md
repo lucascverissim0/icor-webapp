@@ -5268,3 +5268,24 @@ index costs ~3 s once per repository instance.
 3. Consider normalising makes during evidence ingestion, so the query-time
    resolver becomes a safety net rather than the only defence.
 4. Gate 1 (the leaked key) is still waived, not met.
+
+### 2026-09-22 late — background processes reaped for memory
+
+Claude Code's low-memory reaper stopped three background processes while the
+session was idle. None of them failed; there is nothing in them to debug.
+
+- **The in-flight snapshot rebuild was killed.** This is the rebuild the earlier
+  checkpoint's next-action 1 was waiting on, started 15:54, candidate directory
+  `.local/evidence/candidates/.build-c8f73d93e0a44f42947fae37ff90ce78` (still on
+  disk, last written 15:55). It produced no usable output. **It has not been
+  restarted**, and it must not be restarted automatically: memory may still be
+  short, and a 26 GB rebuild is the wrong thing to relaunch unattended. Restart
+  it deliberately, when the machine has headroom.
+- The read-only preview harness on port 8010 and its Vite server on 5183 were
+  also stopped, so nothing is serving the UI now. Both were session-bound
+  anyway; `scripts/planner_service.py` is the durable path once a snapshot is
+  promoted.
+
+This makes the promotion blocker worse rather than better: the candidate that
+was being built to replace the unpromotable active snapshot does not exist yet.
+An unrelated Python process is still listening on port 8000 and was left alone.
