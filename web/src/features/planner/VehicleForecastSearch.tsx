@@ -42,7 +42,9 @@ function ForecastResults({ result, clientRelease }: { result: VehicleForecast; c
         <strong>Calculation chain</strong>
         <span>Registration cohorts → surviving fleet at {result.horizon} → age/geography hazard → P10/P50/P90 replacement forecast.</span>
         <span>This remains assumption-led until proprietary fitment and replacement-history calibration are available.</span>
+        <span>Methods used for these figures: survival <code>{result.survival_method}</code>, hazard <code>{result.hazard_method}</code>, uncertainty <code>{result.uncertainty_method}</code>.</span>
       </div>
+      {result.survival_method.startsWith('mixed:') && <p className="integrity-warning">These cohorts were not all built with the same survival curve ({result.survival_method}). Treat the fleet figures as provisional.</p>}
       {result.excluded_ambiguous_years.length > 0 && <p className="integrity-warning">Excluded ambiguous transition years: {result.excluded_ambiguous_years.join(', ')}.</p>}
       <div aria-label="Forecast results by market" className="vehicle-forecast-table-wrap" role="region" tabIndex={0}>
         <table className="vehicle-forecast-table">

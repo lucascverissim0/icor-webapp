@@ -40,6 +40,38 @@ Before sharing a build, confirm all of the following:
 7. The forecast benchmark in docs/FORECAST_VALIDATION.md passes against the active
    snapshot, and the snapshot method version matches the application method version.
 
+## Build and deploy the container
+
+The client preview runs from an image that carries a pruned, client-scoped
+snapshot. Derive that snapshot from the promoted full one -- deriving copies,
+prunes and re-validates in minutes, where a second build would repeat the whole
+replay:
+
+    uv run python scripts/build_client_snapshot.py --root .local/evidence derive --active
+    uv run python scripts/build_client_snapshot.py --root .local/evidence promote --snapshot <id>
+
+Copy the promoted client snapshot to `.local/client-evidence`, which is the only
+evidence path the Dockerfile copies. The image builds the bundle itself with
+`VITE_ICOR_CLIENT_RELEASE=verified`, installs the `preview` extra only so the
+`openai` and `streamlit` packages are absent from the runtime, and fails the
+build if the baked snapshot is not client-scoped.
+
+Deployment needs flyctl, an authenticated Fly account, and the three secrets set
+through `fly secrets import` so no value ever reaches a command line, a shell
+history or a transcript:
+
+    fly deploy --remote-only
+
+`--remote-only` builds on Fly's builder, so the image layer is uploaded once
+rather than rebuilt and re-pushed from a home connection on every change.
+
+Verify the deployed URL against the gates and the smoke test below:
+
+    uv run python scripts/verify_client_release.py --url https://<host> --username client-reviewer
+
+It reads the password from stdin and prints one JSON verdict; record that output
+in `docs/CODEX_HANDOFF.md` as the evidence for gates 2, 4, 5 and 7.
+
 ## Build the client bundle
 
 From the development worktree:

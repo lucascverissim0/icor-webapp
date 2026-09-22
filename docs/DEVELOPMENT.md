@@ -128,7 +128,24 @@ uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
 EEA data is reused under CC BY 4.0 with EEA/DG CLIMA attribution; KBA data uses
 DL-DE/BY-2.0 with KBA attribution; UK data uses the Open Government Licence v3.0 with
 Crown copyright/DfT attribution. EEA and KBA are placed in the same dependency group so
-their overlap is not treated as independent confirmation. The UK active-fleet parser
+their overlap is not treated as independent confirmation.
+
+Dependency groups alone are not enough, and relying on them was a defect. Two
+publishers can cover the same country-year at different granularities -- the
+EEA resolves 6,447 GB vehicles for 2018 where DfT resolves 1,054 -- so they
+collide only on the vehicles both name and the rest get added on top whatever
+their grouping. Reconciliation therefore happens at two scopes. Exactly one
+publisher decomposes a country-year (`RegistrationCoverageSelector`), and below
+that one published value wins per vehicle-year. The pan-European compilation is
+the decomposer wherever it is present, because both publishers report the same
+national total to within about a percent and what distinguishes them is
+granularity and cross-market consistency; national registers still decompose the
+years it does not cover, such as GB before 2010 and after 2020, and still win as
+rival measurements of a single vehicle-year.
+
+`scripts/replay_registration_reconciliation.py` scores this rule against a built
+snapshot in about three minutes, so a change can be judged without paying the
+four-and-a-quarter-hour rebuild. The UK active-fleet parser
 uses only `Cars` with `LicenceStatus=Licensed`; SORN remains in the raw artifact and is
 not added to active fleet. Columns after 2025 Q4 are excluded as provisional.
 
