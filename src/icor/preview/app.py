@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from icor.api.app import DEFAULT_EVIDENCE_ROOT, ROOT, create_app
 from icor.preview.auth import LoginThrottle, PreviewAuthenticator, SessionCodec
@@ -125,18 +126,31 @@ def _compose(
 
         address = request.client.host if request.client is not None else "unknown"
         throttle_key = throttle.key(username, address)
+        address_key = throttle.address_key(address)
         now = time.monotonic()
-        if not throttle.allow(throttle_key, now):
+        # Both buckets are checked before any hashing happens. The
+        # address bucket is what an attacker rotating usernames hits.
+        if not throttle.allow(throttle_key, now) or not throttle.allow(
+            address_key, now
+        ):
             return JSONResponse(
                 {"detail": "Login temporarily unavailable"},
                 status_code=429,
                 headers={"Cache-Control": "no-store"},
             )
-        if not authenticator.verify(username, password):
+        # Argon2id is deliberately expensive: about 64 MiB and tens of
+        # milliseconds per call, and an unknown user still pays it against
+        # the dummy hash. Run on the event loop it is a remote stall.
+        verified = await run_in_threadpool(
+            authenticator.verify, username, password
+        )
+        if not verified:
             throttle.record_failure(throttle_key, now)
+            throttle.record_failure(address_key, now)
             return _login_failure(401)
 
         throttle.reset(throttle_key)
+        throttle.reset(address_key)
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
             SESSION_COOKIE,
@@ -175,9 +189,13 @@ def _compose(
         return FileResponse(index, media_type="text/html")
 
     app.state.preview_settings = settings
-    app.add_middleware(PreviewSecurityMiddleware, session_codec=session_codec)
+    # Starlette prepends, so the execution order is the reverse of this:
+    # headers, then authentication, then the client-release path policy.
+    # Authentication must run before the policy, or its 404s answer
+    # unauthenticated callers and enumerate the client surface.
     if client_release:
         app.add_middleware(ClientReleaseMiddleware)
+    app.add_middleware(PreviewSecurityMiddleware, session_codec=session_codec)
     app.add_middleware(SecurityHeadersMiddleware)
     return app
 

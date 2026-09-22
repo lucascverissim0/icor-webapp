@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from argon2 import PasswordHasher
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from icor.api.app import ROOT
 from icor.preview.config import ConfigurationError, PreviewSettings, PreviewUser
 
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
@@ -273,3 +275,40 @@ def test_static_resolver_rejects_symlink_escape(assets: Path, tmp_path: Path) ->
 def test_preview_variables_are_isolated() -> None:
     assert "ICOR_PREVIEW_USERS" not in os.environ
     assert "ICOR_PREVIEW_SESSION_SECRET" not in os.environ
+
+
+def test_the_client_surface_is_not_enumerable_before_authentication(
+    monkeypatch: pytest.MonkeyPatch, settings: PreviewSettings, assets: Path
+) -> None:
+    """An unauthenticated caller learns nothing about which paths exist.
+
+    The path policy used to run before authentication, so it answered anonymous
+    callers with its own 404s: the difference between a blocked path and an
+    allowed one was readable without signing in.
+    """
+
+    app = _preview(monkeypatch, settings, assets, client_release=True)
+    with TestClient(app) as client:
+        blocked = client.get("/api/v1/registrations/ranking")
+        allowed = client.get("/api/v1/opportunities")
+
+    assert blocked.status_code == 401
+    assert allowed.status_code == 401
+    assert blocked.json() == allowed.json()
+
+
+def test_the_compiled_bundle_stays_within_the_content_security_policy() -> None:
+    """The strict policy is only safe while the bundle has nothing inline.
+
+    If the frontend ever emits an inline script or style attribute, the policy
+    silently breaks the page in a browser, which no other test would catch.
+    """
+
+    bundle = ROOT / ".local" / "client-release" / "index.html"
+    if not bundle.is_file():
+        pytest.skip("no compiled client bundle on disk")
+    markup = bundle.read_text(encoding="utf-8")
+
+    for tag in re.findall(r"<script[^>]*>", markup):
+        assert "src=" in tag, f"inline script blocked by the policy: {tag}"
+    assert " style=" not in markup

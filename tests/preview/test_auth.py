@@ -138,9 +138,63 @@ def test_middleware_attaches_authenticated_user_and_security_headers() -> None:
 
     assert response.status_code == 200
     assert response.json()["username"] == "Lucas"
-    assert response.headers["content-security-policy"] == (
-        "default-src 'self'; object-src 'none'; frame-ancestors 'none'"
-    )
+    policy = response.headers["content-security-policy"]
+    assert "default-src 'none'" in policy
+    assert "base-uri 'none'" in policy
+    assert "form-action 'self'" in policy
+    assert "frame-ancestors 'none'" in policy
+    assert "object-src 'none'" in policy
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["x-robots-tag"].startswith("noindex")
+    assert response.headers["cross-origin-opener-policy"] == "same-origin"
+
+
+def test_hsts_is_sent_only_over_tls() -> None:
+    """Asserting HSTS over plain HTTP would make a local run look protected."""
+
+    app = _protected_app()
+    token = app.state.codec.issue("Lucas", datetime.now(UTC))
+    with TestClient(app) as client:
+        client.cookies.set("icor_preview_session", token)
+        plain = client.get("/planner")
+        forwarded = client.get("/planner", headers={"x-forwarded-proto": "https"})
+
+    assert "strict-transport-security" not in plain.headers
+    assert forwarded.headers["strict-transport-security"] == (
+        "max-age=31536000; includeSubDomains"
+    )
+
+
+def test_hsts_never_asks_for_preload() -> None:
+    app = _protected_app()
+    token = app.state.codec.issue("Lucas", datetime.now(UTC))
+    with TestClient(app) as client:
+        client.cookies.set("icor_preview_session", token)
+        response = client.get("/planner", headers={"x-forwarded-proto": "https"})
+
+    assert "preload" not in response.headers["strict-transport-security"]
+
+
+def test_security_headers_are_attached_to_an_unauthenticated_rejection() -> None:
+    with TestClient(_protected_app()) as client:
+        response = client.get("/planner")
+
+    assert response.status_code == 401
+    assert response.headers["x-robots-tag"].startswith("noindex")
+    assert "default-src 'none'" in response.headers["content-security-policy"]
+
+
+def test_the_login_throttle_has_a_bucket_that_ignores_the_username() -> None:
+    """Rotating usernames must not walk past the limit."""
+
+    throttle = LoginThrottle(b"k" * 32)
+
+    first = throttle.address_key("198.51.100.7")
+    second = throttle.address_key("198.51.100.7")
+    other = throttle.address_key("198.51.100.8")
+
+    assert first == second
+    assert first != other
+    assert first != throttle.key("someone", "198.51.100.7")

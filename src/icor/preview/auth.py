@@ -148,6 +148,17 @@ class LoginThrottle:
         value = f"{username.strip().casefold()}\0{client_address}".encode()
         return hmac.digest(self._digest_key, value, hashlib.sha256).hex()
 
+    def address_key(self, client_address: str) -> str:
+        """A bucket that does not depend on the username.
+
+        The per-username bucket is bypassed entirely by rotating usernames,
+        which is free for an attacker and unauthenticated-reachable because
+        an unknown user is still verified against the dummy hash.
+        """
+
+        value = f"\0address\0{client_address}".encode()
+        return hmac.digest(self._digest_key, value, hashlib.sha256).hex()
+
     def allow(self, key: str, now: float) -> bool:
         self._evict(now)
         return len(self._failures.get(key, ())) < self._max_attempts
