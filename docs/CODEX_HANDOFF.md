@@ -4638,3 +4638,79 @@ Remaining after the build finishes: inspect the candidate with
 (`snapshot_opportunity_repository`, reads stored quantiles) and the vehicle-forecast
 channel (`snapshot_vehicle_forecast_repository`, recomputes them), and re-run the client
 smoke test.
+
+## 2026-09-22 DEFECT: GB registrations are double counted, inflating GB demand up to ~2x
+
+Found while sanity-checking the rebuilt snapshot's modelled fleet against published parc
+figures. **This is a pre-existing defect present in the active production snapshot, not a
+regression introduced by the survival calibration.** It is the most consequential finding
+of the session and it affects client-visible numbers.
+
+### Evidence
+
+GB cohort registrations as reconciled in the snapshot, against actual GB new car
+registrations:
+
+| Cohort year | Reconciled | Actual | Ratio |
+|---|---:|---:|---:|
+| 2015 | 5,156,812 | ~2.63M | **1.96x** |
+| 2018 | 4,645,967 | ~2.37M | **1.96x** |
+| 2019 | 3,984,634 | ~2.31M | **1.72x** |
+| 2023 | 2,132,509 | ~1.90M | 1.12x |
+| 2024 | 2,114,755 | ~1.95M | 1.08x |
+
+The inflation appears exactly in the years where two sources both cover GB, and
+disappears after the UK stopped reporting to the EEA. Per-source totals confirm the two
+are measuring the same vehicles:
+
+- 2018: `eea-co2-monitoring` 2,355,350 and `uk-dft-veh0160` 2,341,505
+- 2019: `eea-co2-monitoring` 2,304,560 and `uk-dft-veh0160` 2,295,409
+
+Consequence: modelled GB fleet for 2028 from 2001+ cohorts alone is **41,129,260**, above
+the entire GB car parc of roughly 33-34 million, which also excludes pre-2001 vehicles
+still licensed.
+
+### Root cause
+
+`RegistrationReconciler.reconcile` in `src/icor/forecasting/reconciliation.py` selects one
+winner **per dependency group** and then **sums across groups**:
+
+    value=sum((item.value for item in selected), start=Decimal(0))
+
+That is correct only when dependency groups measure *disjoint populations*. Here they
+measure the *same* population from two independent publishers, which is corroboration,
+not addition. The dependency-group concept conflates "sources that are correlated" with
+"sources that cover different vehicles".
+
+The same overlap was already recognised for Germany and handled: `docs/DEVELOPMENT.md`
+records that EEA and KBA share a dependency group "so their overlap is not treated as
+independent confirmation". UK DfT was left in its own group `uk-dvla-vehicle-register`
+while EEA uses `european-passenger-car-registrations-<year>`, so the GB overlap was never
+handled.
+
+### Why it is not a one-line fix
+
+EEA dependency groups are **per year** (`european-passenger-car-registrations-2024`),
+while the single UK DfT release spans **2001-2025**. A release therefore cannot simply be
+moved into the matching EEA group; the overlap is per (geography, year), but
+`dependency_group` is a property of a release. Resolving this needs either a
+geography-and-year-scoped overlap rule or a reconciler that understands corroboration
+separately from addition. It needs design, then a rebuild, which currently costs 4h15m.
+
+### Interaction with the survival calibration
+
+The two defects were partially cancelling. The constant survival curve over-attrited
+young vehicles, which masked part of the inflated registration input. Replacing it with
+the accurate curve retains more of an input that is too large, so the GB fleet overshoot
+becomes *more* visible: modelled GB 2028 fleet rises from 35,919,876 to 41,129,260.
+
+This is expected and is not an argument against the calibration. It is an argument for
+fixing the input. Lucas was shown this trade-off explicitly and chose to promote the
+better model now and fix GB next.
+
+### Until it is fixed
+
+Do not quote any GB figure - fleet, opportunity ranking position, or demand - to a client.
+Non-overlapping geographies are unaffected by this specific defect: Germany is covered by
+the shared EEA/KBA group, and the sanity check on the new snapshot gives DE 43.5M and FR
+23.4M for 2028, both below their national parcs and therefore plausible.
