@@ -4497,3 +4497,144 @@ Eurostat `road_eqs_carage` is confirmed live with exactly five age bands
 calibration source, which matches the classification already recorded for `road_tf_vehage`.
 
 No snapshot, release, deployment, merge or history rewrite occurred.
+
+## 2026-09-22 calibrated survival promoted; snapshot rebuild in progress
+
+Lucas asked to end the day with the best version of the web app. He chose the larger
+of two options: add the governed input the calibration needed and do a single rebuild
+carrying both the corrected uncertainty propagation and the calibrated survival curve,
+accepting the risk that it might not finish today.
+
+### The constant survival model had the wrong shape, not just the wrong level
+
+Reproduced on this tree with
+`scripts/benchmark_survival_calibration.py --root .local/evidence --uk-registrations
+.local/downloads/df_VEH0160_UK-20260715.csv`:
+
+| Measure | Constant retention | Calibrated curve |
+|---|---:|---:|
+| WAPE | 0.131908 | **0.007013** |
+| Weighted bias | -0.130606 | **-0.004712** |
+| Points / vehicle-years | 55 / 117,339,249 | same |
+
+A 94.68% relative reduction. Per-age constant WAPE runs 0.0043 at age one, 0.045 at
+age two, 0.177 at age five, 0.317 at age nine, 0.344 at age ten.
+
+The earlier record of 0.006715 versus 0.127699 on 54 points is superseded: the current
+run evaluates 55 points because age ten is now supported.
+
+The important finding is the *shape*. The constant model **over-attrits young vehicles**
+(56.4% of a cohort remaining at age ten against an observed 85.4%) and **under-attrits
+old ones** (31.9% at age twenty against an observed 16.7%). The errors cross over around
+age sixteen, so no single retention constant could have corrected either. Observed annual
+retention is roughly 0.98-1.00 through the first decade, falls to about 0.79 between ages
+eleven and twenty, then rises again as durable survivors remain.
+
+### What was built
+
+- `extend_with_monotone_tail` continues a curve past its calibrated support at the
+  geometric mean of its last five observed transitions. It fits no parametric shape on
+  purpose: neither Weibull nor Gompertz reproduces the three-phase shape above. A curve
+  whose recent transitions were all capped at 1.0 is rejected rather than extended into
+  an immortal fleet. Not exercised by this build - maximum cohort age is 30 against a
+  support of 40, verified before starting.
+- `calibrate_licensed_stock_band` measures the spread of the same annual transition
+  across the eleven registration cohorts available at every age and compounds the
+  quantile transitions around the pooled median, which is left exactly as benchmarked.
+  Compounding assumes a cohort that decays faster than the median keeps doing so; that is
+  the conservative reading and matches the data. Relative band width against the constant
+  model: **0.043 versus 0.237 at age five**, 0.129 versus 0.471 at age ten, and honestly
+  wider at old ages, 1.79 versus 1.45 at age thirty.
+- `CalibratedCohortSurvivalModel` serves that band through the interface
+  `GenerationPlanningService` already expected, carrying its own method and assumption
+  IDs. `reason_code` distinguishes the measured geography from every transfer, and the
+  planner now asks the model for that code instead of hardcoding
+  `assumption-led-survival-not-calibrated`.
+
+### Why the curve is an artifact, not a build-time calculation
+
+`scripts/calibrate_survival_curve.py` writes
+`src/icor/forecasting/survival_curves/uk_licensed_stock.json`, carrying the three share
+curves, cohort counts, the source's URL, byte count and SHA-256, and its stated
+limitations. `load_promoted_survival_model()` reads that committed artifact and the build
+uses it. A snapshot's curve is therefore a reviewable fact in the repository rather than
+a side effect of whichever files were on disk at build time.
+
+### The geography decision, which is the subtle part
+
+The curve is calibrated on **UK** licensed stock (`df_VEH0124`, UK-scoped) anchored by
+**UK** registrations (`df_VEH0160_UK`, 10,092,936 bytes, SHA-256
+`f5390dfb...7abce`, OGL v3.0).
+
+Two alternatives were rejected, both for concrete reasons:
+
+- *Anchor UK stock with the GB registrations already in the snapshot.* GB excludes
+  Northern Ireland, so the scope mismatch would have scaled the age-one anchor, and
+  therefore every cohort at every age, by roughly 2.5%.
+- *Load `df_VEH0160_UK` into the evidence set as a governed release.* GB registrations
+  from the same DVLA register are already there, so a UK-wide copy would double count and
+  would create a `UK` geography the product does not target. The file is read only to
+  calibrate. Parser counts were derived exactly (raw 62,967 / accepted 33,589 /
+  rejected 29,378) in case that decision is ever revisited.
+
+`calibrated_geography` is therefore **UK**, not GB. Every product geography - EU27, BE,
+FR, ES, NL, GB, DE, PL - receives the curve as a transfer and each cohort records
+`licensed-stock-calibrated-survival-transferred-from-uk`. GB is a 97% subset of UK rather
+than the same thing, so it is labelled a transfer too; that is pedantic but honest, and
+the label names its source so a reader can judge the distance.
+
+### Snapshot versioning gap, closed
+
+`SnapshotVersions` had no `uncertainty_method` field, so a snapshot could not record which
+propagation produced its intervals. `CLIENT_RELEASE.md` gate 7 therefore had nothing to
+compare and could not detect that the active snapshot predated the split-normal fix. The
+field now exists, defaulted so manifests written before it still load, and
+`_LEGACY_VERSION_FIELDS` excludes it. `tests/api/test_completeness_api.py` passed its
+versions positionally and silently shifted when the field was inserted; it now uses
+keywords.
+
+`OFFICIAL_SOURCE_VERSIONS.survival_method` is now `uk-dft-licensed-stock-band-v1`.
+
+### Verification
+
+- `uv run pytest`: **702 passed, 14 skipped, 4 xfailed**. Baseline at the start of the day
+  was 683.
+- `uv run ruff check src tests scripts/calibrate_survival_curve.py`: all checks passed.
+- One transient `test_open_active_snapshot_returns_matching_manifest_and_repository`
+  teardown error appeared in a single full run and did not reproduce on rerun or in
+  isolation; it looks like a Windows file lock on the 9.2 GB database, not a defect.
+
+### Commits
+
+`52ae5e3` tail, band and model; `9606957` promotion, curve artifact and version bump;
+`94c1b2a` documentation. All pushed.
+
+### What promotion does NOT license anyone to claim
+
+Registration WAPE (0.6976), UK licensed-stock survival WAPE (0.007013) and final
+windshield-replacement accuracy measure different things and must never be blended into
+one number. **Calibrating the fleet does not calibrate the rate applied to it**: the
+4.3026% French insurance proxy is untouched and still assumption-led, so final demand
+intervals remain assumption-led. `docs/WINDSHIELD_DEMAND_ASSUMPTIONS.md` now states the
+two separately rather than declaring both uncalibrated.
+
+### Snapshot rebuild status at the time of writing
+
+A rebuild started at 09:41 local time covering all 21 releases of the active snapshot,
+with `--build-as-of 2026-09-22T12:00:00+00:00 --deterministic-seed 20260922`, writing to
+`.local/evidence/candidates/.build-82025dce027c4ac9926eecaff3caa44b`. It is the first
+snapshot to carry both the split-normal uncertainty propagation and the calibrated
+survival curve.
+
+**It has not been promoted.** Until it is, the active snapshot remains
+`snapshot-a20e1c00232b3603c1a1`, whose intervals are the measured 45%-too-narrow ones and
+whose survival is the constant model. If this rebuild is abandoned, delete only the
+`.build-` candidate directory; the active pointer and both retained snapshots are
+untouched by a failed or abandoned build.
+
+Remaining after the build finishes: inspect the candidate with
+`scripts/report_snapshot_completeness.py`, promote only a zero-error candidate, confirm
+`survival_method` and `uncertainty_method` appear in both the ranking channel
+(`snapshot_opportunity_repository`, reads stored quantiles) and the vehicle-forecast
+channel (`snapshot_vehicle_forecast_repository`, recomputes them), and re-run the client
+smoke test.
