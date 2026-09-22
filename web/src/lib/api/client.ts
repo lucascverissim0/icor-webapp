@@ -74,6 +74,7 @@ export interface VehicleForecastOptionsQuery {
   search?: string
   brand?: string
   model?: string
+  includeAllBrands?: boolean
 }
 
 export interface VehicleForecastQuery {
@@ -154,6 +155,7 @@ export class PlannerApiClient {
     if (query.search) parameters.set('search', query.search)
     if (query.brand) parameters.set('brand', query.brand)
     if (query.model) parameters.set('model', query.model)
+    if (query.includeAllBrands) parameters.set('include_all_brands', 'true')
     const suffix = parameters.size > 0 ? `?${parameters.toString()}` : ''
     return this.request<VehicleForecastOptions>(`/api/v1/vehicle-forecasts/options${suffix}`)
   }

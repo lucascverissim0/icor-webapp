@@ -93,6 +93,12 @@ def test_start_replaces_state_left_behind_by_dead_processes(
     assert planner_service.read_state(state_path) == state
     assert len(spawned) == 2
     assert any("uvicorn" in part for part in spawned[0])
+    # Vite runs through node, not npm: on Windows npm is a batch file, and the
+    # cmd.exe wrapping it takes console control events that detachment should
+    # have prevented, killing the dev server with a prompt nobody can answer.
+    assert "node" in spawned[1][0]
+    assert any(part.endswith("vite.js") for part in spawned[1])
+    assert not any("npm" in part for part in spawned[1])
 
 
 def test_start_names_the_missing_environment_variable(
@@ -106,6 +112,43 @@ def test_start_names_the_missing_environment_variable(
     monkeypatch.setattr(planner_service, "check_prerequisites", lambda: None)
 
     with pytest.raises(planner_service.ServiceError, match="ICOR_EVIDENCE_ACTIVE_ROOT"):
+        planner_service.start(
+            state_path=tmp_path / "planner-service.json", log_directory=tmp_path
+        )
+
+
+def test_start_refuses_a_snapshot_root_that_does_not_resolve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Set but wrong is worse than unset.
+
+    The API starts, fails to open the active snapshot and answers 503 for every
+    vehicle, while the pair looks healthy. A Git Bash `/c/Users/...` path on
+    Windows is the easy way to land there.
+    """
+
+    from scripts import planner_service
+
+    monkeypatch.setattr(planner_service, "check_prerequisites", lambda: None)
+    monkeypatch.setenv("ICOR_EVIDENCE_ACTIVE_ROOT", "/c/Users/someone/evidence")
+
+    with pytest.raises(planner_service.ServiceError, match="not a directory"):
+        planner_service.start(
+            state_path=tmp_path / "planner-service.json", log_directory=tmp_path
+        )
+
+
+def test_start_refuses_a_snapshot_root_with_nothing_promoted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import planner_service
+
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    monkeypatch.setattr(planner_service, "check_prerequisites", lambda: None)
+    monkeypatch.setenv("ICOR_EVIDENCE_ACTIVE_ROOT", str(evidence))
+
+    with pytest.raises(planner_service.ServiceError, match="No active.json"):
         planner_service.start(
             state_path=tmp_path / "planner-service.json", log_directory=tmp_path
         )

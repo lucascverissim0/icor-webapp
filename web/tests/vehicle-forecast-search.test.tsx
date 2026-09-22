@@ -108,9 +108,113 @@ describe('VehicleForecastSearch', () => {
     expect(await screen.findByRole('heading', { name: /Volkswagen Golf · Golf Mk8/i })).toBeVisible()
     expect(screen.getByText('800')).toBeVisible()
     expect(screen.getByText('32')).toBeVisible()
+    // Per-market detail sits behind a disclosure so the EU figures lead.
+    await user.click(screen.getByText(/Per-market breakdown/i))
     expect(screen.getByText(/England is not separable/i)).toBeVisible()
     expect(screen.getByText(/fleet decay has already been applied/i)).toBeVisible()
     expect(screen.getByText(/Future sales cohorts 2026, 2027, 2028 are not added/i)).toBeVisible()
+  })
+
+  it('leads with the EU figures and the demand rank', async () => {
+    const user = userEvent.setup()
+    const ranked = {
+      ...forecast,
+      european_coverage: { contributing_markets: ['BE', 'FR'], missing_markets: ['DE', 'ES'] },
+      demand_rank: {
+        percentile: 0.92, demand_points: 73.6, rank: 41, population: 500,
+        basis: 'european_opportunity_p50_at_horizon',
+      },
+    }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      if (url.includes('/vehicle-forecasts?')) return Promise.resolve(json(ranked))
+      if (url.includes('brand=Volkswagen') && url.includes('model=Golf')) return Promise.resolve(json(selectedOptions))
+      return Promise.resolve(json(searchOptions))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search brand or model' }), 'Golf')
+    await user.click(screen.getByRole('button', { name: 'Search vehicles' }))
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Model year' }), '2020')
+    await user.click(screen.getByRole('button', { name: 'Calculate forecast' }))
+
+    expect(await screen.findByText('EU27 fleet estimate')).toBeVisible()
+    expect(screen.getByText('Windshield replacements')).toBeVisible()
+    expect(screen.getByText('#41')).toBeVisible()
+    expect(screen.getByText(/92th percentile/)).toBeVisible()
+    // A partial EU sum must name the members it leaves out.
+    expect(screen.getByText(/does not include/i)).toHaveTextContent('DE, ES')
+  })
+
+  it('reads an unavailable market as a data gap, not as a forecast of zero', async () => {
+    const user = userEvent.setup()
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      if (url.includes('/vehicle-forecasts?')) return Promise.resolve(json(forecast))
+      if (url.includes('brand=Volkswagen') && url.includes('model=Golf')) return Promise.resolve(json(selectedOptions))
+      return Promise.resolve(json(searchOptions))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search brand or model' }), 'Golf')
+    await user.click(screen.getByRole('button', { name: 'Search vehicles' }))
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Model year' }), '2020')
+    await user.click(screen.getByRole('button', { name: 'Calculate forecast' }))
+    await user.click(await screen.findByText(/Per-market breakdown/i))
+
+    expect(screen.getByText(/No official registration data yet/i)).toBeVisible()
+    expect(screen.getByText(/not a forecast of zero/i)).toBeVisible()
+    expect(screen.queryByText(/Unavailable . not zero/)).not.toBeInTheDocument()
+  })
+
+  it('carries a year typed into the search through to the year selection', async () => {
+    const user = userEvent.setup()
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      if (url.includes('/vehicle-forecasts?')) return Promise.resolve(json(forecast))
+      if (url.includes('brand=Volkswagen') && url.includes('model=Golf')) return Promise.resolve(json(selectedOptions))
+      return Promise.resolve(json({ ...searchOptions, search_year: 2020 }))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search brand or model' }), 'VW Golf 2020')
+    await user.click(screen.getByRole('button', { name: 'Search vehicles' }))
+
+    expect(await screen.findByRole('combobox', { name: 'Brand' })).toHaveValue('Volkswagen')
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('Golf')
+    expect(await screen.findByRole('combobox', { name: 'Model year' })).toHaveValue('2020')
+  })
+
+  it('offers the full make list only when asked', async () => {
+    const user = userEvent.setup()
+    const seen: string[] = []
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL ? input.href : input.url
+      seen.push(url)
+      if (url.includes('include_all_brands=true')) {
+        return Promise.resolve(json({ ...searchOptions, brands: ['Agrifac', 'Ford', 'Volkswagen'] }))
+      }
+      return Promise.resolve(json(searchOptions))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
+
+    expect(await screen.findByRole('option', { name: 'Volkswagen' })).toBeVisible()
+    expect(screen.queryByRole('option', { name: 'Agrifac' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox'))
+
+    expect(await screen.findByRole('option', { name: 'Agrifac' })).toBeVisible()
   })
 
   it('provides working brand and dependent model dropdowns', async () => {

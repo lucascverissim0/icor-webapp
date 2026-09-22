@@ -3005,3 +3005,71 @@ button:hover:not(:disabled) {
     width: 100%;
   }
 }
+
+/* Model search: the EU figures lead, per-market detail sits behind a
+   disclosure. The previous layout buried the European total as row one of an
+   eight-row table in which most rows read "Unavailable". */
+.eu-headline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1rem;
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border-radius: 0.7rem;
+  background: var(--surface-muted);
+}
+
+.eu-headline__figure {
+  display: grid;
+  gap: 0.15rem;
+  align-content: start;
+}
+
+.eu-headline__value {
+  margin: 0;
+  font-size: 1.9rem;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.eu-headline__note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.eu-headline__coverage,
+.market-gap {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.55rem;
+  background: #fff1c6;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.market-gap {
+  margin-top: 0.75rem;
+}
+
+.market-breakdown {
+  margin: 1rem 0;
+}
+
+.market-breakdown > summary {
+  cursor: pointer;
+  padding: 0.5rem 0;
+  font-weight: 600;
+}
+
+.brand-scope {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}

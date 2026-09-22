@@ -149,11 +149,32 @@ def _require_free_ports(api_port: int, web_port: int) -> None:
 
 
 def _require_environment() -> None:
+    """Check the snapshot root is set and actually resolves.
+
+    Set but wrong is worse than unset: the API starts, fails to open the active
+    snapshot, and answers 503 for every vehicle while `status` reports a healthy
+    pair. A POSIX-style path from a Git Bash shell (`/c/Users/...`) is the easy
+    way to land there on Windows, so the path is resolved here and the start is
+    refused rather than leaving a running app that cannot answer.
+    """
+
     missing = [name for name in REQUIRED_ENVIRONMENT if not os.environ.get(name)]
     if missing:
         raise ServiceError(
             "Set these before starting the planner service so it serves the "
             f"snapshot you expect: {', '.join(missing)}"
+        )
+    root = Path(os.environ["ICOR_EVIDENCE_ACTIVE_ROOT"])
+    if not root.is_dir():
+        raise ServiceError(
+            f"ICOR_EVIDENCE_ACTIVE_ROOT points at {root}, which is not a directory. "
+            "Nothing was started: the API would run but answer 503 for every "
+            "vehicle. On Windows give it a Windows path, not a /c/... shell path."
+        )
+    if not (root / "active.json").is_file():
+        raise ServiceError(
+            f"No active.json under {root}, so no snapshot is promoted there. "
+            "Nothing was started, because the API could not serve a forecast."
         )
 
 
@@ -164,6 +185,13 @@ def _spawn_detached(command: list[str], log_path: Path, environment: dict[str, s
     close the pipes underneath it. Its output goes to a log file instead, and on
     Windows DETACHED_PROCESS also keeps it out of this console's process group
     so a Ctrl+C or a window close does not reach it.
+
+    Vite is started through `node` on its own entry point rather than through
+    `npm run dev`. On Windows `npm` is a batch file, so npm.cmd runs under a
+    cmd.exe that survives detachment as a console app: a console control event
+    reached it, cmd.exe asked "Terminate batch job (Y/N)?" into a log nobody was
+    reading, and the dev server died with it. Running node directly removes the
+    cmd.exe layer, and the argv is the one `npm run dev` would have produced.
     """
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,10 +261,8 @@ def start(
     )
     web_pid = _spawn_detached(
         [
-            _executable("npm"),
-            "run",
-            "dev",
-            "--",
+            _executable("node"),
+            str(WEB_ROOT / "node_modules" / "vite" / "bin" / "vite.js"),
             "--host",
             "127.0.0.1",
             "--port",
