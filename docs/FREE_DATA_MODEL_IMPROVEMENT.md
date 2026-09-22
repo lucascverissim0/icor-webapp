@@ -19,7 +19,13 @@ cohort-out validation produced:
 | Evaluation | 54 cohort-age points / 115,051,473 actual vehicle-years | same |
 
 This is a 94.74% relative WAPE reduction for the aggregate UK Cars licensed-stock
-target. It is a research result, not authority to change production. The evidence is
+target.
+
+**Promotion status, 2026-09-22: this curve is now the production survival model.**
+Reproduced on the current tree it scores WAPE 0.007013 against 0.131908, a 94.68%
+relative reduction, with weighted bias -0.0047 against -0.1306 across 55 cohort-age
+points. It clears all four survival gates stated further down this page. The caveats
+below are unchanged by promotion and still bound what may be claimed: the evidence is
 one current DfT publication vintage, the score aggregates makes and models, licensed
 stock is an administrative proxy rather than physical survival, and generation-level
 or non-UK accuracy has not been demonstrated.
@@ -35,8 +41,11 @@ The model is a deterministic evidence-and-assumption pipeline:
 3. Observed annual registrations are reconciled and gaps are explicitly estimated.
 4. Future registrations use a fixed 50/50 blend of the last observation and a damped
    five-year linear trend.
-5. Each registration cohort is decayed with constant annual retention: P50 0.9444,
-   P10 0.92 and P90 0.965.
+5. Each registration cohort is decayed by the calibrated UK licensed-stock
+   retention band (`uk-dft-licensed-stock-band-v1`). Its median is the pooled
+   curve validated here; its P10/P90 come from the spread of the same annual
+   transition measured across eleven registration cohorts. Until 2026-09-22 this
+   step applied constant annual retention of P50 0.9444, P10 0.92 and P90 0.965.
 6. Surviving fleet is multiplied by a flat windshield-replacement hazard. The current
    central assumption is `0.0606 × 0.71 = 0.043026` replacements per active
    vehicle-year.
@@ -94,7 +103,7 @@ the highest-value data-engineering action.
 
 | Need | Best free source found | What it can improve | Decision |
 |---|---|---|---|
-| Cohort stock/survival | UK DfT `df_VEH0160_UK` + `df_VEH0124` | Age-shaped UK licensed-stock retention | Implemented as challenger; no production promotion |
+| Cohort stock/survival | UK DfT `df_VEH0160_UK` + `df_VEH0124` | Age-shaped UK licensed-stock retention | **Promoted 2026-09-22**; UK-measured, transferred elsewhere with a per-cohort label |
 | EU registrations and vehicle attributes | EEA new car CO2 monitoring | Country, manufacturer, type/variant/version and technical covariates | Continue governed annual ingestion; archive every vintage[3] |
 | Traffic exposure | Eurostat road traffic by vehicle type and age (`road_tf_vehage`) | Country/age exposure priors | Research covariate only; it is aggregate, not model-level[4] |
 | Weather exposure | Copernicus ERA5-Land | Hail, freezing, temperature and precipitation features | Add only after geographically aligned claims/replacement labels exist[5] |

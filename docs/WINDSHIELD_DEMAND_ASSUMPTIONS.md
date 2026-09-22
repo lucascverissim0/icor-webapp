@@ -59,6 +59,11 @@ or installation outcomes become available.
   documented end year. Its earlier cohorts remain in the active fleet after that
   date, decay through the survival model, and continue to generate replacement
   demand.
-- Fleet survival and exact vehicle-to-windshield fitment remain uncalibrated.
-  All final demand intervals therefore remain assumption-led until ICOR history
-  and fitment truth are integrated and backtested.
+- Fleet survival is now calibrated against UK DfT licensed stock and is no
+  longer an assumption; see `docs/FREE_DATA_MODEL_IMPROVEMENT.md`. Outside the
+  UK it is an explicit transfer, and each cohort records which it received.
+- The windshield replacement rate on this page and exact vehicle-to-windshield
+  fitment remain uncalibrated. Final demand intervals therefore remain
+  assumption-led until ICOR replacement history and fitment truth are
+  integrated and backtested. Calibrating the fleet does not calibrate the rate
+  applied to it.
