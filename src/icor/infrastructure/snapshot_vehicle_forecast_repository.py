@@ -15,6 +15,7 @@ from icor.evidence.normalization import (
     normalize_vehicle_label,
     source_vehicle_display_label,
 )
+from icor.evidence.provenance import resolve_reported_method
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 from icor.generations.public_catalog import (
@@ -694,21 +695,13 @@ def _survival_method(rows: list[sqlite3.Row]) -> str:
 
     The fleet quantiles are read from `cohort_estimate`, so constructing a
     survival model here and reporting its method described the code rather than
-    the data. After a snapshot was built with a calibrated curve, this channel
-    still claimed `constant-annual-retention-v1` while the ranking channel,
-    which reads the stored rows, reported the calibrated method - the two pages
-    disagreed about the same vehicle again.
-
-    Rows disagreeing among themselves would mean a snapshot mixing curves, which
-    the build cannot currently produce; say so rather than picking a winner.
+    the data. The shared rule now lives in `icor.evidence.provenance`, because
+    this is the fourth channel to need it.
     """
 
-    methods = {row["survival_method"] for row in rows}
-    if not methods:
-        raise ValueError("cohort rows carry no survival method")
-    if len(methods) > 1:
-        return "mixed:" + ",".join(sorted(str(method) for method in methods))
-    return str(next(iter(methods)))
+    return resolve_reported_method(
+        (row["survival_method"] for row in rows), label="survival method"
+    )
 
 
 def _latest_evidence_year(rows: list[sqlite3.Row]) -> int:

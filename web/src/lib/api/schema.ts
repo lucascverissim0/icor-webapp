@@ -880,6 +880,7 @@ export interface components {
             reason_codes: string[];
             /** Replacement Rate */
             replacement_rate: number;
+            row_methods?: components["schemas"]["RowProvenanceResponse"] | null;
             /** Sku */
             sku: string | null;
             /** Sources */
@@ -1074,6 +1075,20 @@ export interface components {
             /** Years */
             years: number[];
         };
+        /**
+         * RowProvenanceResponse
+         * @description Row-scope provenance: what produced this row, not what built the snapshot.
+         */
+        RowProvenanceResponse: {
+            /** Forecast Method */
+            forecast_method: string;
+            /** Hazard Method */
+            hazard_method: string;
+            /** Survival Method */
+            survival_method: string;
+            /** Uncertainty Method */
+            uncertainty_method: string;
+        };
         /** ScenarioResponse */
         ScenarioResponse: {
             /** Data Version */
@@ -1112,6 +1127,8 @@ export interface components {
             source_registry: string;
             /** Survival Method */
             survival_method: string;
+            /** Uncertainty Method */
+            uncertainty_method: string;
         };
         /**
          * SortDirection

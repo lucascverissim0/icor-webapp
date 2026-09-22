@@ -114,6 +114,22 @@ class ModelYearDemand:
 
 
 @dataclass(frozen=True, slots=True)
+class RowProvenance:
+    """How the served row was produced, read from the row itself.
+
+    Distinct from `method_versions`, which describes the snapshot as a whole. A
+    client has to be able to tell "this is what produced this number" from "this
+    is what the snapshot was built with"; conflating them is what let a stale
+    provenance claim survive three rounds of fixing.
+    """
+
+    survival_method: str
+    hazard_method: str
+    forecast_method: str
+    uncertainty_method: str
+
+
+@dataclass(frozen=True, slots=True)
 class PlanningConfiguration:
     configuration_id: str
     sku: str | None
@@ -146,6 +162,7 @@ class PlanningConfiguration:
     reason_codes: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     method_versions: SnapshotVersions | None = None
+    row_methods: RowProvenance | None = None
 
     def __post_init__(self) -> None:
         required_text = (

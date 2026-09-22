@@ -22,12 +22,17 @@ from icor.domain.planner import (
     PlannerQuery,
     PlannerSummary,
     PlanningConfiguration,
+    RowProvenance,
     SortDirection,
     SortField,
     SourceSummary,
     filter_sort_paginate,
 )
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
+from icor.evidence.provenance import resolve_reported_method
+from icor.infrastructure.sqlite_evidence_repository import (
+    UNRECORDED_UNCERTAINTY_METHOD,
+)
 
 
 class SnapshotPlannerRepository:
@@ -204,6 +209,9 @@ class SnapshotPlannerRepository:
                 ).fetchall()
             else:
                 attribution_rows = ()
+            survival_methods = self._row_survival_methods(
+                connection, tuple(row["opportunity_id"] for row in rows)
+            )
         attributions: dict[str, list[sqlite3.Row]] = {}
         for attribution in attribution_rows:
             attributions.setdefault(attribution["opportunity_id"], []).append(attribution)
@@ -275,6 +283,7 @@ class SnapshotPlannerRepository:
                     reason_codes=reason_codes,
                     evidence_ids=tuple(json.loads(row["evidence_ids"])),
                     method_versions=self.versions,
+                    row_methods=_row_provenance(row, survival_methods),
                 )
             )
         return tuple(records)
@@ -348,6 +357,35 @@ class SnapshotPlannerRepository:
                 upside_units=int(summary["upside_units"]),
             ),
         )
+
+    @staticmethod
+    def _row_survival_methods(
+        connection: sqlite3.Connection, opportunity_ids: tuple[str, ...]
+    ) -> dict[str, str]:
+        """The survival curve behind each served opportunity, from its cohorts.
+
+        The fleet the opportunity is computed from lives in `cohort_estimate`,
+        so this is the only place the answer actually exists. Bounded by the
+        page size, so it is one extra query per page.
+        """
+
+        if not opportunity_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in opportunity_ids)
+        methods: dict[str, set[str]] = {}
+        for row in connection.execute(
+            f"""SELECT oi.opportunity_id AS opportunity_id,
+                c.survival_method AS survival_method
+            FROM opportunity_input oi
+            JOIN cohort_estimate c ON c.cohort_id = oi.cohort_id
+            WHERE oi.opportunity_id IN ({placeholders})""",
+            opportunity_ids,
+        ):
+            methods.setdefault(row["opportunity_id"], set()).add(row["survival_method"])
+        return {
+            opportunity_id: resolve_reported_method(values, label="survival method")
+            for opportunity_id, values in methods.items()
+        }
 
     @staticmethod
     def _base_sql(where: str) -> str:
@@ -461,6 +499,19 @@ class SnapshotPlannerRepository:
                     reason_codes=opportunity.reason_codes,
                     evidence_ids=evidence_ids,
                     method_versions=self.versions,
+                    row_methods=RowProvenance(
+                        survival_method=resolve_reported_method(
+                            (
+                                cohorts[cohort_id].survival_method
+                                for cohort_id in opportunity.input_cohort_ids
+                                if cohort_id in cohorts
+                            ),
+                            label="survival method",
+                        ),
+                        hazard_method=opportunity.hazard_method,
+                        forecast_method=opportunity.forecast_method,
+                        uncertainty_method=opportunity.uncertainty_method,
+                    ),
                 )
             )
         return tuple(sorted(records, key=lambda item: item.configuration_id))
@@ -567,3 +618,29 @@ def _identity_confidence_values(
         else ConfidenceLevel.HIGH
     )
     return Confidence(level, "; ".join(reasons))
+
+
+UNRECORDED_SURVIVAL_METHOD = "unrecorded-no-cohort-rows-served"
+
+
+def _row_provenance(row: sqlite3.Row, survival_methods: dict[str, str]) -> RowProvenance:
+    """Read provenance off the served row, never from application state.
+
+    `uncertainty_method` is absent from snapshots built before schema 7; those
+    rows say so rather than borrowing the value the application happens to use.
+    """
+
+    keys = row.keys()
+    uncertainty = (
+        row["uncertainty_method"]
+        if "uncertainty_method" in keys  # noqa: SIM118 - Row keys, not a dict
+        else UNRECORDED_UNCERTAINTY_METHOD
+    )
+    return RowProvenance(
+        survival_method=survival_methods.get(
+            row["opportunity_id"], UNRECORDED_SURVIVAL_METHOD
+        ),
+        hazard_method=row["hazard_method"],
+        forecast_method=row["forecast_method"],
+        uncertainty_method=uncertainty,
+    )

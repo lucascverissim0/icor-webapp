@@ -96,6 +96,7 @@ class Ledger:
                 active_fleet_p50=Decimal("90"),
                 active_fleet_p90=Decimal("95"),
                 input_observation_ids=("observation-golf-2020",),
+                survival_method="survival-v1",
                 confidence=ConfidenceBand.LOW,
                 reason_codes=("observed-registration-cohort",),
             ),
@@ -113,6 +114,9 @@ class Ledger:
                 p90=Decimal("15.8"),
                 active_fleet_p50=Decimal("90"),
                 input_cohort_ids=("cohort-golf-de-2020",),
+                hazard_method="hazard-v1",
+                forecast_method="forecast-v1",
+                uncertainty_method="uncertainty-v1",
                 confidence=ConfidenceBand.LOW,
                 assumption_ids=("assumption-hazard-v1",),
                 reason_codes=("uncalibrated-fitment-and-hazard",),
@@ -141,12 +145,14 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
             );
             CREATE TABLE cohort_estimate (
                 cohort_id TEXT PRIMARY KEY, registration_cohort_year INTEGER,
-                active_fleet_p10 TEXT, active_fleet_p50 TEXT, active_fleet_p90 TEXT
+                active_fleet_p10 TEXT, active_fleet_p50 TEXT, active_fleet_p90 TEXT,
+                survival_method TEXT
             );
             CREATE TABLE opportunity_estimate (
                 opportunity_id TEXT PRIMARY KEY, generation_id TEXT,
                 canonical_vehicle_id TEXT, geography TEXT, horizon_year INTEGER,
                 p10 TEXT, p50 TEXT, p90 TEXT, active_fleet_p50 TEXT,
+                hazard_method TEXT, forecast_method TEXT, uncertainty_method TEXT,
                 confidence TEXT, assumption_ids TEXT, reason_codes TEXT
             );
             CREATE TABLE opportunity_input (
@@ -177,14 +183,17 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
                 ),
             )
             connection.execute(
-                "INSERT INTO cohort_estimate VALUES (?, 2020, '80', '90', '95')",
+                "INSERT INTO cohort_estimate VALUES "
+                "(?, 2020, '80', '90', '95', 'survival-v1')",
                 (cohort_id,),
             )
             connection.execute(
-                "INSERT INTO opportunity_estimate VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO opportunity_estimate VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     opportunity_id, generation_id, vehicle_id, "DE", 2028,
                     str(int(demand) - 2), demand, str(int(demand) + 3), "90",
+                    "hazard-v1", "forecast-v1", "uncertainty-v1",
                     "low", '["assumption"]', '["reason"]',
                 ),
             )
@@ -369,7 +378,7 @@ def test_model_year_opportunities_allocate_and_reconcile_every_input_cohort(
     with sqlite3.connect(path) as connection:
         connection.execute(
             "INSERT INTO cohort_estimate VALUES "
-            "('cohort-golf-2021', 2021, '20', '30', '40')"
+            "('cohort-golf-2021', 2021, '20', '30', '40', 'survival-v1')"
         )
         connection.execute(
             "INSERT INTO opportunity_input VALUES "
@@ -562,3 +571,75 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     assert "cohort_attribution AS" in model_year_cte
     assert "i.input_position = 0" not in model_year_cte
     assert "GROUP BY o.opportunity_id" not in model_year_cte
+
+
+def test_row_provenance_is_read_from_the_served_rows_not_the_manifest(
+    sqlite_repository: SnapshotPlannerRepository,
+) -> None:
+    """The test that would have caught all four instances of this defect.
+
+    The manifest says `survival-v1`. The rows say otherwise. The channel must
+    report what produced the numbers it is actually serving.
+    """
+
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "UPDATE cohort_estimate SET survival_method = ?",
+            ("uk-dft-licensed-stock-band-v1",),
+        )
+
+    page = sqlite_repository.search(PlannerQuery(page=1, page_size=10))
+
+    assert page.items
+    for record in page.items:
+        assert record.row_methods is not None
+        assert record.row_methods.survival_method == "uk-dft-licensed-stock-band-v1"
+        assert record.row_methods.survival_method != "survival-v1"
+
+
+def test_cohorts_disagreeing_about_the_curve_are_reported_as_mixed(
+    sqlite_repository: SnapshotPlannerRepository,
+) -> None:
+    """A snapshot mixing curves must say so rather than pick a plausible winner."""
+
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        opportunity_id, cohort_id = connection.execute(
+            "SELECT opportunity_id, cohort_id FROM opportunity_input LIMIT 1"
+        ).fetchone()
+        connection.execute(
+            "UPDATE cohort_estimate SET survival_method = ? WHERE cohort_id = ?",
+            ("constant-annual-retention-v1", cohort_id),
+        )
+        connection.execute(
+            "INSERT INTO cohort_estimate VALUES "
+            "('cohort-mixed', 2021, '10', '20', '30', 'uk-dft-licensed-stock-band-v1')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_input VALUES (?, 'cohort-mixed', 1)",
+            (opportunity_id,),
+        )
+
+    page = sqlite_repository.search(PlannerQuery(page=1, page_size=10))
+
+    mixed = [
+        record
+        for record in page.items
+        if record.row_methods is not None
+        and record.row_methods.survival_method.startswith("mixed:")
+    ]
+    assert mixed
+
+
+def test_snapshot_scope_and_row_scope_provenance_stay_distinct(
+    sqlite_repository: SnapshotPlannerRepository,
+) -> None:
+    """A client must be able to tell these apart, so they are separate fields."""
+
+    page = sqlite_repository.search(PlannerQuery(page=1, page_size=10))
+
+    record = page.items[0]
+    assert record.method_versions is not None
+    assert record.method_versions.survival_method == "survival-v1"
+    assert record.row_methods is not None
+    assert record.row_methods.hazard_method == "hazard-v1"
+    assert record.row_methods.uncertainty_method == "uncertainty-v1"

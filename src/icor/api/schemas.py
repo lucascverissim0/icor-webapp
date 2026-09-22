@@ -31,6 +31,15 @@ class HealthResponse(ApiModel):
     data_version: str
 
 
+class RowProvenanceResponse(ApiModel):
+    """Row-scope provenance: what produced this row, not what built the snapshot."""
+
+    survival_method: str
+    hazard_method: str
+    forecast_method: str
+    uncertainty_method: str
+
+
 class SnapshotVersionsResponse(ApiModel):
     source_registry: str
     identity_registry: str
@@ -118,6 +127,7 @@ class PlanningConfigurationResponse(ApiModel):
     reason_codes: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     method_versions: SnapshotVersionsResponse | None = None
+    row_methods: RowProvenanceResponse | None = None
 
 
 class PlannerSummaryResponse(ApiModel):

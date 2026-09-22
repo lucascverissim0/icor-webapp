@@ -1570,6 +1570,16 @@
             "title": "Replacement Rate",
             "type": "number"
           },
+          "row_methods": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RowProvenanceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sku": {
             "anyOf": [
               {
@@ -2158,6 +2168,36 @@
         "title": "RegistrationSummaryResponse",
         "type": "object"
       },
+      "RowProvenanceResponse": {
+        "additionalProperties": false,
+        "description": "Row-scope provenance: what produced this row, not what built the snapshot.",
+        "properties": {
+          "forecast_method": {
+            "title": "Forecast Method",
+            "type": "string"
+          },
+          "hazard_method": {
+            "title": "Hazard Method",
+            "type": "string"
+          },
+          "survival_method": {
+            "title": "Survival Method",
+            "type": "string"
+          },
+          "uncertainty_method": {
+            "title": "Uncertainty Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "survival_method",
+          "hazard_method",
+          "forecast_method",
+          "uncertainty_method"
+        ],
+        "title": "RowProvenanceResponse",
+        "type": "object"
+      },
       "ScenarioResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2244,6 +2284,10 @@
           "survival_method": {
             "title": "Survival Method",
             "type": "string"
+          },
+          "uncertainty_method": {
+            "title": "Uncertainty Method",
+            "type": "string"
           }
         },
         "required": [
@@ -2255,6 +2299,7 @@
           "survival_method",
           "hazard_method",
           "forecast_method",
+          "uncertainty_method",
           "generation_registry",
           "generation_resolver"
         ],
