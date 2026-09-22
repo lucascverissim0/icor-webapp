@@ -1,0 +1,45 @@
+# Defence in depth. The Dockerfile copies an explicit allowlist and never uses
+# `COPY . .`, so nothing below can reach an image even if this file is wrong.
+#
+# `.git` matters most: the historically exposed OpenAI key is still reachable in
+# four commits of this repository's history, so the history must never be part
+# of a build context that leaves this machine.
+.git/
+.github/
+.gitattributes
+
+# Secrets and local configuration.
+.env
+.env.*
+*.pem
+*.key
+.streamlit/
+
+# The legacy Streamlit application: the only consumer of OPENAI_API_KEY.
+ui/
+
+# Local state, caches and build output.
+.venv/
+node_modules/
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+.pytest_cache/
+.ruff_cache/
+.eslintcache
+**/__pycache__/
+**/*.py[cod]
+
+# Evidence. The client snapshot is copied in explicitly by path; everything
+# else under .local is tens of gigabytes of full-scope corpora.
+.local/evidence/candidates/
+.local/evidence/releases/
+.local/e2e-fixture-*/
+.local/*.sqlite3
+
+# Not needed at runtime.
+tests/
+docs/
+*.log
+*.md

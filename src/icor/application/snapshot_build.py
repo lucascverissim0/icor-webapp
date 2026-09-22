@@ -14,7 +14,7 @@ from typing import Protocol, cast
 from uuid import uuid4
 
 from icor.application.snapshot_queries import SnapshotQueryProjectionService
-from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
+from icor.domain.snapshots import FULL_SCOPE, SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.evidence.release_manifests import (
     load_snapshot_manifest,
     write_release_manifest,
@@ -119,6 +119,7 @@ def snapshot_id_for(
     versions: SnapshotVersions,
     release_artifact_hashes: tuple[tuple[str, str], ...],
     legacy_generation_versions: bool = False,
+    scope: str = FULL_SCOPE,
 ) -> str:
     """Derive the canonical identity shared by candidate build and promotion."""
     release_ids = tuple(release_id for release_id, _ in release_artifact_hashes)
@@ -167,6 +168,10 @@ def snapshot_id_for(
         ),
         "versions": version_identity,
     }
+    if scope != FULL_SCOPE:
+        # Only a non-default scope enters the payload, so every snapshot id
+        # minted before this field existed is bit-identical to what it was.
+        identity_payload["scope"] = scope
     digest = sha256(canonical_json_bytes(identity_payload)).hexdigest()
     return f"snapshot-{digest[:20]}"
 

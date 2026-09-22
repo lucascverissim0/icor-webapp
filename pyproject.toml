@@ -24,6 +24,17 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
 ]
 
+[project.optional-dependencies]
+# The client preview runtime. Deliberately excludes openai and streamlit: the
+# container must not carry a client for the API whose key is still exposed in
+# this repository's history, and it never runs the legacy Streamlit app.
+preview = [
+  "argon2-cffi>=25.1,<26",
+  "fastapi>=0.116,<1",
+  "numpy>=1.26,<3",
+  "uvicorn[standard]>=0.35,<1",
+]
+
 [dependency-groups]
 dev = [
   "httpx2>=2,<3",

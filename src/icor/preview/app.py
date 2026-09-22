@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from starlette.concurrency import run_in_threadpool
 
 from icor.api.app import DEFAULT_EVIDENCE_ROOT, ROOT, create_app
+from icor.domain.snapshots import CLIENT_RELEASE_SCOPE, FULL_SCOPE
 from icor.preview.auth import LoginThrottle, PreviewAuthenticator, SessionCodec
 from icor.preview.config import ConfigurationError, PreviewSettings
 from icor.preview.security import (
@@ -57,8 +58,15 @@ def create_preview_app(
         snapshot_root=selected_snapshot_root,
         client_release=selected_client_release,
     )
-    if getattr(core.state, "snapshot_manifest", None) is None:
+    manifest = getattr(core.state, "snapshot_manifest", None)
+    if manifest is None:
         raise ConfigurationError("preview active snapshot is unavailable")
+    # The mechanical guarantee that a client preview cannot serve the full
+    # evidence corpus, and that an internal build cannot silently serve the
+    # pruned one and report missing evidence as absent.
+    expected_scope = CLIENT_RELEASE_SCOPE if selected_client_release else FULL_SCOPE
+    if manifest.scope != expected_scope:
+        raise ConfigurationError("preview snapshot scope does not match the release mode")
     selected_asset_root = asset_root or Path(
         os.environ.get(ASSET_ROOT_VARIABLE, str(DEFAULT_ASSET_ROOT))
     )

@@ -232,6 +232,7 @@ class SnapshotStore:
                 deterministic_seed=manifest.deterministic_seed,
                 versions=manifest.versions,
                 release_artifact_hashes=release_artifact_hashes,
+                scope=manifest.scope,
             )
             accepted_snapshot_ids = {expected_snapshot_id}
             if (
@@ -245,6 +246,7 @@ class SnapshotStore:
                         versions=manifest.versions,
                         release_artifact_hashes=release_artifact_hashes,
                         legacy_generation_versions=True,
+                        scope=manifest.scope,
                     )
                 )
             if manifest.snapshot_id not in accepted_snapshot_ids:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from argon2 import PasswordHasher
@@ -10,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from icor.api.app import ROOT
+from icor.domain.snapshots import CLIENT_RELEASE_SCOPE, FULL_SCOPE
 from icor.preview.config import ConfigurationError, PreviewSettings, PreviewUser
 
 pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
@@ -35,9 +37,9 @@ def assets(tmp_path: Path) -> Path:
     return root
 
 
-def _stub_api() -> FastAPI:
+def _stub_api(scope: str = FULL_SCOPE) -> FastAPI:
     app = FastAPI()
-    app.state.snapshot_manifest = object()
+    app.state.snapshot_manifest = SimpleNamespace(scope=scope)
 
     @app.get("/api/example")
     def example() -> dict[str, bool]:
@@ -55,7 +57,10 @@ def _preview(
 ):
     from icor.preview import app as preview_module
 
-    monkeypatch.setattr(preview_module, "create_app", lambda **kwargs: _stub_api())
+    scope = CLIENT_RELEASE_SCOPE if client_release else FULL_SCOPE
+    monkeypatch.setattr(
+        preview_module, "create_app", lambda **kwargs: _stub_api(scope)
+    )
     return preview_module.create_preview_app(
         settings, asset_root=assets, client_release=client_release
     )
@@ -312,3 +317,35 @@ def test_the_compiled_bundle_stays_within_the_content_security_policy() -> None:
     for tag in re.findall(r"<script[^>]*>", markup):
         assert "src=" in tag, f"inline script blocked by the policy: {tag}"
     assert " style=" not in markup
+
+
+def test_a_client_preview_refuses_a_full_evidence_snapshot(
+    monkeypatch: pytest.MonkeyPatch, settings: PreviewSettings, assets: Path
+) -> None:
+    """The client build must not be able to serve the full evidence corpus."""
+
+    from icor.preview import app as preview_module
+
+    monkeypatch.setattr(
+        preview_module, "create_app", lambda **kwargs: _stub_api(FULL_SCOPE)
+    )
+    with pytest.raises(ConfigurationError, match="scope does not match"):
+        preview_module.create_preview_app(
+            settings, asset_root=assets, client_release=True
+        )
+
+
+def test_an_internal_preview_refuses_a_pruned_snapshot(
+    monkeypatch: pytest.MonkeyPatch, settings: PreviewSettings, assets: Path
+) -> None:
+    """A pruned snapshot would make missing evidence look genuinely absent."""
+
+    from icor.preview import app as preview_module
+
+    monkeypatch.setattr(
+        preview_module, "create_app", lambda **kwargs: _stub_api(CLIENT_RELEASE_SCOPE)
+    )
+    with pytest.raises(ConfigurationError, match="scope does not match"):
+        preview_module.create_preview_app(
+            settings, asset_root=assets, client_release=False
+        )

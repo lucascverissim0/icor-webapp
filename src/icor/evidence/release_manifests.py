@@ -31,6 +31,9 @@ _LEGACY_VERSION_FIELDS = _VERSION_FIELDS - {
     "generation_resolver",
     "uncertainty_method",
 }
+# Manifests written before `scope` existed are all full snapshots, and
+# their file digest must keep verifying, so they load without the key.
+_LEGACY_SNAPSHOT_FIELDS = _SNAPSHOT_FIELDS - {"scope"}
 
 
 def load_release_manifest(path: Path) -> ReleaseManifest:
@@ -59,7 +62,8 @@ def load_release_manifest(path: Path) -> ReleaseManifest:
 def load_snapshot_manifest(path: Path) -> SnapshotManifest:
     """Load a snapshot manifest so snapshot identity uses the same strict boundary."""
     payload = _load_json_object(path)
-    _require_exact_keys(payload, _SNAPSHOT_FIELDS, "snapshot manifest")
+    if frozenset(payload) != _LEGACY_SNAPSHOT_FIELDS:
+        _require_exact_keys(payload, _SNAPSHOT_FIELDS, "snapshot manifest")
     versions = payload["versions"]
     if not isinstance(versions, dict):
         raise ManifestError("snapshot versions must be an object")

@@ -1,0 +1,38 @@
+app = "icor-client-preview"
+primary_region = "ams"
+
+[build]
+
+# Non-secret runtime configuration only. The three secrets --
+# ICOR_PREVIEW_USERS, ICOR_PREVIEW_SESSION_SECRET and ICOR_EXPORT_TOKEN --
+# are set with `fly secrets import` and must never appear in this file.
+[env]
+  ICOR_PREVIEW_HOST_MODE = "container"
+  ICOR_CLIENT_RELEASE_MODE = "verified"
+  ICOR_PREVIEW_PUBLIC_ORIGIN = "https://icor-client-preview.fly.dev"
+  # Safe only because a machine with no dedicated IPv4 is reachable exclusively
+  # through fly-proxy. On any host where the container port is directly
+  # reachable this must become the real proxy CIDR, or X-Forwarded-For becomes
+  # spoofable and login throttling stops working.
+  ICOR_PREVIEW_TRUSTED_PROXIES = "*"
+  ICOR_PREVIEW_SESSION_TTL_SECONDS = "3600"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Verifying the baked snapshot costs about forty seconds. Scaling to zero
+  # would charge that to whichever reviewer arrives first.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "120s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

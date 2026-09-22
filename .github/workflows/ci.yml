@@ -43,6 +43,8 @@ jobs:
           scripts/run_codespaces_preview.py scripts/run_e2e_dev.py
           scripts/run_planner_dev.py scripts/run_quarterly_source_research.py
           scripts/replay_registration_reconciliation.py
+          scripts/rebuild_active_snapshot.py scripts/run_container_preview.py
+          scripts/build_client_snapshot.py
       - run: uv run pytest
 
   planner-web:

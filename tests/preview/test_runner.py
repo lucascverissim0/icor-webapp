@@ -117,3 +117,142 @@ def test_local_runner_remains_loopback_only() -> None:
     source = (root / "scripts" / "run_planner_dev.py").read_text("utf-8")
     assert '"127.0.0.1"' in source
     assert '"0.0.0.0"' not in source
+
+
+def _container_environment() -> dict[str, str]:
+    environment = _valid_environment()
+    del environment["CODESPACES"]
+    environment.update(
+        {
+            "ICOR_PREVIEW_HOST_MODE": "container",
+            "ICOR_PREVIEW_PUBLIC_ORIGIN": "https://icor-client-preview.example",
+            "ICOR_PREVIEW_TRUSTED_PROXIES": "*",
+            "ICOR_CLIENT_RELEASE_MODE": "verified",
+        }
+    )
+    return environment
+
+
+@pytest.mark.parametrize(
+    "declared",
+    ("", "   ", "fly", "kubernetes", "CODESPACES-ish"),
+)
+def test_runner_refuses_an_absent_or_unknown_host_mode(declared: str) -> None:
+    """Absent, empty or misspelled must all fail closed, never fall back."""
+
+    from icor.preview.runner import RunnerError, host_mode
+
+    environment = {"ICOR_PREVIEW_HOST_MODE": declared}
+    with pytest.raises(RunnerError, match="explicit supported host mode"):
+        host_mode(environment)
+
+
+def test_runner_refuses_an_empty_environment() -> None:
+    from icor.preview.runner import RunnerError, host_mode
+
+    with pytest.raises(RunnerError, match="explicit supported host mode"):
+        host_mode({})
+
+
+def test_codespaces_declares_itself_and_is_accepted() -> None:
+    """The platform sets this variable, so it is a declaration, not a guess."""
+
+    from icor.preview.runner import CODESPACES_MODE, host_mode
+
+    assert host_mode({"CODESPACES": "true"}) == CODESPACES_MODE
+
+
+def test_codespaces_mode_still_requires_the_codespaces_environment() -> None:
+    from icor.preview.runner import RunnerError, host_mode
+
+    with pytest.raises(RunnerError, match="requires GitHub Codespaces"):
+        host_mode({"ICOR_PREVIEW_HOST_MODE": "codespaces", "CODESPACES": "false"})
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "",
+        "http://icor.example",
+        "https://",
+        "https://icor.example:8000",
+        "https://user@icor.example",
+        "https://icor.example/path",
+        "https://icor.example?query=1",
+        "https://icor.example#fragment",
+    ),
+)
+def test_container_mode_requires_a_clean_https_public_origin(origin: str) -> None:
+    from icor.preview.runner import RunnerError, host_mode
+
+    environment = _container_environment()
+    environment["ICOR_PREVIEW_PUBLIC_ORIGIN"] = origin
+    with pytest.raises(RunnerError, match="HTTPS public origin"):
+        host_mode(environment)
+
+
+def test_container_mode_requires_declared_trusted_proxies() -> None:
+    from icor.preview.runner import RunnerError, host_mode
+
+    environment = _container_environment()
+    environment["ICOR_PREVIEW_TRUSTED_PROXIES"] = "   "
+    with pytest.raises(RunnerError, match="trusted proxy set"):
+        host_mode(environment)
+
+
+def test_container_mode_serves_only_the_verified_client_release() -> None:
+    from icor.preview.runner import RunnerError, host_mode
+
+    environment = _container_environment()
+    environment["ICOR_CLIENT_RELEASE_MODE"] = ""
+    with pytest.raises(RunnerError, match="verified client release"):
+        host_mode(environment)
+
+
+def test_container_mode_is_accepted_when_fully_declared() -> None:
+    from icor.preview.runner import CONTAINER_MODE, host_mode
+
+    assert host_mode(_container_environment()) == CONTAINER_MODE
+
+
+def test_container_command_forwards_proxy_headers_to_a_declared_set() -> None:
+    from icor.preview.runner import CONTAINER_MODE, server_command
+
+    command = server_command(
+        CONTAINER_MODE, host="0.0.0.0", port=8080, trusted_proxies="10.0.0.0/8"
+    )
+
+    assert "--proxy-headers" in command
+    assert command[command.index("--forwarded-allow-ips") + 1] == "10.0.0.0/8"
+    assert command[command.index("--port") + 1] == "8080"
+
+
+def test_container_command_never_enables_reload_or_debug_logging() -> None:
+    from icor.preview.runner import CONTAINER_MODE, server_command
+
+    command = server_command(CONTAINER_MODE, trusted_proxies="*")
+
+    assert "--reload" not in command
+    assert "debug" not in command
+
+
+def test_container_command_refuses_an_undeclared_proxy_set() -> None:
+    from icor.preview.runner import CONTAINER_MODE, RunnerError, server_command
+
+    with pytest.raises(RunnerError, match="supported host mode"):
+        server_command(CONTAINER_MODE, trusted_proxies=None)
+
+
+@pytest.mark.parametrize("raw", ("0", "65536", "-1", "http"))
+def test_container_port_rejects_values_outside_the_port_range(raw: str) -> None:
+    from icor.preview.runner import RunnerError, container_port
+
+    with pytest.raises(RunnerError, match="port is invalid"):
+        container_port({"ICOR_PREVIEW_PORT": raw})
+
+
+def test_container_port_defaults_only_when_unset() -> None:
+    from icor.preview.runner import DEFAULT_CONTAINER_PORT, container_port
+
+    assert container_port({}) == DEFAULT_CONTAINER_PORT
+    assert container_port({"ICOR_PREVIEW_PORT": "9000"}) == 9000

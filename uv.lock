@@ -520,6 +520,14 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+preview = [
+    { name = "argon2-cffi" },
+    { name = "fastapi" },
+    { name = "numpy" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "httpx2" },
@@ -532,10 +540,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "argon2-cffi", specifier = ">=25.1,<26" },
+    { name = "argon2-cffi", marker = "extra == 'preview'", specifier = ">=25.1,<26" },
     { name = "bcrypt", specifier = ">=4.1,<5" },
     { name = "beautifulsoup4", specifier = ">=4.12,<5" },
     { name = "fastapi", specifier = ">=0.116,<1" },
+    { name = "fastapi", marker = "extra == 'preview'", specifier = ">=0.116,<1" },
     { name = "numpy", specifier = ">=1.26,<3" },
+    { name = "numpy", marker = "extra == 'preview'", specifier = ">=1.26,<3" },
     { name = "openai", specifier = ">=1.10,<2" },
     { name = "openpyxl", specifier = ">=3.1,<4" },
     { name = "pandas", specifier = ">=2.2,<3" },
@@ -545,7 +556,9 @@ requires-dist = [
     { name = "streamlit-authenticator", specifier = ">=0.4,<0.5" },
     { name = "tabulate", specifier = ">=0.9,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'preview'", specifier = ">=0.35,<1" },
 ]
+provides-extras = ["preview"]
 
 [package.metadata.requires-dev]
 dev = [

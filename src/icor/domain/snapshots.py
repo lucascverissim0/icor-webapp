@@ -59,6 +59,11 @@ class SnapshotVersions:
             _require_text(value, "snapshot")
 
 
+FULL_SCOPE = "full"
+CLIENT_RELEASE_SCOPE = "client-release"
+_SUPPORTED_SCOPES = frozenset({FULL_SCOPE, CLIENT_RELEASE_SCOPE})
+
+
 @dataclass(frozen=True, slots=True)
 class SnapshotManifest:
     snapshot_id: str
@@ -71,9 +76,15 @@ class SnapshotManifest:
     observation_count: int
     published_value_count: int
     warnings: tuple[str, ...]
+    # What this snapshot contains. A client-release snapshot has had the
+    # evidence tables the client never reads emptied, so it must be
+    # distinguishable from a full one by the manifest alone.
+    scope: str = FULL_SCOPE
 
     def __post_init__(self) -> None:
         _require_identifier(self.snapshot_id, "snapshot")
+        if self.scope not in _SUPPORTED_SCOPES:
+            raise ValueError("snapshot scope is unsupported")
         if not isinstance(self.status, SnapshotStatus):
             raise ValueError("snapshot status is unsupported")
         if (
