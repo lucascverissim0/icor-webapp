@@ -1,0 +1,58 @@
+{
+  "$comment": [
+    "Reviewed vehicle-identity rules for resolving raw publisher labels to one canonical",
+    "identity. Applied at query time by icor.evidence.vehicle_identity; the snapshot itself",
+    "is never rewritten. Under-merging only leaves a duplicate in a dropdown, while",
+    "over-merging silently corrupts a forecast, so every rule here must be conservative.",
+    "Sub-brands and coachbuilt variants (volkswagen knaus, mercedes-benz hymer) are",
+    "deliberately NOT merged into their parent make: they are different vehicles."
+  ],
+  "corporate_suffixes": [
+    "ag",
+    "automobili",
+    "bv",
+    "car",
+    "cars",
+    "deutschland",
+    "gmbh",
+    "group",
+    "limited",
+    "ltd",
+    "motor",
+    "motors",
+    "nv",
+    "plc",
+    "sa",
+    "spa",
+    "srl",
+    "uk"
+  ],
+  "make_aliases": {
+    "vw": "volkswagen",
+    "volkswagen vw": "volkswagen",
+    "volksawgen": "volkswagen",
+    "mercedes": "mercedes-benz",
+    "mercedes benz": "mercedes-benz",
+    "mercedes-amg": "mercedes-benz",
+    "mercedes amg": "mercedes-benz",
+    "amg": "mercedes-benz",
+    "vauxhall": "opel",
+    "skoda auto": "skoda",
+    "alfa": "alfa romeo",
+    "land-rover": "land rover",
+    "range rover": "land rover",
+    "aston-martin": "aston martin",
+    "rolls royce": "rolls-royce",
+    "citroen ds": "ds",
+    "byd auto": "byd",
+    "bmw i": "bmw",
+    "bmw m": "bmw"
+  },
+  "$aliases_comment": [
+    "ALPINA and ALPINE are different manufacturers and must never be merged.",
+    "VAUXHALL is the UK marque of OPEL and shares model identity, so DfT and EEA rows",
+    "for the same vehicle are merged."
+  ],
+  "trim_vocabulary_max_tokens": 3,
+  "passenger_car_volume_share": 0.0002
+}
