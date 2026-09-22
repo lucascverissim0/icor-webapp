@@ -4792,3 +4792,154 @@ on 5173 (PID 34028). An attempt to start the API through
 8000 - the background process exited 3 with an empty log, cause not yet
 diagnosed. The in-process verification above did not need it. **Port 8000 is not
 currently serving.**
+
+
+## 2026-09-22 registration double counting fixed in two places; rebuild in flight
+
+Working branch `fix/client-release-production`, cut from `b301f81`. Lucas asked for a
+shareable HTTPS client URL with everything production ready, and chose the full
+reconciler fix plus rebuild over hiding GB.
+
+### The defect was two defects, and the second changes the diagnosis
+
+The recorded diagnosis -- one winner per dependency group then summed across groups --
+is correct but incomplete. Fixing only that would have left both GB and DE wrong.
+
+`scripts/replay_registration_reconciliation.py` is new: it replays the planner
+bucketing in SQL against a built snapshot, read-only, and scores every annual key under
+both the old rule and the current one. It runs in about three minutes against the 8.7 GB
+database, so a reconciliation change can be judged without paying 4h15m. Run against the
+unchanged code first, it reproduced the known figures exactly -- GB 2018 EEA 2,355,350,
+DfT 2,341,505, sum 4,696,855, ratio 1.9842 -- which is what licensed trusting it.
+
+**Mechanism 1, cross dependency group.** The EEA and UK DfT releases sit in different
+groups, so their values were added. Germany escaped only because `kba-fz10` was
+deliberately filed inside `european-passenger-car-registrations-2024`
+(`evidence/acquisition.py:116`), which is the proof that `dependency_group` always meant
+"measures the same population".
+
+**Mechanism 2, cross granularity, not previously recorded.** Both publishers cover the
+whole market but decompose it differently, so they collide only on vehicles both name:
+
+| | EEA | national register | union |
+|---|---|---|---|
+| GB 2018 | 6,447 vehicles, 2,355,350 | DfT 1,054 vehicles, 2,341,505 | 7,489, 4,696,855 |
+| DE 2024 | 2,267 vehicles, 2,728,802 | KBA 366 vehicles, 2,797,633 | 2,446, 4,641,590 |
+
+DE 2024 ran at 1.6475x actual on the cohort path with **zero** cross-group pairs, which
+no amount of dependency-group fixing would have touched. The handoff previously
+certified DE as unaffected; that was wrong, and it was wrong on the cohort path as well
+as the projection path.
+
+### The rule now
+
+Reconciliation happens at the scope the population is measured at.
+
+1. **Coverage**, per (geography, year): exactly one publisher decomposes it
+   (`RegistrationCoverageSelector`). Others become corroboration.
+2. **Reconciliation**, per (generation, vehicle, geography, year): one published value
+   wins, never a sum and never a mean, so the cited observation ids still explain the
+   number. Corroborators are recorded with the measured disagreement, surfaced as a
+   cohort reason code.
+
+**Lucas chose the pan-European compilation as the decomposer** (asked explicitly, with
+the vehicle counts above in front of him). Both publishers report the same national
+total to within about a percent, so the total does not distinguish them; granularity and
+cross-market consistency do. Keeping the register instead would have cut the GB ranking
+from 7,489 to 1,054 vehicles and DE from 2,446 to 366. National registers still win as
+rival measurements of one vehicle-year (`release_precedence` is unchanged), and still
+decompose the years the compilation does not cover: GB before 2010 and after 2020.
+
+`coverage_precedence` deliberately inverts `release_precedence`. Both live in
+`forecasting/reconciliation.py` with the reasoning next to them.
+
+### The projection carried the same defect, independently
+
+`sqlite_evidence_repository.rebuild_query_projections` built
+`registration_family_aggregate` and `registration_label_aggregate` with a plain SUM and
+no dependency-group logic at all, so the Registrations page served a doubled GB
+2010-2020 **and** DE 2024. Both queries now join a `registration_coverage` temp table
+built from the same Python `coverage_precedence`, loaded into SQLite as data rather than
+restated as SQL, so planner and projections cannot drift apart.
+
+### Measured effect, before promotion
+
+Replay against `snapshot-38878384744b4c9d310f`:
+
+| | historical | corrected | corrected/actual |
+|---|---:|---:|---:|
+| GB 2018 | 4,696,855 | 2,355,350 | 0.9950 |
+| GB 2020 | 3,240,133 | 1,620,176 | 0.9933 |
+| DE 2024 | 4,641,590 | 2,728,802 | 0.9686 |
+| GB modelled fleet 2028 | 42,139,597 | 26,315,679 | ceiling 34,000,000 |
+
+Every GB year 2010-2020 moves from about 1.98x actual to between 0.993x and 0.997x. The
+script gate passes for GB and DE.
+
+**GB demand will fall by roughly a third when this promotes.** That is the double count
+leaving, not a regression, and it must be said plainly to anyone who saw the old number.
+
+### uncertainty_method is now a column
+
+`opportunity_estimate` recorded `hazard_method` and `forecast_method` per row but not
+`uncertainty_method`, although the row quantiles come straight from the uncertainty
+model. Schema goes to **7**. Pre-v7 snapshots report
+`unrecorded-before-snapshot-schema-v7` rather than being made to look as though they
+recorded it. `SnapshotVersionsResponse` was also silently dropping the field, so it was
+absent from five API responses including the one gate 7 compares.
+`OpportunityUncertaintyModel.method` is per-instance now, the same defect fixed once
+before for `CohortSurvivalModel`.
+
+Taken now because it needs a rebuild and one was about to run.
+
+### Rebuild in flight
+
+`scripts/rebuild_active_snapshot.py` reads the release list off the active manifest
+rather than retyping 21 ids. Started 15:54 local, 21 releases, `--build-as-of
+2026-09-22T12:00:00+00:00 --deterministic-seed 20260922`, writing to
+`.local/evidence/candidates/.build-c8f73d93e0a44f42947fae37ff90ce78`.
+
+**Not promoted.** The active snapshot remains `snapshot-38878384744b4c9d310f`, whose GB
+and DE figures are the doubled ones. If this rebuild is abandoned, delete only that
+`.build-` directory.
+
+A first launch attempt was backgrounded with `nohup ... &` inside a shell that exited;
+the wrapper reported failure but the child survived, so two builds ran concurrently
+against the same seed for about a minute. The orphan tree (PIDs 27676/5688, started
+15:53:27) was stopped and its candidate directory
+`.build-976dadb1cbd341fbb3912ae38819af72` removed. Only the tracked build remains.
+
+Expect `report_snapshot_completeness.py` to show lower `forecastable` and higher
+`evidence_only` than the previous snapshot: corroborating observations are no longer
+cited as cohort inputs, and superseded-coverage observations are not cited at all. That
+is expected, not data loss.
+
+### Verification at the time of writing
+
+- `uv run pytest`: **730 passed, 14 skipped, 4 xfailed** (baseline was 702/14/4; 28 new
+  tests, no regressions).
+- `uv run ruff check src tests scripts/replay_registration_reconciliation.py`: clean.
+- `npm audit --audit-level=high` in `web/`: **0 vulnerabilities**. This had never run in
+  CI: it sat after the e2e step, which has hung on every run since 2026-08-29, so it
+  reported `skipped` every time. Its posture was unknown, not passing.
+
+### CI, measured rather than assumed
+
+GitHub's public REST API answers `/actions/runs/{id}/jobs` and
+`/check-runs/{id}/annotations` without a token; only `/actions/jobs/{id}/logs` is 403.
+Every run back to 2026-08-29 shows a `created_at -> updated_at` delta of exactly 6h00m,
+the default job timeout: the e2e step has never once completed. windows-latest `pytest`
+fails with exit code 1, so tests fail rather than collection erroring.
+
+`.github/workflows/ci.yml` now has `concurrency` with `cancel-in-progress`,
+`timeout-minutes` on all three jobs and on the e2e step, `npm audit` moved ahead of the
+browser suite, and Playwright report/trace upload on failure.
+
+Five runs were in flight at the start of this session, each on course to burn six hours.
+Cancelling them needs credentials this machine does not have.
+
+### Commits
+
+- `dcc033b` ci: bound job runtime and stop starving the npm audit step
+- `1dacf36` fix: reconcile registrations by coverage instead of adding publishers
+- `b0a2658` feat: record the uncertainty method on the row that carries the interval
