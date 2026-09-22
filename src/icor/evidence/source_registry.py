@@ -27,7 +27,7 @@ from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceReposit
 OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     source_registry="official-sources-v1",
     identity_registry="exact-normalized-model-family-v1",
-    reconciliation_method="dependency-precedence-v1",
+    reconciliation_method="single-coverage-corroboration-v2",
     confidence_method="source-evidence-v1",
     estimation_method="linear-gap-interpolation-v1",
     survival_method="uk-dft-licensed-stock-band-v1",

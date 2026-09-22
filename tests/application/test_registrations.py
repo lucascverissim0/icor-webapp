@@ -461,3 +461,47 @@ def test_active_snapshot_with_unresolved_registry_fails_closed(
 
     with pytest.raises(RegistrationUnavailableError, match="unavailable"):
         RegistrationService.from_active(mapped_candidate.parent)
+
+
+def test_two_publishers_of_one_country_year_are_not_summed_in_the_projection(
+    mapped_candidate: Path,
+) -> None:
+    """DE 2024 is reported by both the EEA compilation and KBA.
+
+    The projection used to sum every observation for a vehicle-year regardless of
+    who published it, so a country covered twice was counted twice. Only the
+    publisher that decomposes the year may reach the page.
+    """
+
+    database = mapped_candidate / "evidence.sqlite3"
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            """SELECT registrations, source_ids FROM registration_family_aggregate
+            WHERE geography = ? AND year = ? AND publication_status = ? AND model = ?""",
+            ("DE", 2024, "final", "Alpha"),
+        ).fetchall()
+
+    assert len(rows) == 1
+    registrations, source_ids = rows[0]
+    assert registrations == "10"
+    assert registrations != "1009"
+    assert "kba-fz10" not in source_ids
+
+
+def test_a_country_year_only_the_register_covers_still_reaches_the_projection(
+    mapped_candidate: Path,
+) -> None:
+    """GB 2025 has no EEA coverage, so the register decomposes it."""
+
+    database = mapped_candidate / "evidence.sqlite3"
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            """SELECT registrations, source_ids FROM registration_family_aggregate
+            WHERE geography = ? AND year = ? AND publication_status = ?""",
+            ("GB", 2025, "final"),
+        ).fetchall()
+
+    assert len(rows) == 1
+    registrations, source_ids = rows[0]
+    assert registrations == "7"
+    assert "uk-dft-veh0160" in source_ids

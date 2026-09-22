@@ -36,6 +36,7 @@ from icor.domain.generations import (
 )
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.evidence.serialization import canonical_json_bytes
+from icor.forecasting.reconciliation import coverage_precedence
 
 
 class EvidenceSchemaError(RuntimeError):
@@ -362,6 +363,7 @@ class SQLiteEvidenceRepository:
                 "planner_option",
             ):
                 connection.execute(f"DELETE FROM {table}")
+            self._build_registration_coverage(connection, publishable, parameters)
             connection.execute(
                 f"""INSERT INTO registration_family_aggregate
                 SELECT o.geography, CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
@@ -373,6 +375,11 @@ class SQLiteEvidenceRepository:
                 FROM observation o
                 JOIN source_release r ON r.release_id = o.release_id
                 JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN registration_coverage c
+                    ON c.geography = o.geography
+                    AND c.year = CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER)
+                    AND c.publication_status = o.publication_status
+                    AND c.source_id = r.source_id
                 WHERE o.measure = 'new_registrations' AND o.unit = 'vehicles'
                     AND o.canonical_vehicle_id IS NOT NULL
                     AND o.mapping_status NOT IN ({publishable})
@@ -393,6 +400,11 @@ class SQLiteEvidenceRepository:
                 FROM observation o
                 JOIN source_release r ON r.release_id = o.release_id
                 JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN registration_coverage c
+                    ON c.geography = o.geography
+                    AND c.year = CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER)
+                    AND c.publication_status = o.publication_status
+                    AND c.source_id = r.source_id
                 WHERE o.measure = 'new_registrations' AND o.unit = 'vehicles'
                     AND o.canonical_vehicle_id IS NOT NULL
                     AND o.mapping_status NOT IN ({publishable})
@@ -546,6 +558,58 @@ class SQLiteEvidenceRepository:
             GROUP BY CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
                 o.publication_status, v.vehicle_id,
                 o.original_make, o.original_model''',
+            parameters,
+        )
+
+    @staticmethod
+    def _build_registration_coverage(
+        connection: sqlite3.Connection, publishable: str, parameters: tuple[str, ...]
+    ) -> None:
+        """Name the one publisher that decomposes each country-year.
+
+        Where two publishers both cover a year they report the same national
+        total at different granularities, so the projections must read exactly
+        one of them. The precedence is the shared rule the planner uses, loaded
+        into a table rather than restated as SQL, so the two cannot drift apart.
+        """
+
+        connection.execute("DROP TABLE IF EXISTS temp.coverage_precedence")
+        connection.execute(
+            """CREATE TEMP TABLE coverage_precedence (
+                source_id TEXT PRIMARY KEY, precedence INTEGER NOT NULL)"""
+        )
+        connection.executemany(
+            "INSERT INTO temp.coverage_precedence (source_id, precedence) VALUES (?, ?)",
+            [
+                (row["source_id"], coverage_precedence(row["source_id"]))
+                for row in connection.execute(
+                    "SELECT DISTINCT source_id FROM source_release"
+                )
+            ],
+        )
+        connection.execute("DROP TABLE IF EXISTS temp.registration_coverage")
+        connection.execute(
+            f"""CREATE TEMP TABLE registration_coverage AS
+            SELECT geography, year, publication_status, source_id FROM (
+                SELECT o.geography AS geography,
+                    CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER) AS year,
+                    o.publication_status AS publication_status,
+                    r.source_id AS source_id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY o.geography,
+                            CAST(SUBSTR(o.period_end, 1, 4) AS INTEGER),
+                            o.publication_status
+                        ORDER BY p.precedence DESC, r.source_id
+                    ) AS selection_rank
+                FROM observation o
+                JOIN source_release r ON r.release_id = o.release_id
+                JOIN temp.coverage_precedence p ON p.source_id = r.source_id
+                WHERE o.measure = 'new_registrations' AND o.unit = 'vehicles'
+                    AND o.canonical_vehicle_id IS NOT NULL
+                    AND o.mapping_status NOT IN ({publishable})
+                    AND SUBSTR(o.period_start, 1, 4) = SUBSTR(o.period_end, 1, 4)
+                GROUP BY 1, 2, 3, 4
+            ) WHERE selection_rank = 1""",
             parameters,
         )
 

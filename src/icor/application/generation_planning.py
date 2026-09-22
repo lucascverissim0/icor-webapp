@@ -11,7 +11,13 @@ from typing import Protocol
 from icor.domain.cohorts import CohortEstimate, OpportunityEstimate
 from icor.domain.evidence import ConfidenceBand, Measure
 from icor.evidence.normalization import stable_evidence_id
-from icor.forecasting.reconciliation import RegistrationInput, RegistrationReconciler
+from icor.forecasting.reconciliation import (
+    CoverageCandidate,
+    RegistrationCoverageSelector,
+    RegistrationInput,
+    RegistrationReconciler,
+    release_precedence,
+)
 from icor.forecasting.registration_forecast import RegistrationForecaster
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
 from icor.forecasting.survival import CohortSurvivalModel
@@ -42,6 +48,8 @@ class GenerationPlanningResult:
     reconciled_input_count: int
     excluded_correlated_input_count: int
     evidence_only_series_count: int
+    corroborating_input_count: int = 0
+    superseded_coverage_input_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +57,7 @@ class _AnnualValue:
     registrations: Decimal
     observation_ids: tuple[str, ...]
     status: str
+    extra_reason_codes: tuple[str, ...] = ()
 
 
 class GenerationPlanningService:
@@ -121,33 +130,63 @@ class GenerationPlanningService:
                 [*identifiers, observation.observation_id],
             )
 
+        coverage_candidates: dict[tuple[str, int], set[tuple[str, str]]] = defaultdict(set)
+        for key in release_buckets:
+            _generation, _vehicle, geography, year, release_id = key
+            release = releases.get(release_id)
+            if release is None:
+                raise ValueError("planning observation release is unavailable")
+            coverage_candidates[geography, year].add(
+                (release.source_id, str(release.publication_status))
+            )
+        coverage_selector = RegistrationCoverageSelector()
+        coverage: dict[tuple[str, int], str] = {}
+        coverage_corroborators: dict[tuple[str, int], tuple[str, ...]] = {}
+        for scope, candidates in coverage_candidates.items():
+            selection = coverage_selector.select(
+                tuple(
+                    CoverageCandidate(source_id=source, publication_status=status)
+                    for source, status in sorted(candidates)
+                )
+            )
+            coverage[scope] = selection.source_id
+            coverage_corroborators[scope] = selection.corroborating_source_ids
+
         annual_candidates: dict[
             tuple[str, str, str, int], list[RegistrationInput]
         ] = defaultdict(list)
         input_observations: dict[tuple[str, str, str, int, str], tuple[str, ...]] = {}
+        superseded_coverage_count = 0
         for key, (value, observation_ids) in release_buckets.items():
             generation_id, vehicle_id, geography, year, release_id = key
             release = releases.get(release_id)
             if release is None:
                 raise ValueError("planning observation release is unavailable")
+            if release.source_id != coverage[geography, year]:
+                # Another publisher decomposes this country-year. Keeping this
+                # release would add the vehicles only it happens to name on top
+                # of a total that already covers the whole market.
+                superseded_coverage_count += 1
+                continue
             annual_key = generation_id, vehicle_id, geography, year
             annual_candidates[annual_key].append(
                 RegistrationInput(
                     release_id,
                     release.dependency_group,
                     value,
-                    _release_priority(release.source_id),
+                    release_precedence(release.source_id),
                 )
             )
             input_observations[key] = tuple(sorted(observation_ids))
 
         series: dict[tuple[str, str, str], dict[int, _AnnualValue]] = defaultdict(dict)
-        selected_count = excluded_count = 0
+        selected_count = excluded_count = corroborating_count = 0
         for annual_key in sorted(annual_candidates):
             generation_id, vehicle_id, geography, year = annual_key
             result = self.reconciler.reconcile(tuple(annual_candidates[annual_key]))
             selected_count += len(result.selected_input_ids)
             excluded_count += len(result.excluded_input_ids)
+            corroborating_count += len(result.corroborating_input_ids)
             observation_ids = tuple(
                 sorted(
                     identifier
@@ -161,6 +200,9 @@ class GenerationPlanningService:
                 result.value,
                 observation_ids,
                 result.status,
+                _coverage_reason_codes(
+                    result.agreement, coverage_corroborators[geography, year]
+                ),
             )
 
         cohort_buffer: list[CohortEstimate] = []
@@ -253,6 +295,7 @@ class GenerationPlanningService:
                         reason_codes=(
                             f"{annual.status}-registration-cohort",
                             self.survival.reason_code(geography),
+                            *annual.extra_reason_codes,
                         ),
                     )
                     horizon_cohorts.append(cohort)
@@ -331,6 +374,8 @@ class GenerationPlanningService:
             selected_count,
             excluded_count,
             evidence_only_series_count,
+            corroborating_count,
+            superseded_coverage_count,
         )
 
     def _forecast(
@@ -378,12 +423,16 @@ def _fill_internal_gaps(values: dict[int, _AnnualValue]) -> dict[int, _AnnualVal
     return completed
 
 
-def _release_priority(source_id: str) -> int:
-    if source_id.startswith(("kba-", "uk-dft-")):
-        return 30
-    if source_id == "eea-co2-monitoring":
-        return 20
-    return 10
+def _coverage_reason_codes(
+    agreement: str, corroborating_sources: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Name the corroboration on the cohort, so provenance travels with the value."""
+
+    if agreement == "disputed":
+        return ("independent-publisher-disagreement-above-tolerance",)
+    if agreement == "corroborated" or corroborating_sources:
+        return ("corroborated-by-independent-publisher",)
+    return ()
 
 
 def _stable_seed(seed: int, identifier: str) -> int:
