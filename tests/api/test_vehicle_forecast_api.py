@@ -18,7 +18,11 @@ pytestmark = pytest.mark.allow_hosts(["127.0.0.1", "::1", "localhost"])
 
 
 class VehicleForecasts:
-    def options(self, **_kwargs):  # type: ignore[no-untyped-def]
+    def __init__(self) -> None:
+        self.option_calls: list[dict[str, object]] = []
+
+    def options(self, **kwargs):  # type: ignore[no-untyped-def]
+        self.option_calls.append(dict(kwargs))
         return VehicleForecastOptions(
             (VehicleOption("Volkswagen", "Golf"),),
             (2020, 2021),
@@ -29,6 +33,7 @@ class VehicleForecasts:
             ),
             (2028, 2031),
             ("Volkswagen",),
+            2020 if kwargs.get("search") else None,
         )
 
     def forecast(self, **kwargs):  # type: ignore[no-untyped-def]
@@ -129,3 +134,32 @@ def test_client_release_rejects_direct_generation_selection() -> None:
     assert response.json()["message"] == (
         "The client catalog supports source model-year selection only."
     )
+
+
+def test_options_report_the_year_read_out_of_a_free_text_search() -> None:
+    """`VW Golf 2020` must reach the client as a vehicle plus a year."""
+
+    service = VehicleForecasts()
+    client = TestClient(create_app(vehicle_forecast_service=service))
+
+    body = client.get(
+        "/api/v1/vehicle-forecasts/options", params={"search": "VW Golf 2020"}
+    ).json()
+
+    assert body["search_year"] == 2020
+    assert service.option_calls[0]["search"] == "VW Golf 2020"
+
+
+def test_options_pass_the_show_all_brands_choice_through() -> None:
+    """The brand list hides low-volume makes by default; nothing is deleted."""
+
+    service = VehicleForecasts()
+    client = TestClient(create_app(vehicle_forecast_service=service))
+
+    client.get("/api/v1/vehicle-forecasts/options")
+    client.get(
+        "/api/v1/vehicle-forecasts/options", params={"include_all_brands": "true"}
+    )
+
+    assert service.option_calls[0]["include_all_brands"] is False
+    assert service.option_calls[1]["include_all_brands"] is True

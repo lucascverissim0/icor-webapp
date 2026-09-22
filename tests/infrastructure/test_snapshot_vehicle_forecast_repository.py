@@ -34,7 +34,10 @@ def _database(path: Path) -> None:
             );
             CREATE TABLE opportunity_estimate (
                 opportunity_id TEXT PRIMARY KEY, generation_id TEXT,
-                canonical_vehicle_id TEXT, geography TEXT, horizon_year INTEGER
+                canonical_vehicle_id TEXT, geography TEXT, horizon_year INTEGER,
+                p10 TEXT, p50 TEXT, p90 TEXT, active_fleet_p50 TEXT,
+                hazard_method TEXT, forecast_method TEXT, confidence TEXT,
+                assumption_ids TEXT, reason_codes TEXT
             );
             CREATE TABLE opportunity_input (
                 opportunity_id TEXT, cohort_id TEXT, input_position INTEGER
@@ -91,8 +94,19 @@ def _database(path: Path) -> None:
             )
             opportunity_id = f"opportunity-{cohort_id}"
             connection.execute(
-                "INSERT INTO opportunity_estimate VALUES (?, ?, ?, ?, 2028)",
-                (opportunity_id, generation_id, vehicle_id, geography),
+                "INSERT INTO opportunity_estimate VALUES "
+                "(?, ?, ?, ?, 2028, ?, ?, ?, ?, 'fixture-hazard', "
+                "'fixture-forecast', 'medium', '[]', '[]')",
+                (
+                    opportunity_id,
+                    generation_id,
+                    vehicle_id,
+                    geography,
+                    p10,
+                    p50,
+                    p90,
+                    p50,
+                ),
             )
             connection.execute(
                 "INSERT INTO opportunity_input VALUES (?, ?, 0)",
@@ -255,6 +269,45 @@ def test_a_transition_year_cohort_is_served_without_guessing_its_generation(
     assert result.included_cohort_years == (2019,)
     assert result.generation_confidence == "source-reported"
     assert result.generation_basis == "official_source_registration_cohort"
+
+
+def test_the_european_figure_names_the_members_that_are_not_in_it(
+    repository: SnapshotVehicleForecastRepository,
+) -> None:
+    """An EU27 row is a partial sum; presenting it as Europe overstates it."""
+
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+    )
+
+    coverage = result.european_coverage
+    assert coverage is not None
+    assert coverage.contributing_markets == ("BE", "FR")
+    assert "DE" in coverage.missing_markets
+    assert "GB" not in coverage.missing_markets  # GB is not an EU27 member
+    assert not set(coverage.contributing_markets) & set(coverage.missing_markets)
+
+
+def test_the_demand_rank_places_the_selection_in_its_population(
+    repository: SnapshotVehicleForecastRepository,
+) -> None:
+    """A percentile needs a population, so a single vehicle is ranked against one.
+
+    Only the demand half of `DemandReadinessV1` is reported: the readiness half
+    needs the coverage database this channel does not read, and reporting it as
+    zero would understate every vehicle.
+    """
+
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+    )
+
+    rank = result.demand_rank
+    assert rank is not None
+    assert 0.0 <= rank.percentile <= 1.0
+    assert rank.demand_points == pytest.approx(rank.percentile * 80.0)
+    assert 1 <= rank.rank <= rank.population
+    assert rank.basis == "european_opportunity_p50_at_horizon"
 
 
 def test_survival_method_is_read_from_the_model_not_a_literal(

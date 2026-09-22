@@ -203,6 +203,40 @@
         "title": "DemandRangeResponse",
         "type": "object"
       },
+      "DemandRankResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "demand_points": {
+            "title": "Demand Points",
+            "type": "number"
+          },
+          "percentile": {
+            "title": "Percentile",
+            "type": "number"
+          },
+          "population": {
+            "title": "Population",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "percentile",
+          "demand_points",
+          "rank",
+          "population",
+          "basis"
+        ],
+        "title": "DemandRankResponse",
+        "type": "object"
+      },
       "EquipmentResponse": {
         "additionalProperties": false,
         "properties": {
@@ -270,6 +304,31 @@
           "rain_light_sensor"
         ],
         "title": "EquipmentResponse",
+        "type": "object"
+      },
+      "EuropeanCoverageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "contributing_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Contributing Markets",
+            "type": "array"
+          },
+          "missing_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Markets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "contributing_markets",
+          "missing_markets"
+        ],
+        "title": "EuropeanCoverageResponse",
         "type": "object"
       },
       "EvidenceObservationPageResponse": {
@@ -2411,6 +2470,17 @@
             "title": "Horizons",
             "type": "array"
           },
+          "search_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Year"
+          },
           "vehicles": {
             "items": {
               "$ref": "#/components/schemas/VehicleOptionResponse"
@@ -2449,6 +2519,26 @@
           "data_version": {
             "title": "Data Version",
             "type": "string"
+          },
+          "demand_rank": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemandRankResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "european_coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EuropeanCoverageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "excluded_ambiguous_years": {
             "items": {
@@ -4513,6 +4603,16 @@
                 }
               ],
               "title": "Model"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_all_brands",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include All Brands",
+              "type": "boolean"
             }
           }
         ],

@@ -166,6 +166,9 @@ class VehicleForecastOptionsResponse(ApiModel):
     generations: tuple[GenerationOptionResponse, ...]
     horizons: tuple[int, ...]
     brands: tuple[str, ...] = ()
+    #: A registration year read out of a free-text search, so `VW Golf 2020`
+    #: can preselect 2020 rather than matching it as text and finding nothing.
+    search_year: int | None = None
 
 
 class MarketVehicleForecastResponse(ApiModel):
@@ -176,6 +179,19 @@ class MarketVehicleForecastResponse(ApiModel):
     cohort_count: int
     active_fleet: DemandRangeResponse | None
     replacements: DemandRangeResponse | None
+
+
+class DemandRankResponse(ApiModel):
+    percentile: float
+    demand_points: float
+    rank: int
+    population: int
+    basis: str
+
+
+class EuropeanCoverageResponse(ApiModel):
+    contributing_markets: tuple[str, ...]
+    missing_markets: tuple[str, ...]
 
 
 class VehicleForecastResponse(ApiModel):
@@ -199,6 +215,8 @@ class VehicleForecastResponse(ApiModel):
     uncertainty_method: str
     calibration_status: str
     data_version: str
+    european_coverage: EuropeanCoverageResponse | None = None
+    demand_rank: DemandRankResponse | None = None
 
 
 class ModelYearDemandResponse(ApiModel):

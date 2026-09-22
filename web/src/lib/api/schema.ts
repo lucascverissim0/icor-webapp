@@ -414,6 +414,19 @@ export interface components {
             /** Upside Units */
             upside_units: number;
         };
+        /** DemandRankResponse */
+        DemandRankResponse: {
+            /** Basis */
+            basis: string;
+            /** Demand Points */
+            demand_points: number;
+            /** Percentile */
+            percentile: number;
+            /** Population */
+            population: number;
+            /** Rank */
+            rank: number;
+        };
         /** EquipmentResponse */
         EquipmentResponse: {
             /** Acoustic */
@@ -426,6 +439,13 @@ export interface components {
             hud: boolean | null;
             /** Rain Light Sensor */
             rain_light_sensor: boolean | null;
+        };
+        /** EuropeanCoverageResponse */
+        EuropeanCoverageResponse: {
+            /** Contributing Markets */
+            contributing_markets: string[];
+            /** Missing Markets */
+            missing_markets: string[];
         };
         /** EvidenceObservationPageResponse */
         EvidenceObservationPageResponse: {
@@ -1171,6 +1191,8 @@ export interface components {
             generations: components["schemas"]["GenerationOptionResponse"][];
             /** Horizons */
             horizons: number[];
+            /** Search Year */
+            search_year?: number | null;
             /** Vehicles */
             vehicles: components["schemas"]["VehicleOptionResponse"][];
             /** Years */
@@ -1184,6 +1206,8 @@ export interface components {
             calibration_status: string;
             /** Data Version */
             data_version: string;
+            demand_rank?: components["schemas"]["DemandRankResponse"] | null;
+            european_coverage?: components["schemas"]["EuropeanCoverageResponse"] | null;
             /** Excluded Ambiguous Years */
             excluded_ambiguous_years: number[];
             /** Excluded Forecast Cohort Years */
@@ -2300,6 +2324,7 @@ export interface operations {
                 search?: string | null;
                 brand?: string | null;
                 model?: string | null;
+                include_all_brands?: boolean;
             };
             header?: never;
             path?: never;

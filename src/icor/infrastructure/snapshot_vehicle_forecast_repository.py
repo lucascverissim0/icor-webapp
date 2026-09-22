@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
+from icor.application.ranking import DEMAND_POINTS_MAX, demand_percentile_rank
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.planner import DemandRange
 from icor.evidence.normalization import (
@@ -116,6 +117,40 @@ class MarketVehicleForecast:
 
 
 @dataclass(frozen=True, slots=True)
+class DemandRank:
+    """Where this selection sits among every forecastable vehicle at a horizon.
+
+    `DemandReadinessV1` scores demand as a percentile within a population, so a
+    single vehicle has no score on its own. This ranks the selection against
+    every vehicle with an opportunity at the same horizon, using the shared
+    percentile rule, and reports only the demand half of that score. The
+    20-point production-readiness half depends on the coverage database, which
+    this channel does not read, so it is deliberately absent rather than
+    reported as zero.
+    """
+
+    percentile: float
+    demand_points: float
+    rank: int
+    population: int
+    basis: str
+
+
+@dataclass(frozen=True, slots=True)
+class EuropeanCoverage:
+    """Which EU27 members are actually inside the EU27 figure, and which are not.
+
+    The EU27 row sums the member states present in the snapshot. Presenting
+    that as "Europe" without naming the absent members overstates a partial
+    sum, which is the same class of defect as the double count already on
+    record for GB and DE.
+    """
+
+    contributing_markets: tuple[str, ...]
+    missing_markets: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class VehicleForecastResult:
     brand: str
     model: str
@@ -137,6 +172,8 @@ class VehicleForecastResult:
     uncertainty_method: str
     calibration_status: str
     data_version: str
+    european_coverage: EuropeanCoverage | None = None
+    demand_rank: DemandRank | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +326,7 @@ class SnapshotVehicleForecastRepository:
             if not vehicle_ids:
                 raise VehicleForecastSelectionError("the selected vehicle is unavailable")
             rows = self._cohort_rows(connection, vehicle_ids, horizon)
+            demand_rank = self._demand_rank(connection, vehicle_ids, horizon)
         if not rows:
             raise VehicleForecastSelectionError(
                 "no forecast is available for this vehicle and horizon"
@@ -313,6 +351,10 @@ class SnapshotVehicleForecastRepository:
             self._market_result(code, name, selected_rows, selection, horizon)
             for code, name in _TARGETS
         )
+        contributing = {row["geography"] for row in selected_rows} & _EU27
+        coverage = EuropeanCoverage(
+            tuple(sorted(contributing)), tuple(sorted(_EU27 - contributing))
+        )
         return VehicleForecastResult(
             brand=brand,
             model=model,
@@ -336,6 +378,56 @@ class SnapshotVehicleForecastRepository:
             uncertainty_method=self._uncertainty.method,
             calibration_status="assumption_led_without_proprietary_fitment_or_hazard_calibration",
             data_version=self._data_version,
+            european_coverage=coverage,
+            demand_rank=demand_rank,
+        )
+
+    def _demand_rank(
+        self, connection: sqlite3.Connection, vehicle_ids: tuple[str, ...], horizon: int
+    ) -> DemandRank | None:
+        """Rank this selection's European demand among every vehicle at a horizon.
+
+        The population is read from the stored `opportunity_estimate` p50 rather
+        than recomputed, and is grouped by canonical identity so a vehicle whose
+        rows are split across publisher spellings is ranked once, at its real
+        size, instead of several times at a fraction of it.
+        """
+
+        index = self._identity_index(connection)
+        placeholders = ", ".join("?" for _ in _EU27)
+        totals: dict[tuple[str, str] | str, float] = {}
+        try:
+            population_rows = connection.execute(
+                f"""SELECT canonical_vehicle_id, SUM(CAST(p50 AS REAL))
+                FROM opportunity_estimate
+                WHERE horizon_year = ? AND geography IN ({placeholders})
+                GROUP BY canonical_vehicle_id""",
+                (horizon, *sorted(_EU27)),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # An older snapshot without stored quantiles still has a valid
+            # forecast; only the comparison against other vehicles is missing.
+            return None
+        for vehicle_id, amount in population_rows:
+            key = index.identity_for(vehicle_id) or vehicle_id
+            totals[key] = totals.get(key, 0.0) + float(amount or 0.0)
+        if not totals:
+            return None
+        # The selection may span several canonical identities, so its total is
+        # not one of the population's entries. Removing its constituents and
+        # inserting the aggregate makes the value a member by construction;
+        # ranking it against a population it is not part of produced a
+        # percentile above 1.0 whenever the selection outsized every entry.
+        selected_keys = {index.identity_for(item) or item for item in vehicle_ids}
+        value = sum(totals.pop(key, 0.0) for key in selected_keys)
+        population = sorted([*totals.values(), value])
+        percentile = demand_percentile_rank(population, value)
+        return DemandRank(
+            percentile=percentile,
+            demand_points=percentile * DEMAND_POINTS_MAX,
+            rank=sum(1 for item in population if item > value) + 1,
+            population=len(population),
+            basis="european_opportunity_p50_at_horizon",
         )
 
     def _cohort_year_selection(self, vehicle, profile, year):  # type: ignore[no-untyped-def]

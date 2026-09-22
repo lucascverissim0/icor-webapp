@@ -218,6 +218,11 @@ class VehicleIdentityIndex:
         self._vehicle_ids = vehicle_ids
         self._make_volume = make_volume
         self._total_volume = total_volume
+        self._identity_by_vehicle = {
+            vehicle_id: key
+            for key, vehicle_ids_for_key in vehicle_ids.items()
+            for vehicle_id in vehicle_ids_for_key
+        }
 
     @classmethod
     def from_rows(cls, rows: Iterable[tuple[str, str, str, float]]) -> VehicleIdentityIndex:
@@ -307,6 +312,16 @@ class VehicleIdentityIndex:
 
     def identity(self, make: str, model: str) -> VehicleIdentity | None:
         return self._identities.get(self._key(make, model))
+
+    def identity_for(self, vehicle_id: str) -> tuple[str, str] | None:
+        """The canonical identity one raw vehicle id belongs to.
+
+        Lets a population keyed by raw vehicle id be grouped by real vehicle, so
+        a car whose rows are split across publisher spellings is counted once at
+        its full size rather than several times at a fraction of it.
+        """
+
+        return self._identity_by_vehicle.get(vehicle_id)
 
     def match(
         self, query: ParsedVehicleQuery, *, limit: int | None = None

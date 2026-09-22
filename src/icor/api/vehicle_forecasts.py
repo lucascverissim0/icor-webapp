@@ -36,12 +36,18 @@ def vehicle_forecast_options(
     search: Annotated[str | None, Query(max_length=100)] = None,
     brand: Annotated[str | None, Query(max_length=100)] = None,
     model: Annotated[str | None, Query(max_length=200)] = None,
+    include_all_brands: Annotated[bool, Query()] = False,
 ) -> VehicleForecastOptionsResponse | JSONResponse:
     service = request.app.state.vehicle_forecast_service
     if service is None:
         return _problem(request, "Vehicle forecast data is unavailable.", 503)
     return VehicleForecastOptionsResponse.model_validate(
-        service.options(search=search, brand=brand, model=model)
+        service.options(
+            search=search,
+            brand=brand,
+            model=model,
+            include_all_brands=include_all_brands,
+        )
     )
 
 
