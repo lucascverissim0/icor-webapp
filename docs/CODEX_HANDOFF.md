@@ -5112,3 +5112,159 @@ plainly.
 - `1f8f08c` feat: surface method provenance in the UI and add the deployed-release check
 - `9b885ad` feat: make the client preview deployable to a container behind HTTPS
 - `3ed5e09` fix: make Windows CI diagnosable and stop two real transient failures
+
+---
+
+## 2026-09-22 (evening) — Model search repaired; detached local service added
+
+Branch `fix/client-release-production`. Commits `3155298`, `674c0b6`, `31d7a79`,
+`cd2fa95`, `3a6c269`. Verification: `uv run pytest` **856 passed, 14 skipped, 4
+xfailed**; `npx vitest run` **80 passed**; `npm run lint` and `npm run typecheck`
+clean. Verified in a browser against the active snapshot.
+
+### BLOCKER found: the active snapshot cannot be served
+
+`SnapshotStore.open_active_snapshot()` raises `SnapshotUnavailableError`, caused by
+`SnapshotPromotionError('candidate snapshot cannot be verified')`. **Every
+`/api/v1/vehicle-forecasts*` request answers 503 on this machine**, and the
+Opportunities and forecast pages are equally dead.
+
+Measured, so the cause is not in doubt:
+
+- `active.json` points at `snapshot-38878384744b4c9d310f`, promoted 2026-09-22T12:12:24Z
+- `sha256(snapshot.json)` **matches** the recorded `manifest_sha256`
+- `sha256(evidence.sqlite3)` (9,250,779,136 bytes) **matches** `database_sha256`
+- `snapshot.json` carries **`"status": "candidate"`** and 100 warnings
+
+So nothing is corrupt: a **candidate was pointed at by `active.json` without ever
+being promoted to active status**, and the store correctly refuses to serve a
+candidate. This was NOT introduced by this session and was NOT worked around. The
+integrity check is right; the promotion is what is missing. Next action is the
+existing step 2 below — promote a zero-error candidate properly, then re-check
+`open_active_snapshot`.
+
+To see the UI meanwhile, a read-only harness injects the repository directly
+(`create_app(vehicle_forecast_service=SnapshotVehicleForecastRepository(...))`).
+It reads the snapshot file and promotes nothing. It lives in the session
+scratchpad, deliberately not committed.
+
+### Root cause behind the reported Model search faults
+
+`canonical_vehicle` stores raw publisher labels and nothing canonicalised them
+before the UI: **557 make strings** (93 casefold-collision groups, 14 spellings of
+Volkswagen) over **22,892 make/model pairs**, most "models" being trim strings.
+Every spelling was its own silo. That single cause produced all four symptoms.
+
+`src/icor/evidence/vehicle_identity.py` resolves identities at query time; the
+reviewed rules live in `data/vehicle_identity.json`. The 9 GB snapshot is not
+rewritten. Measured on `snapshot-38878384744b4c9d310f`:
+
+| | before | after |
+|---|---|---|
+| brands in dropdown | 557 | 54 (423 with `include_all_brands`) |
+| make/model pairs | 22,892 | 4,082 identities |
+| Audi models | 1,194 | 78 |
+| `VW Golf 2020` matches | **0** | Volkswagen Golf, year 2020 extracted |
+| Audi A4 years (the trim silo the user hit) | 2010-2013 | 2001-2025 |
+| Golf 2020 markets with data | 5 of 8 | **7 of 7** |
+| Golf 2020 `included_cohort_years` | **2010-2025** | **2020** |
+
+Germany alone contributed 118,793 Golf registrations the silos were hiding.
+
+The merge rules are deliberately asymmetric: under-merging leaves a duplicate in a
+dropdown, over-merging sums two different windshields into one forecast. So
+ID.3 stays apart from ID.4, ALPINA from ALPINE, A4 from A4 Avant, and a label
+naming two vehicles (`a4 , s4`) is dropped rather than attributed to one of them.
+Coachbuilders (`volkswagen knaus`, `mercedes-benz hymer`) stay separate from the
+parent make.
+
+Two data defects found while validating: accents were **deleted** rather than
+folded, which made Skoda a second make called `koda` holding real Czech volume;
+and a decimal engine size was being read as part of the model name.
+
+### Behaviour changes to previously-tested behaviour (both deliberate)
+
+A chosen registration year now selects **that cohort and no other**. It used to
+resolve to a generation and then pull every cohort in it, so any vehicle whose
+generation window is one estimated block reported sixteen model years under the
+single year shown on screen. Two tests changed with it, both moving from refusing
+to reporting:
+
+- A transition year (Golf 2019) no longer raises. Refusing protected a generation
+  label the user had not asked for, while the cohort itself is unambiguous. It is
+  served, with the generation marked `source-reported`.
+- Transition years are no longer hidden from the year picker, for the same reason.
+  Golf regains 2012 and 2019.
+
+Selecting a generation directly is unchanged and still aggregates the whole
+generation.
+
+### The result now carries coverage and a rank
+
+- `european_coverage` names which EU27 members are inside the figure and which are
+  absent. A partial sum presented as "Europe" is the same defect class as the
+  GB/DE double count already on record.
+- `demand_rank` ranks one selection among every vehicle with an opportunity at the
+  same horizon, through `demand_percentile_rank`, now shared with
+  `DemandReadinessV1` so the two channels cannot disagree about a vehicle. **Only
+  the 80-point demand half is reported**: the readiness half needs the coverage
+  database this channel does not read, and reporting it as zero would understate
+  every vehicle.
+
+Three bugs the new tests caught: a percentile above 1.0 (a selection spans several
+canonical identities, so its total was not a member of the population it was being
+ranked against); a population keyed by raw vehicle id (which would rank a car
+split across spellings several times at a fraction of its size); and the test
+fixture's `opportunity_estimate` missing the real schema's columns, so it could
+not have caught either.
+
+### `scripts/planner_service.py` — a local server that outlives its terminal
+
+`start` / `stop` / `status [--probe]` / `logs`. Spawns uvicorn and Vite detached,
+logs to `.local/planner-*.log`, records both pids in
+`.local/planner-service.json`. Not a supervisor: a child that exits is not
+restarted, and `status` reports each process separately so a half-dead pair is
+visible. Verified surviving the exit of the shell that launched it.
+
+Four defects found during that verification, all fixed and pinned by tests:
+
+1. Starting onto a port another server held spawned anyway. Vite came up, uvicorn
+   died on `[Errno 10048]` in a log nobody was reading, and the pair looked
+   started. Ports are checked before anything spawns, and a port someone else
+   holds is reported rather than reused or killed.
+2. The health probe read an HTTP error status as silence, so a healthy API
+   answering 404 on a mistyped path was reported dead. Any HTTP reply now proves
+   life. The correct path is **`/api/health`**, not `/api/v1/health`.
+3. Vite ran through `npm run dev`. On Windows npm is a batch file, so cmd.exe
+   wrapped it, took a console control event that detachment should have stopped,
+   and asked "Terminate batch job (Y/N)?" into an unread log — killing the dev
+   server. It now runs `node node_modules/vite/bin/vite.js` directly.
+4. `ICOR_EVIDENCE_ACTIVE_ROOT` was only checked for being set. **Set but wrong is
+   worse than unset**: the API starts and answers 503 for every vehicle while
+   `status` reports a healthy pair. A Git Bash `/c/Users/...` path on Windows is
+   the easy way to land there. The path is now resolved, and a root with no
+   `active.json` is refused too.
+
+**Windows note:** pass a Windows path, not a shell path, for example
+`ICOR_EVIDENCE_ACTIVE_ROOT=C:\Users\...\icor-webapp-development\.local\evidence`
+
+### Known residue (all under-merges, the safe direction)
+
+The Volkswagen model list still shows `Up!`/`Up`/`E-Up`/`Eup!`, `Id.3 Pro`/`Id3`,
+`T-Roc`/`T Roc`, `T-Cross`/`T Cross`/`Tcross`, and long-tail junk such as
+`T-Porter T30 Se 140Tdi Lw`, `Model Missing` and `Widder`. These are separate
+identities rather than wrong ones, and they sort below the real models by volume.
+Tightening them means extending `data/vehicle_identity.json`, which is reviewable.
+
+Cold `options(brand, model)` was ~10 s and is now ~2.5 s; building the identity
+index costs ~3 s once per repository instance.
+
+### Exact next actions
+
+1. **Promote a zero-error candidate properly**, so the manifest status is not
+   `candidate`. Until then the app serves nothing without the harness.
+2. Re-run `scripts/replay_registration_reconciliation.py` against it, as the
+   earlier checkpoint already required.
+3. Consider normalising makes during evidence ingestion, so the query-time
+   resolver becomes a safety net rather than the only defence.
+4. Gate 1 (the leaked key) is still waived, not met.
