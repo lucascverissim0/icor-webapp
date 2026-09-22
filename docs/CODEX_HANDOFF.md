@@ -4943,3 +4943,172 @@ Cancelling them needs credentials this machine does not have.
 - `dcc033b` ci: bound job runtime and stop starving the npm audit step
 - `1dacf36` fix: reconcile registrations by coverage instead of adding publishers
 - `b0a2658` feat: record the uncertainty method on the row that carries the interval
+
+
+## 2026-09-22 client-release production work; rebuild still in flight
+
+Continues the entry above. Branch `fix/client-release-production`, eight commits,
+nothing pushed. `uv run pytest`: **799 passed, 14 skipped, 4 xfailed**. `uv run ruff
+check src tests` and the named scripts: clean. `npm run typecheck`, `npm run lint`,
+`npm test -- --run` (76 passed), `npm run openapi:check`: clean. `npm run e2e`: 25
+passed in 1.3m, exiting cleanly.
+
+### Preview security: two items that were safe in Codespaces and are not on a URL
+
+`POST /auth/login` was an `async` endpoint calling Argon2id verification directly on the
+event loop. Argon2id costs about 64 MiB and tens of milliseconds, and an unknown
+username still pays it against `_dummy_hash`, so it is reachable without credentials: a
+handful of concurrent posts stalled the single-worker server. Now runs in a threadpool.
+
+The throttle keyed on `(username, address)` only, so rotating usernames bypassed it
+entirely while five guesses at a *known* username locked that reviewer out for fifteen
+minutes. There is now a second bucket keyed on address alone, and both are checked
+before any hashing happens.
+
+`ClientReleaseMiddleware` ran **before** authentication, so its 404s answered anonymous
+callers: the client surface was enumerable without signing in. Starlette prepends, so
+the registration order was inverted; authentication is now outermost after the headers.
+
+Headers gained HSTS (TLS-gated, no `preload` - irreversible for a year on a hostname
+the project does not own), `X-Robots-Tag`, COOP, CORP and `Permissions-Policy`. CSP
+gained **`base-uri 'none'` and `form-action 'self'`**, which is the substantive change:
+neither falls back to `default-src`, so nothing previously stopped a `<base>` injection
+retargeting every relative asset URL or the credential-posting login form being
+repointed. `default-src` is now `'none'` with explicit directives, verified safe against
+the shipped bundle (no inline script, no inline style attribute) and guarded by a test
+that parses the built `index.html`.
+
+**Still to check in a browser before the URL is shared:** that the tightened CSP breaks
+nothing visually. The bundle on disk is from 2026-09-12 and predates this branch.
+
+### The e2e hang, root-caused
+
+`run_e2e_dev.py:88` spawned uvicorn and Vite with `start_new_session=True` while they
+inherited its stdout and stderr. Playwright kills its webServer with
+`process.kill(-pid, SIGKILL)`, which is process-group scoped and never reaches children
+in their own session. They survived holding the write end of the pipe Playwright reads,
+so the Node `close` event never fired, `waitForCleanup` never resolved, and teardown
+hung with all 25 tests green. Windows passes because Playwright uses `taskkill /T`
+there, which kills the tree regardless of groups - the asymmetry in the symptom is
+exactly the asymmetry in the kill strategy.
+
+The load-bearing fix is that the children no longer share our stdio: each gets a pipe
+and a daemon relay thread, so the handles close when this process exits whatever signal
+arrives. SIGTERM/SIGINT now reach the `finally` that reaps them, `_stop` waits and
+escalates, and Playwright is asked for a graceful SIGTERM. Plus `forbidOnly`,
+`globalTimeout`, one CI worker, a non-interactive reporter, and report/trace upload.
+
+**Not proven from here.** The hang only reproduces on Linux CI. It needs one green run.
+
+### Provenance, and what the handoff had wrong about it
+
+The ranking channel was recorded as exposing no provenance. It exposed the wrong one:
+`snapshot_planner_repository.py:277` and `:463` passed `method_versions=self.versions`,
+the snapshot-level block, as a **per-row** value. Same shape as `b76f2a6`, so this was
+the fourth instance and already client-visible, true only by accident because a build
+currently writes one curve per snapshot.
+
+Rows now carry `row_methods`, read from the rows: hazard, forecast and uncertainty off
+the opportunity row, survival off the cohorts that produced its fleet. `method_versions`
+stays with its own meaning. They are separate fields on purpose. The `mixed:` convention
+moved into `icor.evidence.provenance` and is shared by both channels; four channels have
+needed that rule.
+
+`SnapshotVersionsResponse` was silently dropping `uncertainty_method`, so it was absent
+from five responses including the one gate 7 compares. Added; OpenAPI regenerated.
+
+The forecast page now names the survival, hazard and uncertainty methods behind the
+figures on screen, and raises a visible integrity warning on a `mixed:` value. Note the
+client ranking page reports `versions` at page scope, which is correctly labelled;
+`row_methods` rides on `PlanningConfigurationResponse`, which the client release blocks,
+so it is internal-only for now.
+
+### Deployment, Part G: code complete, nothing deployed
+
+- **Host-agnostic runner.** `ICOR_PREVIEW_HOST_MODE` names the host with no default.
+  Codespaces sets `CODESPACES=true` itself, so that is accepted as the platform
+  declaring itself and all four original runner tests pass unchanged. Container mode
+  additionally requires a clean HTTPS origin, a declared trusted-proxy set and verified
+  client-release mode. `scripts/run_container_preview.py` validates then `execv`s uvicorn
+  so it is PID 1.
+- **Snapshot scope.** `SnapshotManifest.scope`, entering the identity payload only when
+  it is not `full`, so **every existing snapshot id is bit-identical** - there is a test
+  whose only job is that. Manifests without the key still load. The preview fails closed
+  unless release mode and scope agree in both directions.
+- **Client snapshot.** `derive_client_snapshot` copies the finished snapshot, empties
+  `observation`, `cohort_input`, `generation_assignment`, `identity_mapping` and
+  `registration_label_aggregate`, vacuums, and re-issues the manifest and validation
+  report through the same writer and validator. Identity is recomputed from
+  `source_release` in the database, which is exactly where promotion reads it.
+  `scripts/build_client_snapshot.py derive|promote`.
+- **Container.** Multi-stage Dockerfile with an explicit COPY allowlist and **no
+  `COPY . .` anywhere**, so Git history - which still carries the leaked key - cannot
+  reach the image. A `preview` extra keeps `openai` and `streamlit` out of the runtime.
+  A build-time `open_active_snapshot` assert makes a bad bake a red build. `fly.toml`
+  targets ams, forces HTTPS, does not scale to zero.
+- **`scripts/verify_client_release.py`** checks a deployed URL against the gates and the
+  seven smoke steps and prints one JSON verdict.
+
+**Unvalidated:** neither Docker nor flyctl is installed on this machine, so the
+Dockerfile has never been built and `fly.toml` has never been parsed by flyctl. Expect
+to iterate on the first build. Note `fly deploy --remote-only` builds on Fly's builder,
+so only flyctl is needed locally, not Docker.
+
+### Windows CI
+
+The recorded teardown diagnosis is **refuted**: with no `tmp_path_retention_policy`
+configured, pytest removes nothing at teardown and the removal path cannot raise. The
+real cause was two sites using `with sqlite3.connect(...)`, which commits but does not
+close, leaking a handle inside `tmp_path`. The same file already used
+`contextlib.closing` twice. Both fixed; `pytest -W error::ResourceWarning` over the
+module is clean.
+
+`_publish_no_replace` handled only winerrors 80 and 183 and let `ERROR_SHARING_VIOLATION`
+escape on the first attempt, although the sibling filesystem defends against that class
+and its comment names the mechanism. Now retried with backoff; the filesystem budget
+goes 1.0s to 5.0s.
+
+A `pytest_runtest_makereport` hook, active only under `GITHUB_ACTIONS`, emits
+`::error file=...` annotations. Annotations are readable unauthenticated, so the next
+failing run yields the test names and assertion text without a token. Verified locally.
+
+**The Windows failure is still unidentified.** This makes the next run say what it is.
+
+### Exact next actions, in order
+
+1. **Wait for the rebuild** (started 15:54, `.build-c8f73d93e0a44f42947fae37ff90ce78`).
+   Inspect with `scripts/report_snapshot_completeness.py --candidate <dir>`; expect lower
+   `forecastable` and higher `evidence_only` than before, which is the corroborating and
+   superseded observations no longer being cited, not data loss.
+2. **Promote only a zero-error candidate**, then re-run
+   `scripts/replay_registration_reconciliation.py --root .local/evidence --geography GB
+   --geography DE --check-projection` against it. The projection rows should now match
+   the cohort rows; until this rebuild promotes, the active snapshot still serves the
+   doubled GB and DE figures.
+3. **Derive the client snapshot**, record its measured size, and time
+   `open_active_snapshot` on it.
+4. **Rebuild the client bundle** into `.local/client-release`; the one on disk is from
+   2026-09-12.
+5. **Lucas**: install flyctl, `fly auth login`, `fly apps create`, `fly secrets import`.
+   Then `fly deploy --remote-only` and `scripts/verify_client_release.py`.
+6. **Gate 1 is still waived, not met.** The key is live and the repository public. My
+   recommendation remains to rotate before the URL is shared.
+
+### Client-facing status
+
+**GB and DE figures are still wrong in the running app.** Nothing promoted. Once the
+rebuild promotes, GB demand falls by roughly a third and DE 2024 by about a sixth; that
+is the double count leaving, and anyone who saw the old numbers should be told so
+plainly.
+
+### Commits on this branch
+
+- `dcc033b` ci: bound job runtime and stop starving the npm audit step
+- `1dacf36` fix: reconcile registrations by coverage instead of adding publishers
+- `b0a2658` feat: record the uncertainty method on the row that carries the interval
+- `6adb7c7` docs: record the two double-count mechanisms and the in-flight rebuild
+- `3017136` fix: make the preview login survivable and the headers internet-grade
+- `cb75417` fix: stop the e2e webServer teardown hanging on Linux CI
+- `1f8f08c` feat: surface method provenance in the UI and add the deployed-release check
+- `9b885ad` feat: make the client preview deployable to a container behind HTTPS
+- `3ed5e09` fix: make Windows CI diagnosable and stop two real transient failures
