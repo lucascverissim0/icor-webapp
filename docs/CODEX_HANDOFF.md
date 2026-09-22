@@ -4714,3 +4714,81 @@ Do not quote any GB figure - fleet, opportunity ranking position, or demand - to
 Non-overlapping geographies are unaffected by this specific defect: Germany is covered by
 the shared EEA/KBA group, and the sanity check on the new snapshot gives DE 43.5M and FR
 23.4M for 2028, both below their national parcs and therefore plausible.
+
+### Promotion completed and verified, 2026-09-22
+
+`snapshot-38878384744b4c9d310f` is **promoted and active** (pointer written
+2026-09-22T12:12:24Z, manifest SHA-256 `dfd05826...45ee6`, database SHA-256
+`4042e5db...072f`). Build took 4h15m; promotion a further ~15 minutes because it
+re-hashes the 8.7 GB database. The previous snapshot
+`snapshot-a20e1c00232b3603c1a1` is retained, so `promote --snapshot
+snapshot-a20e1c00232b3603c1a1` reverses this at any time.
+
+Measured effect of the rebuild, old versus new:
+
+| | Active before | Promoted now |
+|---|---:|---:|
+| Opportunity interval relative width | 0.3719 | **0.5888** |
+| Mean opportunity p50 | 104.6 | 125.0 |
+| Mean cohort active fleet p50 | 2,417.5 | 2,919.4 |
+| survival_method on 883,172 cohorts | constant-annual-retention-v1 | uk-dft-licensed-stock-band-v1 |
+
+The wider intervals are the corrected split-normal propagation; the previous
+bands were the measured 45%-too-narrow ones. Fleet and demand rise about 20%
+because the calibrated curve retains far more young vehicles, where most fleet
+mass sits.
+
+Manifest records both `survival_method: uk-dft-licensed-stock-band-v1` and
+`uncertainty_method: quantile-matched-split-normal-propagation-v2`, so
+CLIENT_RELEASE.md gate 7 now has something to compare. Note that the
+`uncertainty_method` was added to `SnapshotVersions` only; no column was added to
+`opportunity_estimate`, so the method is recorded per snapshot, not per row.
+
+Resolved a question left open in the plan: the promoted snapshot's own
+`snapshot.json` still reads `"status": "candidate"`. That is a record-of-build
+artifact, not a state inconsistency - the active pointer is the authority.
+
+### A third instance of the two-channels defect, found by this verification
+
+Verifying the promoted snapshot through both API channels in process showed the
+vehicle-forecast channel returning `survival_method: constant-annual-retention-v1`
+while the ranking channel reported the calibrated method. The channel built its
+own `CohortSurvivalModel` and reported that instance, although the fleet
+quantiles it serves come from `cohort_estimate`. Commits 3c91add and 45c54fe
+addressed the same class of defect; 3c91add removed a hardcoded literal but left
+a freshly built model in its place, which is the same bug one level up.
+
+Numbers were never affected - `_survival` was used only for the label. Fixed in
+`b76f2a6` by reading `survival_method` from the selected rows. Both channels now
+report `uk-dft-licensed-stock-band-v1` against the live snapshot.
+
+**Lesson worth keeping: any provenance a channel reports must be read from the
+rows it serves, never reconstructed from application code.** The remaining
+instance of this pattern is the ranking channel, which does not expose
+`survival_method` or `uncertainty_method` at all. That is a transparency gap
+rather than a false claim, but it is the reason this defect survived two previous
+fixes without being noticed.
+
+### Verification state at end of session
+
+- `uv run pytest`: **702 passed, 14 skipped, 4 xfailed**.
+- `uv run ruff check src tests`: all checks passed.
+- `npm run e2e` earlier on this tree: 25 passed, exit 0, 1.1m.
+- Both API channels verified in process against the promoted snapshot, via
+  `fastapi.testclient`; `/api/health` returns `snapshot_ready: True` and
+  `data_version: snapshot-38878384744b4c9d310f`.
+
+`tests/infrastructure/test_snapshot_store.py` produced a teardown ERROR twice
+today in full-suite runs, on different tests each time, and passed in isolation
+and on rerun both times. It looks like Windows temp-directory cleanup racing with
+open SQLite handles, not a defect, but it is worth watching.
+
+### Local processes
+
+The stale API (PID 10948) and Vite (PID 38396) from the 2026-09-20 session were
+killed: they served both the old snapshot and pre-fix code. A new Vite is running
+on 5173 (PID 34028). An attempt to start the API through
+`scripts/run_planner_dev.py` and then directly with uvicorn did not bring up port
+8000 - the background process exited 3 with an empty log, cause not yet
+diagnosed. The in-process verification above did not need it. **Port 8000 is not
+currently serving.**
