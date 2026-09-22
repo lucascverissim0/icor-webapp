@@ -13,9 +13,16 @@ const coverageDatabase = fileURLToPath(
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
-  workers: process.env.ICOR_E2E_EVIDENCE_CANDIDATE ? 1 : undefined,
+  // One shared webServer plus serial tests makes extra workers pure variance.
+  workers: process.env.CI || process.env.ICOR_E2E_EVIDENCE_CANDIDATE ? 1 : undefined,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? 'github' : 'list',
+  // A stray test.only must fail CI rather than quietly green-light it.
+  forbidOnly: !!process.env.CI,
+  // Nothing else bounds the run; the job timeout used to be the only limit.
+  globalTimeout: process.env.CI ? 15 * 60 * 1000 : undefined,
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['html', { open: 'never' }]]
+    : 'list',
   use: {
     baseURL,
     trace: 'retain-on-failure',
@@ -29,6 +36,9 @@ export default defineConfig({
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 120_000,
+    // Ask for a signal the runner can act on, instead of going straight to a
+    // SIGKILL that never reaches the grandchildren.
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
     env: {
       ICOR_COVERAGE_DB: coverageDatabase,
       ...(process.env.ICOR_E2E_EVIDENCE_CANDIDATE
