@@ -12,6 +12,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
+# How long a transient Windows sharing reservation may delay a publish before
+# it is treated as a real denial. One second is a workstation figure; CI
+# runners have slower, more variable disks with a scanner in the path.
+WINDOWS_SHARING_RETRY_SECONDS = 5.0
 
 class _WindowsFileInformation(ctypes.Structure):
     _fields_ = [
@@ -274,7 +278,8 @@ class SnapshotFilesystem:
 
     def publish_directory(self, source: Path, destination: Path) -> None:
         safe_root = self.require_root(source.parent)
-        deadline = time.monotonic() + 1.0
+        deadline = time.monotonic() + WINDOWS_SHARING_RETRY_SECONDS
+        backoff = 0.01
         while True:
             safe_source = self.require_directory(source, safe_root)
             safe_destination = self.require_absent(destination, safe_root)
@@ -287,7 +292,8 @@ class SnapshotFilesystem:
                 # Closed SQLite/flush handles and filesystem scanners can retain a
                 # transient Windows sharing reservation. Recheck every path before
                 # retrying; a real ACL denial still fails after the bounded interval.
-                time.sleep(0.01)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 0.2)
 
     def replace_verified_file(
         self,

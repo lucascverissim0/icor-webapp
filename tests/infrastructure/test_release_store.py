@@ -481,3 +481,63 @@ def test_list_releases_is_stably_sorted_by_release_id(store: ReleaseStore, tmp_p
         "eea-2023-20260826",
         "eea-2025-20260826",
     ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MoveFileW retry contract")
+def test_publication_retries_a_transient_windows_sharing_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scanner holding the handle for a moment is not a failed publish.
+
+    The sibling snapshot filesystem already retried this class of error; this
+    path raised on the first attempt.
+    """
+
+    import ctypes
+
+    from icor.infrastructure import release_store as module
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    destination = tmp_path / "published"
+    attempts = {"count": 0}
+
+    class _Kernel32:
+        @staticmethod
+        def MoveFileW(source: str, target: str) -> int:  # noqa: N802
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                ctypes.set_last_error(32)  # ERROR_SHARING_VIOLATION
+                return 0
+            Path(source).rename(target)
+            return 1
+
+    monkeypatch.setattr(module.ctypes, "WinDLL", lambda *a, **k: _Kernel32())
+
+    module.ReleaseStore._publish_no_replace(staging, destination)
+
+    assert attempts["count"] == 3
+    assert destination.is_dir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MoveFileW retry contract")
+def test_publication_still_reports_a_destination_that_already_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retrying must not turn a real collision into a timeout."""
+
+    import ctypes
+
+    from icor.infrastructure import release_store as module
+
+    class _Kernel32:
+        @staticmethod
+        def MoveFileW(source: str, target: str) -> int:  # noqa: N802
+            del source, target
+            ctypes.set_last_error(183)  # ERROR_ALREADY_EXISTS
+            return 0
+
+    monkeypatch.setattr(module.ctypes, "WinDLL", lambda *a, **k: _Kernel32())
+
+    with pytest.raises(FileExistsError):
+        module.ReleaseStore._publish_no_replace(tmp_path / "a", tmp_path / "b")

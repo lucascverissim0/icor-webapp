@@ -233,7 +233,7 @@ def test_promotion_rejects_raw_mapping_attribution_corruption(
         release_store,
         PublishedObservationLoader(),
     ).build(build_request)
-    with sqlite3.connect(candidate.database_path) as connection:
+    with closing(sqlite3.connect(candidate.database_path)) as connection, connection:
         connection.execute(
             "UPDATE identity_mapping SET status = ? WHERE mapping_id = ?",
             (MappingStatus.CURATED_ALIAS.value, "mapping-sample-eu-2024-1"),
@@ -263,7 +263,7 @@ def test_promotion_rejects_raw_published_value_without_inputs(
         release_store,
         PublishedObservationLoader(),
     ).build(build_request)
-    with sqlite3.connect(candidate.database_path) as connection:
+    with closing(sqlite3.connect(candidate.database_path)) as connection, connection:
         connection.execute("DELETE FROM published_value_input")
         connection.commit()
         connection.execute("VACUUM")

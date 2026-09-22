@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from icor.evidence.release_manifests import (
 )
 from icor.evidence.serialization import sha256_file
 from icor.infrastructure.snapshot_filesystem import (
+    WINDOWS_SHARING_RETRY_SECONDS,
     SnapshotFilesystem,
     SnapshotLockUnavailableError,
     SnapshotPathError,
@@ -31,6 +33,9 @@ _IDENTIFIER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 
+
+# ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+_WINDOWS_TRANSIENT_ERRORS = frozenset({5, 32, 33})
 
 class ReleaseAlreadyExistsError(RuntimeError):
     """A release ID is already occupied by different immutable content."""
@@ -298,12 +303,26 @@ class ReleaseStore:
     def _publish_no_replace(staging: Path, destination: Path) -> None:
         if os.name == "nt":
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            if kernel32.MoveFileW(str(staging), str(destination)):
-                return
-            error = ctypes.get_last_error()
-            if error in {80, 183}:
-                raise FileExistsError(error, "release destination already exists", destination)
-            raise ctypes.WinError(error)
+            deadline = time.monotonic() + WINDOWS_SHARING_RETRY_SECONDS
+            backoff = 0.01
+            while True:
+                if kernel32.MoveFileW(str(staging), str(destination)):
+                    return
+                error = ctypes.get_last_error()
+                if error in {80, 183}:
+                    raise FileExistsError(
+                        error, "release destination already exists", destination
+                    )
+                # A sharing violation or a scanner holding the handle is
+                # transient, and the sibling snapshot filesystem already
+                # retries it. This path used to let it escape on the first
+                # attempt.
+                if error not in _WINDOWS_TRANSIENT_ERRORS or (
+                    time.monotonic() >= deadline
+                ):
+                    raise ctypes.WinError(error)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 0.2)
 
         if sys.platform.startswith("linux"):
             libc = ctypes.CDLL(None, use_errno=True)
