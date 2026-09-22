@@ -252,7 +252,7 @@ class GenerationPlanningService:
                         confidence=ConfidenceBand.LOW,
                         reason_codes=(
                             f"{annual.status}-registration-cohort",
-                            "assumption-led-survival-not-calibrated",
+                            self.survival.reason_code(geography),
                         ),
                     )
                     horizon_cohorts.append(cohort)

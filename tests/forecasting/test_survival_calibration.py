@@ -6,6 +6,7 @@ from icor.forecasting.survival_calibration import (
     CohortStock,
     RegistrationCohort,
     calibrate_licensed_stock_curve,
+    extend_with_monotone_tail,
 )
 
 
@@ -136,3 +137,74 @@ def test_calibration_fails_closed_without_usable_evidence(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         calibrate_licensed_stock_curve(registrations, stocks)
+
+
+def test_the_tail_extends_the_curve_beyond_its_calibrated_support() -> None:
+    registrations = (RegistrationCohort(2020, Decimal(100)),)
+    stocks = tuple(CohortStock(2020, year, Decimal(90) * Decimal("0.9") ** (year - 2021))
+                   for year in range(2021, 2025))
+    curve = calibrate_licensed_stock_curve(registrations, stocks, maximum_age_years=4)
+
+    extended = extend_with_monotone_tail(curve, maximum_age_years=10)
+
+    assert len(extended.shares) == 11
+    assert extended.shares[: len(curve.shares)] == curve.shares
+    assert extended.calibrated_support_age == len(curve.shares) - 1
+
+
+def test_the_tail_never_increases_and_stays_below_the_last_observed_share() -> None:
+    registrations = (RegistrationCohort(2020, Decimal(100)),)
+    stocks = tuple(CohortStock(2020, year, Decimal(90) * Decimal("0.9") ** (year - 2021))
+                   for year in range(2021, 2025))
+    curve = calibrate_licensed_stock_curve(registrations, stocks, maximum_age_years=4)
+
+    extended = extend_with_monotone_tail(curve, maximum_age_years=30)
+
+    shares = extended.shares
+    assert all(later <= earlier for earlier, later in zip(shares[:-1], shares[1:], strict=True))
+    last_calibrated = curve.shares[-1]
+    assert all(share < last_calibrated for share in shares[len(curve.shares):])
+
+
+def test_the_tail_decays_at_the_recent_calibrated_rate() -> None:
+    """A steady 0.9 transition must continue as 0.9, not as some invented shape."""
+    registrations = (RegistrationCohort(2020, Decimal(100)),)
+    stocks = tuple(CohortStock(2020, year, Decimal(90) * Decimal("0.9") ** (year - 2021))
+                   for year in range(2021, 2028))
+    curve = calibrate_licensed_stock_curve(registrations, stocks, maximum_age_years=7)
+
+    extended = extend_with_monotone_tail(curve, maximum_age_years=12)
+
+    step = extended.remaining_share(9) / extended.remaining_share(8)
+    assert abs(step - Decimal("0.9")) < Decimal("0.001")
+
+
+def test_a_curve_that_cannot_decay_is_rejected_at_calibration_time() -> None:
+    """A flat curve gives no evidence of a decay rate, so it must fail loudly."""
+    registrations = (RegistrationCohort(2020, Decimal(100)),)
+    stocks = tuple(CohortStock(2020, year, Decimal(100)) for year in range(2021, 2028))
+    curve = calibrate_licensed_stock_curve(registrations, stocks, maximum_age_years=7)
+
+    with pytest.raises(ValueError, match="tail retention"):
+        extend_with_monotone_tail(curve, maximum_age_years=12)
+
+
+def test_extending_to_the_existing_support_changes_nothing() -> None:
+    registrations = (RegistrationCohort(2020, Decimal(100)),)
+    stocks = tuple(CohortStock(2020, year, Decimal(90) * Decimal("0.9") ** (year - 2021))
+                   for year in range(2021, 2025))
+    curve = calibrate_licensed_stock_curve(registrations, stocks, maximum_age_years=4)
+
+    extended = extend_with_monotone_tail(curve, maximum_age_years=len(curve.shares) - 1)
+
+    assert extended.shares == curve.shares
+
+
+def test_the_tail_cannot_shorten_the_curve() -> None:
+    registrations = (RegistrationCohort(2020, Decimal(100)),)
+    stocks = tuple(CohortStock(2020, year, Decimal(90) * Decimal("0.9") ** (year - 2021))
+                   for year in range(2021, 2025))
+    curve = calibrate_licensed_stock_curve(registrations, stocks, maximum_age_years=4)
+
+    with pytest.raises(ValueError, match="maximum age"):
+        extend_with_monotone_tail(curve, maximum_age_years=2)
