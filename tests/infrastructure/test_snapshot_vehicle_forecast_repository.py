@@ -123,7 +123,7 @@ def test_options_support_text_search_then_year_or_generation_selection(
         ("Volkswagen", "Golf"),
         ("Volkswagen", "Golf Plus"),
     ]
-    assert selected.years == (2018, 2020, 2021)
+    assert selected.years == (2018, 2019, 2020, 2021)
     assert [item.name for item in selected.generations] == ["Golf Mk6", "Golf Mk7", "Golf Mk8"]
     assert selected.horizons == (2028,)
 
@@ -190,8 +190,10 @@ def test_client_model_year_catalog_includes_unreviewed_source_names(
 def test_reviewed_generation_forecast_combines_aliases_and_surviving_cohorts(
     repository: SnapshotVehicleForecastRepository,
 ) -> None:
+    """Selecting a generation aggregates every cohort and every make spelling."""
+
     result = repository.forecast(
-        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+        brand="Volkswagen", model="Golf", year=None, generation="Golf Mk8", horizon=2028
     )
 
     assert result.generation_name == "Golf Mk8"
@@ -201,6 +203,8 @@ def test_reviewed_generation_forecast_combines_aliases_and_surviving_cohorts(
     assert result.excluded_ambiguous_years == (2019,)
     belgium = next(row for row in result.markets if row.code == "BE")
     europe = next(row for row in result.markets if row.code == "EU27")
+    # 2021 is the `Volkswagen VW` Golf GTE cohort: a different spelling of the
+    # same vehicle, which only counts because the identities are merged.
     assert belgium.registration_cohort_units == 160
     assert belgium.active_fleet.base_units == 144
     assert europe.registration_cohort_units == 360
@@ -213,13 +217,44 @@ def test_reviewed_generation_forecast_combines_aliases_and_surviving_cohorts(
     assert next(row for row in result.markets if row.code == "GB").availability == "unavailable"
 
 
-def test_transition_year_is_not_silently_assigned_to_a_reviewed_generation(
+def test_a_selected_registration_year_forecasts_that_year_and_no_other(
     repository: SnapshotVehicleForecastRepository,
 ) -> None:
-    with pytest.raises(VehicleForecastSelectionError, match="unambiguous reviewed generation"):
-        repository.forecast(
-            brand="Volkswagen", model="Golf", year=2019, generation=None, horizon=2028
-        )
+    """Asking for 2020 must not quietly return the whole generation.
+
+    A year used to resolve to a generation and then pull every cohort in it, so
+    a vehicle whose generation window is one estimated block reported sixteen
+    model years under the single year the user had picked.
+    """
+
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+    )
+
+    assert result.selected_year == 2020
+    assert result.included_cohort_years == (2020,)
+    belgium = next(row for row in result.markets if row.code == "BE")
+    assert belgium.registration_cohort_units == 110
+    assert "2020 registration cohort" in result.generation_name
+
+
+def test_a_transition_year_cohort_is_served_without_guessing_its_generation(
+    repository: SnapshotVehicleForecastRepository,
+) -> None:
+    """2019 straddles Mk7 and Mk8, but the 2019 cohort itself is not ambiguous.
+
+    Refusing the request protected a generation label the user had not asked
+    for. The registration year is observed evidence, so it is served, and the
+    generation is reported as source-derived rather than claimed as reviewed.
+    """
+
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2019, generation=None, horizon=2028
+    )
+
+    assert result.included_cohort_years == (2019,)
+    assert result.generation_confidence == "source-reported"
+    assert result.generation_basis == "official_source_registration_cohort"
 
 
 def test_survival_method_is_read_from_the_model_not_a_literal(

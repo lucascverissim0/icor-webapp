@@ -16,6 +16,10 @@ from icor.evidence.normalization import (
     source_vehicle_display_label,
 )
 from icor.evidence.provenance import resolve_reported_method
+from icor.evidence.vehicle_identity import (
+    VehicleIdentityIndex,
+    parse_vehicle_query,
+)
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 from icor.generations.public_catalog import (
@@ -95,6 +99,9 @@ class VehicleForecastOptions:
     generations: tuple[GenerationOption, ...]
     horizons: tuple[int, ...]
     brands: tuple[str, ...] = ()
+    #: The registration year found in a free-text search, so `VW Golf 2020` can
+    #: preselect 2020 instead of matching it as text and finding nothing.
+    search_year: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +172,7 @@ class SnapshotVehicleForecastRepository:
         self._hazard = ReplacementHazardModel()
         self._uncertainty = OpportunityUncertaintyModel()
         self._all_vehicle_options: tuple[VehicleOption, ...] | None = None
+        self._index: VehicleIdentityIndex | None = None
 
     def options(
         self,
@@ -172,19 +180,12 @@ class SnapshotVehicleForecastRepository:
         search: str | None = None,
         brand: str | None = None,
         model: str | None = None,
+        include_all_brands: bool = False,
     ) -> VehicleForecastOptions:
+        parsed = parse_vehicle_query(search) if search else None
+        found_year = parsed.year if parsed else None
         with self._connect() as connection:
-            brands = tuple(
-                sorted(
-                    {
-                        option.brand
-                        for option in self._vehicle_options(
-                            connection, None, include_all=True
-                        )
-                    },
-                    key=lambda value: (value.casefold(), value),
-                )
-            )
+            brands = self._brands(connection, include_all=include_all_brands)
             vehicles = self._vehicle_options(connection, search or (brand if not model else None))
             if not brand or not model:
                 horizons = tuple(
@@ -194,17 +195,17 @@ class SnapshotVehicleForecastRepository:
                         "ORDER BY horizon_year"
                     )
                 )
-                return VehicleForecastOptions(vehicles, (), (), horizons, brands)
+                return VehicleForecastOptions(vehicles, (), (), horizons, brands, found_year)
             selected_vehicle = CanonicalVehicle("selection", brand, model, None, "Europe")
             profile = self._catalog.profile_for(selected_vehicle)
             if self._verified_only and profile is None:
-                return VehicleForecastOptions(vehicles, (), (), (), brands)
+                return VehicleForecastOptions(vehicles, (), (), (), brands, found_year)
             vehicle_ids = self._vehicle_ids(connection, brand, model, profile)
             if not vehicle_ids:
-                return VehicleForecastOptions(vehicles, (), (), (), brands)
+                return VehicleForecastOptions(vehicles, (), (), (), brands, found_year)
             available_horizons = self._horizons(connection, vehicle_ids)
             if not available_horizons:
-                return VehicleForecastOptions(vehicles, (), (), (), brands)
+                return VehicleForecastOptions(vehicles, (), (), (), brands, found_year)
             cohort_rows = self._cohort_rows(
                 connection, vehicle_ids, available_horizons[0]
             )
@@ -212,20 +213,15 @@ class SnapshotVehicleForecastRepository:
             years = tuple(
                 sorted(
                     {
+                        # Every observed cohort year is offered. Years used to be
+                        # hidden when they straddled two reviewed generations,
+                        # which dropped real registration cohorts from the picker
+                        # to protect a generation label the user had not asked
+                        # for. A year now selects its own cohort, so the label is
+                        # reported rather than used to filter the choices.
                         row["registration_cohort_year"]
                         for row in cohort_rows
                         if row["registration_cohort_year"] <= latest_observed_year
-                        and (
-                            self._model_year_only
-                            or
-                            profile is None
-                            or self._catalog.entry_for_year(
-                                selected_vehicle,
-                                row["registration_cohort_year"],
-                                registry_version=_GENERATION_REGISTRY,
-                            )
-                            is not None
-                        )
                     }
                 )
             )
@@ -263,7 +259,7 @@ class SnapshotVehicleForecastRepository:
                     )
                 )
         return VehicleForecastOptions(
-            vehicles, years, generations, available_horizons, brands
+            vehicles, years, generations, available_horizons, brands, found_year
         )
 
     def forecast(
@@ -342,26 +338,45 @@ class SnapshotVehicleForecastRepository:
             data_version=self._data_version,
         )
 
+    def _cohort_year_selection(self, vehicle, profile, year):  # type: ignore[no-untyped-def]
+        """A chosen registration year selects that cohort, and only that cohort.
+
+        A year used to resolve to a *generation* and then pull every cohort in
+        it, so asking for 2020 returned 2010-2025 for any vehicle whose
+        generation window was one estimated block — sixteen model years
+        reported as one, with the 2020 label still on screen. The registration
+        year is unambiguous evidence in its own right; the generation label is
+        the uncertain part, so it is reported rather than used to widen the set.
+        """
+
+        entry = (
+            self._catalog.entry_for_year(vehicle, year, registry_version=_GENERATION_REGISTRY)
+            if profile is not None and not self._model_year_only
+            else None
+        )
+        label = (
+            f"{source_vehicle_display_label(vehicle.make)} "
+            f"{source_vehicle_display_label(vehicle.model)} — "
+            f"{year} registration cohort"
+        )
+        return _Selection(
+            f"source-registration-year:{vehicle.make}:{vehicle.model}:{year}",
+            label if entry is None else f"{entry.display_name} — {year} registration cohort",
+            year,
+            year,
+            "official_source_registration_cohort",
+            "source-reported" if entry is None else "high",
+            entry.evidence_ids[0] if entry is not None and entry.evidence_ids else None,
+            profile,
+            year,
+        )
+
     def _selection(self, vehicle, profile, year, generation):  # type: ignore[no-untyped-def]
+        if year is not None:
+            return self._cohort_year_selection(vehicle, profile, year)
         if self._model_year_only:
-            if year is None:
-                raise VehicleForecastSelectionError(
-                    "the client catalog supports source model-year selection only"
-                )
-            return _Selection(
-                f"source-registration-year:{vehicle.make}:{vehicle.model}:{year}",
-                (
-                    f"{source_vehicle_display_label(vehicle.make)} "
-                    f"{source_vehicle_display_label(vehicle.model)} — "
-                    f"{year} registration cohort"
-                ),
-                year,
-                year,
-                "official_source_registration_cohort",
-                "source-reported",
-                None,
-                profile,
-                year,
+            raise VehicleForecastSelectionError(
+                "the client catalog supports source model-year selection only"
             )
         if profile is not None:
             entries = self._catalog.entries_for(vehicle, registry_version=_GENERATION_REGISTRY)
@@ -522,89 +537,128 @@ class SnapshotVehicleForecastRepository:
             DemandRange(_units(interval.p10), _units(interval.p50), _units(interval.p90)),
         )
 
+    def _identity_index(self, connection: sqlite3.Connection) -> VehicleIdentityIndex:
+        """Build the canonical make/model index once per repository instance.
+
+        Both subqueries are aggregated before they meet, because joining
+        `opportunity_estimate` straight onto `cohort_estimate` fans out to one
+        row per opportunity-cohort pair and multiplies the registration volume
+        that the brand ranking depends on.
+        """
+
+        if self._index is None:
+            self._index = VehicleIdentityIndex.from_rows(
+                connection.execute(
+                    """SELECT v.vehicle_id, v.make, v.model, COALESCE(c.registrations, 0)
+                    FROM canonical_vehicle v
+                    JOIN (
+                        SELECT DISTINCT canonical_vehicle_id AS vehicle_id
+                        FROM opportunity_estimate
+                    ) o ON o.vehicle_id = v.vehicle_id
+                    LEFT JOIN (
+                        SELECT canonical_vehicle_id AS vehicle_id,
+                            SUM(CAST(registrations AS REAL)) AS registrations
+                        FROM cohort_estimate GROUP BY canonical_vehicle_id
+                    ) c ON c.vehicle_id = v.vehicle_id"""
+                ).fetchall()
+            )
+        return self._index
+
+    def _brands(
+        self, connection: sqlite3.Connection, *, include_all: bool = False
+    ) -> tuple[str, ...]:
+        index = self._identity_index(connection)
+        if not self._verified_only:
+            return index.makes(include_all=include_all)
+        return tuple(
+            sorted(
+                {
+                    option.brand
+                    for option in self._vehicle_options(connection, None, include_all=True)
+                },
+                key=lambda value: (value.casefold(), value),
+            )
+        )
+
     def _vehicle_options(
         self,
         connection: sqlite3.Connection,
         search: str | None,
         *,
         include_all: bool = False,
-    ):
+    ) -> tuple[VehicleOption, ...]:
+        """Canonical vehicles matching a free-text search or a chosen brand.
+
+        Matching is an AND over the query's tokens against the canonical make
+        and model, with any registration year removed first. The previous single
+        `LIKE '%vw golf 2020%'` could not match anything once a year was typed,
+        and offered raw trim strings when it did.
+        """
+
+        index = self._identity_index(connection)
         term = (search or "").strip()
-        where = ""
-        parameters: tuple[object, ...] = ()
-        if term:
-            where = "WHERE LOWER(v.make || ' ' || v.model) LIKE LOWER(?)"
-            parameters = (f"%{term}%",)
-        if self._all_vehicle_options is not None:
-            options = self._all_vehicle_options
-            if term:
-                normalized_term = normalize_vehicle_label(term)
-                return tuple(
-                    option
-                    for option in options
-                    if normalized_term
-                    in normalize_vehicle_label(f"{option.brand} {option.model}")
-                )
-            return options if include_all else options[:200]
-        rows = connection.execute(
-            f"""SELECT DISTINCT v.vehicle_id, v.make, v.model
-            FROM opportunity_estimate o
-            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
-            {where} ORDER BY LOWER(v.make), LOWER(v.model), v.make, v.model""",
-            parameters,
-        ).fetchall()
-        values: dict[tuple[str, str], VehicleOption] = {}
+        identities = (
+            index.match(parse_vehicle_query(term)) if term else index.identities()
+        )
+        options: list[VehicleOption] = []
         reviewed: set[tuple[str, str]] = set()
-        for row in rows:
-            vehicle = CanonicalVehicle("option", row[1], row[2], None, "Europe")
+        for identity in identities:
+            vehicle = CanonicalVehicle(
+                "option", identity.display_make, identity.display_model, None, "Europe"
+            )
             profile = self._catalog.profile_for(vehicle)
             if profile is None:
                 if self._verified_only:
                     continue
-                option = VehicleOption(
-                    source_vehicle_display_label(row[1])
-                    if self._model_year_only
-                    else row[1],
-                    source_vehicle_display_label(row[2])
-                    if self._model_year_only
-                    else row[2],
-                )
+                option = VehicleOption(identity.display_make, identity.display_model)
             else:
                 option = VehicleOption(*profile.aliases[0])
                 reviewed.add((option.brand, option.model))
-            values.setdefault((option.brand, option.model), option)
-        ordered = sorted(
-            values.values(),
-            key=lambda item: (
-                (item.brand, item.model) not in reviewed,
-                item.brand.casefold(),
-                item.model.casefold(),
-                item.brand,
-                item.model,
-            ),
+            options.append(option)
+        unique: dict[tuple[str, str], VehicleOption] = {}
+        for option in options:
+            unique.setdefault((option.brand, option.model), option)
+        if term:
+            # `match` already ranks by exactness then volume; keep that order.
+            return tuple(unique.values())
+        ordered = tuple(
+            sorted(
+                unique.values(),
+                key=lambda item: (
+                    (item.brand, item.model) not in reviewed,
+                    item.brand.casefold(),
+                    item.model.casefold(),
+                ),
+            )
         )
-        options = tuple(ordered)
-        if not term:
-            self._all_vehicle_options = options
-        return options if term or include_all else options[:200]
+        return ordered if include_all else ordered[:200]
 
-    @staticmethod
     def _vehicle_ids(
+        self,
         connection: sqlite3.Connection,
         brand: str,
         model: str,
         profile: VehicleGenerationProfile | None,
     ) -> tuple[str, ...]:
+        """Every raw vehicle id stored under any spelling of this selection.
+
+        Resolving only the exact `(make, model)` the user picked left each
+        publisher's spelling in its own silo, which is why a selection could
+        offer a truncated year range and report no data for markets whose rows
+        were filed under another spelling.
+        """
+
+        index = self._identity_index(connection)
+        resolved = set(index.vehicle_ids(brand, model))
         aliases = (
             set(profile._normalized_aliases)
             if profile is not None
             else {(normalize_vehicle_label(brand), normalize_vehicle_label(model))}
         )
-        return tuple(
-            row[0]
-            for row in connection.execute("SELECT vehicle_id, make, model FROM canonical_vehicle")
-            if (normalize_vehicle_label(row[1]), normalize_vehicle_label(row[2])) in aliases
-        )
+        for row in connection.execute("SELECT vehicle_id, make, model FROM canonical_vehicle"):
+            if (normalize_vehicle_label(row[1]), normalize_vehicle_label(row[2])) in aliases:
+                resolved.add(row[0])
+        return tuple(sorted(resolved))
 
     @staticmethod
     def _horizons(
