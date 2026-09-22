@@ -40,6 +40,7 @@ class SnapshotVersionsResponse(ApiModel):
     survival_method: str
     hazard_method: str
     forecast_method: str
+    uncertainty_method: str
     generation_registry: str
     generation_resolver: str
 

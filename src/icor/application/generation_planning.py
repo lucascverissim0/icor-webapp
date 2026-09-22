@@ -348,6 +348,7 @@ class GenerationPlanningService:
                         input_cohort_ids=tuple(item.cohort_id for item in horizon_cohorts),
                         hazard_method=self.hazard.method,
                         forecast_method=forecast_method,
+                        uncertainty_method=self.uncertainty.method,
                         confidence=ConfidenceBand.LOW,
                         assumption_ids=(
                             *self.survival.assumption_ids,

@@ -49,12 +49,25 @@ class OpportunityInterval:
 
 
 class OpportunityUncertaintyModel:
-    method = "quantile-matched-split-normal-propagation-v2"
+    """`method` is per-instance: a variant must never report the default.
 
-    def __init__(self, *, draw_count: int = DEFAULT_DRAW_COUNT) -> None:
+    A class attribute here would be reported by every instance regardless of
+    what it actually did, which is the defect already fixed once in the
+    survival model.
+    """
+
+    def __init__(
+        self,
+        *,
+        draw_count: int = DEFAULT_DRAW_COUNT,
+        method: str = "quantile-matched-split-normal-propagation-v2",
+    ) -> None:
         if type(draw_count) is not int or draw_count < 100:
             raise ValueError("uncertainty draw count must be at least 100")
+        if not method.strip():
+            raise ValueError("the uncertainty method is required")
         self.draw_count = draw_count
+        self.method = method
 
     def estimate(
         self,

@@ -41,6 +41,7 @@ def opportunity(**overrides: object) -> OpportunityEstimate:
         "input_cohort_ids": ("cohort-golf-8-eu-2020-2028",),
         "hazard_method": "assumption-led-windshield-hazard-v1",
         "forecast_method": "generation-opportunity-v1",
+        "uncertainty_method": "quantile-matched-split-normal-propagation-v2",
         "confidence": ConfidenceBand.LOW,
         "assumption_ids": ("assumption-windshield-hazard-eu-v1",),
         "reason_codes": ("uncalibrated-proprietary-fitment",),

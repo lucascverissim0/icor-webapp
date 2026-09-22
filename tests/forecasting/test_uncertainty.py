@@ -74,3 +74,17 @@ def test_build_and_query_paths_draw_the_same_number_of_samples() -> None:
     query_path = SnapshotVehicleForecastRepository(Path("unused.sqlite3"), "v")._uncertainty
 
     assert build_path.draw_count == query_path.draw_count == DEFAULT_DRAW_COUNT
+
+
+def test_uncertainty_method_is_per_instance_not_a_class_attribute() -> None:
+    default = OpportunityUncertaintyModel()
+    variant = OpportunityUncertaintyModel(method="narrow-band-experiment-v1")
+
+    assert default.method == "quantile-matched-split-normal-propagation-v2"
+    assert variant.method == "narrow-band-experiment-v1"
+    assert "method" not in vars(OpportunityUncertaintyModel)
+
+
+def test_an_empty_uncertainty_method_is_rejected() -> None:
+    with pytest.raises(ValueError, match="uncertainty method is required"):
+        OpportunityUncertaintyModel(method="   ")

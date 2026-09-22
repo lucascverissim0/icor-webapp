@@ -51,7 +51,17 @@ class ImmutableEvidenceError(RuntimeError):
     """A write would mutate the ledger or refer to unavailable evidence."""
 
 
-_SCHEMA_VERSION = 6
+# Snapshots built before schema 7 have no per-row uncertainty method. They must
+# not be made to look as though they do, so they say so instead.
+UNRECORDED_UNCERTAINTY_METHOD = "unrecorded-before-snapshot-schema-v7"
+
+
+def _uncertainty_method(row: sqlite3.Row) -> str:
+    if "uncertainty_method" not in row.keys():  # noqa: SIM118 - Row keys, not a dict
+        return UNRECORDED_UNCERTAINTY_METHOD
+    return row["uncertainty_method"]
+
+_SCHEMA_VERSION = 7
 _EU27_CODES = (
     'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'EL', 'ES', 'FI', 'FR',
     'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO',
@@ -1008,6 +1018,7 @@ class SQLiteEvidenceRepository:
                     p10 TEXT NOT NULL, p50 TEXT NOT NULL, p90 TEXT NOT NULL,
                     active_fleet_p50 TEXT NOT NULL, hazard_method TEXT NOT NULL,
                     forecast_method TEXT NOT NULL,
+                    uncertainty_method TEXT NOT NULL,
                     confidence TEXT NOT NULL CHECK (confidence IN {confidence_bands}),
                     assumption_ids TEXT NOT NULL, reason_codes TEXT NOT NULL
                 );
@@ -1681,6 +1692,7 @@ class SQLiteEvidenceRepository:
                     str(estimate.active_fleet_p50),
                     estimate.hazard_method,
                     estimate.forecast_method,
+                    estimate.uncertainty_method,
                     estimate.confidence.value,
                     self._json(estimate.assumption_ids),
                     self._json(estimate.reason_codes),
@@ -1721,7 +1733,7 @@ class SQLiteEvidenceRepository:
                 )
         connection.executemany(
             """INSERT INTO opportunity_estimate VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             opportunity_rows,
         )
         connection.executemany(
@@ -1951,6 +1963,7 @@ class SQLiteEvidenceRepository:
             input_cohort_ids=inputs,
             hazard_method=row["hazard_method"],
             forecast_method=row["forecast_method"],
+            uncertainty_method=_uncertainty_method(row),
             confidence=ConfidenceBand(row["confidence"]),
             assumption_ids=tuple(json.loads(row["assumption_ids"])),
             reason_codes=tuple(json.loads(row["reason_codes"])),

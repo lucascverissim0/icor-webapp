@@ -108,6 +108,7 @@ class OpportunityEstimate:
     input_cohort_ids: tuple[str, ...]
     hazard_method: str
     forecast_method: str
+    uncertainty_method: str
     confidence: ConfidenceBand
     assumption_ids: tuple[str, ...]
     reason_codes: tuple[str, ...]
@@ -123,6 +124,7 @@ class OpportunityEstimate:
         _identifier_tuple(self.input_cohort_ids, "opportunity input cohort IDs")
         _text(self.hazard_method, "opportunity hazard method")
         _text(self.forecast_method, "opportunity forecast method")
+        _text(self.uncertainty_method, "opportunity uncertainty method")
         if not isinstance(self.confidence, ConfidenceBand):
             raise ValueError("opportunity confidence is unsupported")
         _identifier_tuple(self.assumption_ids, "opportunity assumption IDs")

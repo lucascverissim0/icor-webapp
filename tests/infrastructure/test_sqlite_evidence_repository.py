@@ -32,6 +32,7 @@ from icor.domain.generations import (
 )
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.infrastructure.sqlite_evidence_repository import (
+    _SCHEMA_VERSION,
     DuplicateEvidenceError,
     EvidenceSchemaError,
     ImmutableEvidenceError,
@@ -280,6 +281,7 @@ def generation_records(
         input_cohort_ids=(cohort.cohort_id,),
         hazard_method="assumption-led-windshield-hazard-v1",
         forecast_method="generation-opportunity-v1",
+        uncertainty_method="quantile-matched-split-normal-propagation-v2",
         confidence=ConfidenceBand.LOW,
         assumption_ids=("assumption-windshield-hazard-de-v1",),
         reason_codes=("uncalibrated-proprietary-fitment",),
@@ -506,7 +508,10 @@ def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
-        connection.execute("INSERT INTO schema_version (version) VALUES (7)")
+        connection.execute(
+            "INSERT INTO schema_version (version) VALUES (?)",
+            (_SCHEMA_VERSION + 1,),
+        )
 
     with pytest.raises(EvidenceSchemaError, match="newer"):
         SQLiteEvidenceRepository(path, writable=True)
