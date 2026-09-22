@@ -30,7 +30,7 @@ def _database(path: Path) -> None:
                 registration_cohort_year INTEGER, as_of_year INTEGER,
                 registrations TEXT, active_fleet_p10 TEXT,
                 active_fleet_p50 TEXT, active_fleet_p90 TEXT,
-                reason_codes TEXT
+                survival_method TEXT, reason_codes TEXT
             );
             CREATE TABLE opportunity_estimate (
                 opportunity_id TEXT PRIMARY KEY, generation_id TEXT,
@@ -74,7 +74,8 @@ def _database(path: Path) -> None:
         for cohort_id, vehicle_id, geography, year, registrations, p10, p50, p90, status in rows:
             generation_id = f"estimated-{vehicle_id}"
             connection.execute(
-                "INSERT INTO cohort_estimate VALUES (?, ?, ?, ?, ?, 2028, ?, ?, ?, ?, ?)",
+                "INSERT INTO cohort_estimate "
+                "VALUES (?, ?, ?, ?, ?, 2028, ?, ?, ?, ?, 'fixture-survival-v1', ?)",
                 (
                     cohort_id,
                     generation_id,
@@ -225,17 +226,19 @@ def test_survival_method_is_read_from_the_model_not_a_literal(
     repository: SnapshotVehicleForecastRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A survival version bump must reach this channel, not only the planner channel.
+    """This channel must report the curve that produced the rows it serves.
 
-    Provenance is per-instance, so this patches the model the repository actually
-    holds. Patching the class would pass even if the channel read a literal.
+    The fleet quantiles come from `cohort_estimate`, so the only honest source of
+    the method is the `survival_method` recorded on those same rows. Reporting a
+    freshly constructed model instead made the channel claim
+    `constant-annual-retention-v1` while serving cohorts built by the calibrated
+    curve, which is how the ranking page and the forecast page came to disagree.
     """
-    assert repository._survival.method == CohortSurvivalModel().method
-
-    monkeypatch.setattr(repository._survival, "method", "calibrated-cohort-retention-v2")
+    del monkeypatch
 
     result = repository.forecast(
         brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
     )
 
-    assert result.survival_method == "calibrated-cohort-retention-v2"
+    assert result.survival_method == "fixture-survival-v1"
+    assert result.survival_method != CohortSurvivalModel().method

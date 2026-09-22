@@ -16,7 +16,6 @@ from icor.evidence.normalization import (
     source_vehicle_display_label,
 )
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
-from icor.forecasting.survival import CohortSurvivalModel
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 from icor.generations.public_catalog import (
     ReviewedGenerationCatalog,
@@ -163,7 +162,6 @@ class SnapshotVehicleForecastRepository:
         self._verified_only = verified_only
         self._model_year_only = model_year_only
         self._hazard = ReplacementHazardModel()
-        self._survival = CohortSurvivalModel()
         self._uncertainty = OpportunityUncertaintyModel()
         self._all_vehicle_options: tuple[VehicleOption, ...] | None = None
 
@@ -336,7 +334,7 @@ class SnapshotVehicleForecastRepository:
             excluded_ambiguous_years=tuple(sorted(ambiguous_years)),
             excluded_forecast_cohort_years=tuple(sorted(forecast_years)),
             markets=markets,
-            survival_method=self._survival.method,
+            survival_method=_survival_method(selected_rows),
             hazard_method=self._hazard.method,
             uncertainty_method=self._uncertainty.method,
             calibration_status="assumption_led_without_proprietary_fitment_or_hazard_calibration",
@@ -647,7 +645,7 @@ class SnapshotVehicleForecastRepository:
                     f"""SELECT c.cohort_id, c.generation_id, c.geography,
                         c.registration_cohort_year, c.registrations,
                         c.active_fleet_p10, c.active_fleet_p50, c.active_fleet_p90,
-                        c.reason_codes, v.make, v.model
+                        c.survival_method, c.reason_codes, v.make, v.model
                     FROM opportunity_input oi
                     JOIN cohort_estimate c ON c.cohort_id = oi.cohort_id
                     JOIN canonical_vehicle v ON v.vehicle_id = c.canonical_vehicle_id
@@ -689,6 +687,28 @@ def _units(value: Decimal) -> int:
 
 def _seed(*parts: str) -> int:
     return int.from_bytes(hashlib.sha256(":".join(parts).encode()).digest()[:8], "big")
+
+
+def _survival_method(rows: list[sqlite3.Row]) -> str:
+    """Report the curve that actually produced these cohorts.
+
+    The fleet quantiles are read from `cohort_estimate`, so constructing a
+    survival model here and reporting its method described the code rather than
+    the data. After a snapshot was built with a calibrated curve, this channel
+    still claimed `constant-annual-retention-v1` while the ranking channel,
+    which reads the stored rows, reported the calibrated method - the two pages
+    disagreed about the same vehicle again.
+
+    Rows disagreeing among themselves would mean a snapshot mixing curves, which
+    the build cannot currently produce; say so rather than picking a winner.
+    """
+
+    methods = {row["survival_method"] for row in rows}
+    if not methods:
+        raise ValueError("cohort rows carry no survival method")
+    if len(methods) > 1:
+        return "mixed:" + ",".join(sorted(str(method) for method in methods))
+    return str(next(iter(methods)))
 
 
 def _latest_evidence_year(rows: list[sqlite3.Row]) -> int:
