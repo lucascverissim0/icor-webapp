@@ -5684,3 +5684,73 @@ active manifest carries `reconciliation_method: dependency-precedence-v1` while
   both started 2026-09-22 14:16 and therefore **predating every commit from
   2026-09-23**. They ignore `q` and report the pre-fold 143,888 rows. Nothing they
   return is evidence. Restart before any local verification.
+
+### 2026-09-23 12:35 — deploy preparation, measured rather than assumed
+
+**The build context is now 3 MB, and will be about 2 GB once the client snapshot
+exists.** Measured by walking the tree with Docker's documented matcher rules
+(`*` does not cross a separator, `**` matches any number of segments, the last
+matching pattern decides): **47.673 GB excluded**, everything included fitting in
+`web` 0.9 MB, `src` 0.9 MB, `data` 0.6 MB, `uv.lock` 0.2 MB and a handful of
+config files. Spot checks all behave:
+
+| Path | Verdict | Deciding rule |
+|---|---|---|
+| `.local/evidence/snapshots/.../evidence.sqlite3` | excluded | `.local/**` |
+| `.local/client-evidence/active.json` | **included** | `!.local/client-evidence/**` |
+| `.local/client-evidence/snapshots/*/evidence.sqlite3` | **included** | `!.local/client-evidence/**` |
+| `.superpowers/.../state/server-info` | excluded | `.superpowers/` |
+| `scripts/script2.py` | excluded | `scripts/*` |
+| `scripts/run_container_preview.py` | **included** | `!scripts/run_container_preview.py` |
+| `ui/app.py`, `.git` | excluded | `ui/`, `.git/` |
+
+This is an approximation of flyctl's own walk, not a substitute for the context
+size it reports — but the distance between 3 MB and 27 GB is far larger than any
+error in it.
+
+**`e67e828`: `scripts/preflight_client_evidence.py`.** Reproduces the image's
+build-time assertion locally in about a minute, plus the three shape rules that
+are easy to get wrong by hand: the path must be a whole evidence root rather than
+a snapshot directory, a snapshot directory may hold only its three files, and
+`verified.json` must not be pre-seeded. It also refuses `candidates/`, which
+would put a second copy of a two-gigabyte database into the build context. Added
+to CI's ruff list.
+
+**`1ad72c7`: the container's PID 1 is runnable where it is developed.**
+`run_container_preview.py` resolved the server by bare name beside the
+interpreter, so on Windows it looked for `uvicorn` where the file is
+`uvicorn.exe`; `os.execv` raised `FileNotFoundError`, which it does not catch. The
+entrypoint could not be exercised outside an image that has never been built.
+
+The same commit fixes two tests that asserted the wrong thing:
+`test_the_runtime_image_does_not_install_the_openai_client` checked only that the
+`preview` **extra** omitted openai and streamlit, which was true and irrelevant —
+an extra is additive — so it passed for months while the property it names was
+false. It now asserts the base dependency list, the non-default `legacy` group,
+and that the Dockerfile asks for no groups. The `.dockerignore` test now requires
+the evidence rules to be an allowlist and fails on any `.local/` pattern other
+than the deny-all.
+
+Verification after all of it: `uv run pytest` **901 passed, 14 skipped,
+4 xfailed**; ruff clean over `src`, `tests` and every script CI checks.
+
+**Housekeeping done.** The byte-identical duplicate
+`.local/evidence/candidates/snapshot-38878384744b4c9d310f` was deleted with
+Lucas's approval, freeing 9.25 GB. The two stale dev processes are **stopped**
+(PID 42260 on `:8000`, PID 34028 on `:5173`) so nothing can trust their pre-fold
+numbers; both ports are clear and a fresh dev server has to be started
+deliberately.
+
+**`.local/promote_and_derive.py` (operational, untracked) is running as PID
+34760.** It waits for the rebuild to name its candidate, then: gates it with
+`replay_registration_reconciliation.py --candidate` (which skips the 343 s verify
+of the active snapshot), promotes only on exit 0, re-stamps `mark-verified`,
+derives the client snapshot, promotes that into `.local/client-evidence`, and runs
+the pre-flight. It stops hard on a gate failure, a refused promotion, or a
+non-client scope. Progress in `.local/promote-and-derive.out.log`, full command
+output in `.local/promote-and-derive.log`.
+
+At 12:33 the rebuild was in `VACUUM`: `evidence.sqlite3` 9.92 GB with an
+8.68 GB rollback journal beside it, 45.9 GB free. The journal reaching roughly the
+size of the database and then vanishing is the signal that the build is about to
+name its candidate.
