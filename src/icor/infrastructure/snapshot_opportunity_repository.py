@@ -86,6 +86,7 @@ class SnapshotOpportunityRepository:
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
         self._identity_index: VehicleIdentityIndex | None = None
+        self._facets: tuple[tuple[str, ...], tuple[int, ...]] | None = None
         with sqlite3.connect(
             f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
         ) as connection:
@@ -140,6 +141,7 @@ class SnapshotOpportunityRepository:
                     parameters,
                 ).fetchone()
             warnings = self._integrity_warnings(connection)
+            markets, horizons = self._available_facets(connection)
         items = tuple(self._row(row, query.group_by) for row in rows)
         total = int(summary["summary_total"])
         result = OpportunityPage(
@@ -160,6 +162,8 @@ class SnapshotOpportunityRepository:
             page=query.page,
             page_size=query.page_size,
             pages=ceil(total / query.page_size),
+            available_markets=markets,
+            available_horizons=horizons,
         )
         if not has_manual_coverage:
             if len(self._uncovered_cache) >= 128:
@@ -669,6 +673,33 @@ class SnapshotOpportunityRepository:
             FROM percentile
         )"""
         return cte, tuple(parameters)
+
+    def _available_facets(
+        self, connection: sqlite3.Connection
+    ) -> tuple[tuple[str, ...], tuple[int, ...]]:
+        """Every market and horizon the snapshot can forecast.
+
+        Deliberately not narrowed by the caller's own filters: a filter control
+        that removed its other options once you used it could not be undone.
+        """
+
+        if self._facets is None:
+            markets = tuple(
+                row[0]
+                for row in connection.execute(
+                    "SELECT DISTINCT geography FROM opportunity_estimate "
+                    "ORDER BY geography"
+                )
+            )
+            horizons = tuple(
+                int(row[0])
+                for row in connection.execute(
+                    "SELECT DISTINCT horizon_year FROM opportunity_estimate "
+                    "ORDER BY horizon_year"
+                )
+            )
+            self._facets = (markets, horizons)
+        return self._facets
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(

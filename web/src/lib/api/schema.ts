@@ -731,6 +731,16 @@ export interface components {
         OpportunityGroupBy: "brand" | "model" | "model_year";
         /** OpportunityPageResponse */
         OpportunityPageResponse: {
+            /**
+             * Available Horizons
+             * @default []
+             */
+            available_horizons: number[];
+            /**
+             * Available Markets
+             * @default []
+             */
+            available_markets: string[];
             /** Integrity Warnings */
             integrity_warnings: string[];
             /** Items */
@@ -806,6 +816,17 @@ export interface components {
             /** Total Points */
             total_points: number;
         };
+        /**
+         * OpportunitySort
+         * @description The orders a ranking may be read in.
+         *
+         *     Score is the product's own ranking and stays the default. Demand answers
+         *     "which is the biggest", which the score deliberately does not, because it
+         *     mixes demand with readiness. Vehicle is for finding a known car rather than
+         *     discovering one.
+         * @enum {string}
+         */
+        OpportunitySort: "score" | "demand" | "vehicle";
         /** OpportunitySummaryResponse */
         OpportunitySummaryResponse: {
             /** Base Units */
@@ -1454,6 +1475,8 @@ export interface operations {
                 horizon?: number[] | null;
                 page?: number;
                 page_size?: number;
+                q?: string;
+                sort?: components["schemas"]["OpportunitySort"];
             };
             header?: never;
             path?: never;

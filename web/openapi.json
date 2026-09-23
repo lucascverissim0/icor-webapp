@@ -1078,6 +1078,22 @@
       "OpportunityPageResponse": {
         "additionalProperties": false,
         "properties": {
+          "available_horizons": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Available Horizons",
+            "type": "array"
+          },
+          "available_markets": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Markets",
+            "type": "array"
+          },
           "integrity_warnings": {
             "items": {
               "type": "string"
@@ -1333,6 +1349,16 @@
         ],
         "title": "OpportunityScoreResponse",
         "type": "object"
+      },
+      "OpportunitySort": {
+        "description": "The orders a ranking may be read in.\n\nScore is the product's own ranking and stays the default. Demand answers\n\"which is the biggest\", which the score deliberately does not, because it\nmixes demand with readiness. Vehicle is for finding a known car rather than\ndiscovering one.",
+        "enum": [
+          "score",
+          "demand",
+          "vehicle"
+        ],
+        "title": "OpportunitySort",
+        "type": "string"
       },
       "OpportunitySummaryResponse": {
         "additionalProperties": false,
@@ -3124,6 +3150,26 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 64,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OpportunitySort",
+              "default": "score"
             }
           }
         ],

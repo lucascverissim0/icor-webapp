@@ -2,11 +2,20 @@ import type { components } from './api/schema'
 
 
 type OpportunityGroupBy = components['schemas']['OpportunityGroupBy']
+export type OpportunitySort = 'score' | 'demand' | 'vehicle'
+
+const SORTS: readonly OpportunitySort[] = ['score', 'demand', 'vehicle']
+
+// Matches the server's own cap. A longer value is truncated rather than
+// rejected, because a URL someone pasted should still open the ranking.
+const MAX_TEXT_LENGTH = 64
 
 export interface OpportunitySearch {
   groupBy: OpportunityGroupBy
   market?: string[]
   horizon?: number[]
+  q?: string
+  order?: OpportunitySort
   page: number
 }
 
@@ -60,6 +69,20 @@ export function parseOpportunitySearch(
   ]
   const allHorizonsValid = rawHorizons.every((value) => Number.isInteger(Number(value)))
   if (!allHorizonsValid) invalid.add('horizon')
+  const rawText = raw.q
+  let q: string | undefined
+  if (typeof rawText === 'string' && rawText.trim().length > 0) {
+    q = rawText.trim().slice(0, MAX_TEXT_LENGTH)
+    if (q !== rawText) invalid.add('q')
+  } else if (rawText !== undefined && rawText !== null && rawText !== '') {
+    invalid.add('q')
+  }
+
+  const order = SORTS.includes(raw.order as OpportunitySort)
+    ? (raw.order as OpportunitySort)
+    : 'score'
+  if (raw.order !== undefined && order !== raw.order) invalid.add('order')
+
   const parsedPage = Number(raw.page ?? 1)
   const page = Number.isInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1
   if (raw.page !== undefined && page !== parsedPage) invalid.add('page')
@@ -70,6 +93,8 @@ export function parseOpportunitySearch(
       page,
       ...(markets.length > 0 && { market: markets }),
       ...(horizons.length > 0 && { horizon: horizons }),
+      ...(q !== undefined && { q }),
+      ...(order !== 'score' && { order }),
     },
     invalidKeys: [...invalid].sort(),
   }
@@ -83,5 +108,7 @@ export function serializeOpportunitySearch<T extends OpportunityRouteSearch>(
     page: search.page,
     ...(search.market && { market: search.market }),
     ...(search.horizon && { horizon: search.horizon }),
+    ...(search.q && { q: search.q }),
+    ...(search.order && search.order !== 'score' && { order: search.order }),
   }
 }

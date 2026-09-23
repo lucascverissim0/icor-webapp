@@ -189,6 +189,10 @@ class OpportunityPage:
     page: int = 1
     page_size: int = 25
     pages: int = 0
+    # Every market and horizon this snapshot holds, so a filter can offer what
+    # exists instead of a list written by hand that drifts from the data.
+    available_markets: tuple[str, ...] = ()
+    available_horizons: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,6 +315,7 @@ class OpportunityService:
         rows = _matching_text(rows, query.text)
         rows = _sorted_rows(rows, query.sort)
         total = len(rows)
+        markets, horizons = self._available_facets()
         start = (query.page - 1) * query.page_size
         return OpportunityPage(
             items=rows[start : start + query.page_size],
@@ -334,6 +339,18 @@ class OpportunityService:
             page=query.page,
             page_size=query.page_size,
             pages=ceil(total / query.page_size),
+            available_markets=markets,
+            available_horizons=horizons,
+        )
+
+    def _available_facets(self) -> tuple[tuple[str, ...], tuple[int, ...]]:
+        """Every market and horizon the source holds, not just this page's."""
+
+        assert self._planner_repository is not None
+        configurations = self._planner_repository.list_all()
+        return (
+            tuple(sorted({row.market for row in configurations})),
+            tuple(sorted({row.forecast_horizon for row in configurations})),
         )
 
     def get(self, group_id: str, query: OpportunityQuery) -> OpportunityRow | None:

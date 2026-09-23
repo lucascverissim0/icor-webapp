@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import axe from 'axe-core'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -78,6 +78,8 @@ export const opportunities = {
   page: 1,
   page_size: 1,
   pages: 2,
+  available_markets: ['DE', 'FR', 'GB'],
+  available_horizons: [2028, 2031],
 } as const
 
 const registrationSummary = {
@@ -306,5 +308,72 @@ describe('OpportunityDetailView', () => {
       'href',
       expect.stringContaining('market=FR'),
     )
+  })
+})
+
+describe('OpportunitiesWorkbench filters', () => {
+  it('offers only the markets the snapshot actually holds', async () => {
+    const { findByRole } = renderOpportunities(successFetcher())
+
+    const markets = await findByRole('group', { name: /markets/i })
+    for (const market of ['DE', 'FR', 'GB']) {
+      expect(within(markets).getByRole('checkbox', { name: market })).toBeTruthy()
+    }
+    expect(within(markets).queryByRole('checkbox', { name: 'ZZ' })).toBeNull()
+  })
+
+  it('offers only the forecast years the snapshot actually holds', async () => {
+    const { findByLabelText } = renderOpportunities(successFetcher())
+
+    // The filters render before the ranking resolves, so the option list is
+    // empty until the snapshot's facets arrive.
+    await screen.findByRole('option', { name: '2028' })
+
+    const select = await findByLabelText('Forecast year')
+    const years = within(select as HTMLSelectElement)
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(years).toEqual(['All forecast years', '2028', '2031'])
+  })
+
+  it('selecting a market returns to the first page', async () => {
+    const { findByRole, onSearchChange } = renderOpportunities(successFetcher())
+    const markets = await findByRole('group', { name: /markets/i })
+
+    await userEvent.click(within(markets).getByRole('checkbox', { name: 'FR' }))
+
+    expect(onSearchChange).toHaveBeenCalledWith(
+      expect.objectContaining({ market: ['FR'], page: 1 }),
+    )
+  })
+
+  it('reordering the ranking returns to the first page', async () => {
+    const { findByLabelText, onSearchChange } = renderOpportunities(successFetcher())
+    const select = await findByLabelText('Order by')
+
+    await userEvent.selectOptions(select, 'demand')
+
+    expect(onSearchChange).toHaveBeenCalledWith(
+      expect.objectContaining({ order: 'demand', page: 1 }),
+    )
+  })
+
+  it('does not request a page per keystroke', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const { findByLabelText, onSearchChange } = renderOpportunities(successFetcher())
+      const box = await findByLabelText('Search vehicle')
+
+      await userEvent.type(box, 'Golf')
+      expect(onSearchChange).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(400)
+      expect(onSearchChange).toHaveBeenCalledTimes(1)
+      expect(onSearchChange).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'Golf', page: 1 }),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

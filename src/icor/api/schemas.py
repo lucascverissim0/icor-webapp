@@ -320,6 +320,8 @@ class OpportunityPageResponse(ApiModel):
     page: int
     page_size: int
     pages: int
+    available_markets: tuple[str, ...] = ()
+    available_horizons: tuple[int, ...] = ()
 
 
 class OpportunityDrillDownResponse(ApiModel):

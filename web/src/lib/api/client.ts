@@ -42,10 +42,14 @@ export interface PlannerConfigurationsQuery {
   pageSize?: ApiQuery['page_size']
 }
 
+export type OpportunitySort = 'score' | 'demand' | 'vehicle'
+
 export interface OpportunitiesQuery {
   groupBy: OpportunityGroupBy
   markets?: string[]
   horizons?: number[]
+  text?: string
+  sort?: OpportunitySort
   page?: number
   pageSize?: number
 }
@@ -384,6 +388,8 @@ function opportunityParameters(query: OpportunitiesQuery): URLSearchParams {
   const parameters = new URLSearchParams({ group_by: query.groupBy })
   appendMany(parameters, 'market', query.markets)
   appendMany(parameters, 'horizon', query.horizons)
+  if (query.text) parameters.set('q', query.text)
+  if (query.sort && query.sort !== 'score') parameters.set('sort', query.sort)
   if (query.page !== undefined) parameters.set('page', String(query.page))
   if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
   return parameters
