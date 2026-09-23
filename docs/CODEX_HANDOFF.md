@@ -5809,3 +5809,137 @@ require a credit card on file." **No free compute allowance is stated** and no
 minimum monthly charge is stated. European egress is **$0.02/GB**, negligible for
 a review deployment. Destroying the app when the review window closes stops the
 charge.
+
+### 2026-09-23 13:20 — everything local is done; the deploy waits only on a Fly account
+
+`.local/promote_and_derive.py` ran the whole sequence unattended and every gate
+passed. Timings measured, not estimated:
+
+| Step | Result | Seconds |
+|---|---|---|
+| reconciliation gate on the candidate | `gate: pass`, exit 0 | **22** |
+| promote `snapshot-579bf9a3c33adef9789d` | exit 0 | 1,077 |
+| `mark-verified` on the dev root | exit 0 | 378 |
+| derive the client snapshot | exit 0 | 395 |
+| promote it into `.local/client-evidence` | exit 0 | 120 |
+| pre-flight the baked root | `ready: true` | 22 |
+
+**The two roots are now in the right state.** `.local/evidence/active.json` and
+`verified.json` both name `snapshot-579bf9a3c33adef9789d` with the same
+`manifest_sha256` `c7eb5289…f4e4d`, so a trusted open of the dev root agrees with
+its pointer. `.local/client-evidence/active.json` names
+`snapshot-b8f742ed9c71f14ac21e` in a root of its own, and holds exactly
+`active.json`, `.promotion.lock` and `snapshots/<id>/{evidence.sqlite3,
+snapshot.json, validation.json}` — nothing else.
+
+**The client snapshot:** `snapshot-b8f742ed9c71f14ac21e`, scope `client-release`,
+`sha256 d8bffb25…5cca3`, **1,932,435,456 bytes — 20.5 % of the 9,434,009,600 it
+came from**, `observations 0`.
+
+**The build context is 1.935 GB**, measured with the client snapshot in place:
+48.331 GB excluded, and the only entry over a megabyte is the baked database.
+That is the `.dockerignore` fix doing its job; before it, the same walk put 26 GB
+of full-scope snapshots in the context.
+
+#### The whole-market score, re-verified on the artifact that will actually ship
+
+Against `.local/client-evidence` — the 1.93 GB client snapshot, not the
+development one. `.local/verify-client.out.log`.
+
+| Filter | rows | total | shared | **score identical** | units differ | seconds |
+|---|---|---|---|---|---|---|
+| `q=golf` | 61 | 61 | 11 | **true** | false | 5.0 |
+| `market=DE` | 100 | 12,518 | 100 | **true** | true | 2.3 |
+| `horizon=2028` | 100 | 48,956 | 100 | **true** | true | 8.0 |
+| `market=DE&q=golf` | 28 | 28 | 11 | **true** | true | 1.4 |
+| `sort=vehicle` | 100 | 48,959 | 0 | **true** | false | 17.2 |
+
+`detail_score_matches_the_listed_score: true`. Volkswagen Golf 2020: score
+**89.900**, percentile 0.998745, **rank 32 of 24,694**. On the pre-rebuild
+snapshot the same car scored 89.897 at rank 32 of 24,116 — the reconciliation fix
+moved the registration totals without disturbing the ranking, which is a useful
+independent signal that both changes did what they claim.
+
+Population on the client snapshot: brand 423 groups / 323 ranked; model 4,803 /
+3,998; model_year **48,959 / 24,694** (24,265 forecast nothing). The figure the UI
+states is read from the API, so it follows the snapshot.
+
+**Cost on the shipping artifact, which is what the health check has to tolerate:**
+an **untrusted** `open_active_snapshot` of the 1.93 GB database is **36.5 s** (it
+will be about 0.1 s in the image, where `verified.json` is baked and
+`ICOR_SNAPSHOT_TRUST_BAKED=1`), and warming the model-year population is
+**11.6 s** — against `fly.toml`'s 120 s `grace_period`. Even the worst case, a
+missing marker, fits. First unfiltered page 21.8 s, repeat 0.0 s.
+
+#### The container entrypoint ran, for the first time anywhere
+
+`scripts/run_container_preview.py` was started against the real baked artifacts
+and the real bundle, in `container` host mode, and reached
+`Application startup complete` serving on `0.0.0.0:8081`. That code is PID 1 in
+the image and had never executed successfully on any machine.
+
+What it proved:
+
+- **`/healthz` answers `{"status":"ok"}` to an anonymous caller.** This is the
+  endpoint `fly.toml` checks, and it has to be open or the machine would never
+  become healthy.
+- **Everything else answers 401 to an anonymous caller** — `/`, `/api/health`,
+  `/api/v1/opportunities`, `/evidence`, `/openapi.json` alike, so the blocked and
+  the allowed surfaces are indistinguishable without a session. `/auth/login`
+  serves the bundle.
+- Sign-in returns **303**, and the full header set is present: CSP with
+  `base-uri 'none'` and `form-action 'self'`, `x-robots-tag`, `nosniff`,
+  `no-referrer`, COOP, CORP, permissions-policy, and `Cache-Control: no-store` on
+  `/auth/` and `/api/`.
+
+**An authenticated probe is impossible over plain HTTP, by design.** The session
+cookie is `HttpOnly; Max-Age=3600; Path=/; SameSite=strict; Secure`, so no client
+will return it to `http://127.0.0.1`. Likewise `Strict-Transport-Security` is set
+only when `_is_tls(request)` (`preview/security.py:86`), which on Fly means
+`X-Forwarded-Proto` from fly-proxy, trusted because `ICOR_PREVIEW_TRUSTED_PROXIES`
+is set. Neither absence locally is a defect; both mean the authenticated gates and
+`gate5:hsts-present` can only be checked against the deployed HTTPS URL, which is
+what `verify_client_release.py` is for.
+
+`.local/client-release` was rebuilt with `VITE_ICOR_CLIENT_RELEASE=verified`
+(492 KB). The image builds its own copy; this one exists for the local run above.
+
+#### Fly pricing, read from the page
+
+`shared-cpu-2x` in `ams` is **$4.04/month** at 512 MB plus "about $5 per 30 days
+per GB of additional RAM", so the 2 GB always-on machine is roughly
+**$11.50–12.00/month**. "All organizations (except for Linked Organizations)
+require a credit card on file." No free compute allowance and no minimum monthly
+charge are stated. European egress is **$0.02/GB**.
+
+#### What is left
+
+Only the account-bound steps, in order:
+
+1. `iwr https://fly.io/install.ps1 | iex`, then `$env:PATH = "$env:USERPROFILE\\.fly\\bin;$env:PATH"`.
+   Immediately check `fly deploy --help` and `fly wireguard --help` for the
+   `--depot` and `websockets` escapes, because `--remote-only` needs outbound UDP
+   and a corporate network often blocks it.
+2. `fly auth login`, `fly apps create icor-client-preview`. **Never `fly launch`**:
+   it rewrites `fly.toml` and would discard the env block and the health-check
+   tuning.
+3. `scripts/generate_preview_credentials.py hash-user --username client-reviewer`
+   (it prompts for the password twice, by design) and `session-secret` twice — one
+   for `ICOR_PREVIEW_SESSION_SECRET`, one for a 32+ character
+   `ICOR_EXPORT_TOKEN`. Both subcommands print a *labelled* line; strip the label.
+   `ICOR_PREVIEW_USERS` is a JSON **object** wrapping the argon2id hash, and the
+   hash contains `$`, so build it by concatenation rather than inside a
+   double-quoted PowerShell string. `fly secrets import --stage`.
+4. `fly deploy --remote-only`, detached. **Watch the reported context size: it
+   must be about 1.9 GB.**
+5. `verify_client_release.py --url https://icor-client-preview.fly.dev --username
+   client-reviewer`, password on stdin. Require `"failed": 0`.
+6. Repeat the filtered/unfiltered score comparison against the Fly URL.
+
+#### Reclaimable disk, once the deploy is confirmed
+
+`.local/evidence/snapshots/` holds four snapshots. Three are superseded —
+`snapshot-38878384744b4c9d310f`, `snapshot-7e0eb1d25f73ee96c0f9`,
+`snapshot-a20e1c00232b3603c1a1` — about **27 GB**. They are the rollback, so they
+should go only after the deployed URL has been verified, and they are chmod'd
+read-only so removal needs `-Force`.
