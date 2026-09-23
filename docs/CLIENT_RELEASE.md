@@ -174,7 +174,27 @@ Verify the deployed URL against the gates and the smoke test below:
     uv run python scripts/verify_client_release.py --url https://<host> --username client-reviewer
 
 It reads the password from stdin and prints one JSON verdict; record that output
-in `docs/CODEX_HANDOFF.md` as the evidence for gates 2, 4, 5 and 7.
+in `docs/CODEX_HANDOFF.md` as the evidence for gates 2, 4, 5 and 7. The verdict
+must read `"verdict": "deployed-release-verified"`. No other value is release
+evidence.
+
+Before paying for a deploy, run the same checks in process against the real
+client artifacts:
+
+    uv run python scripts/verify_client_release.py --local --username client-reviewer
+
+`--local` generates its own throwaway credential, so it reads nothing from stdin,
+and it runs the container preflight before building the app. It drives the app
+over an ASGI scope that declares https, which is the only way the authenticated
+half can run locally at all: the session cookie is `Secure`, so it is never
+returned over plain HTTP, and every check after sign-in would otherwise collapse.
+
+That declaration is also its limit. HSTS is emitted because the scope says https,
+not because TLS was negotiated, so `gate5:url-is-https` and `gate5:hsts-present`
+are reported as `"evidence": "asserted"` and listed under `not_proven_locally`.
+A passing local run prints `"verdict": "local-preflight-passed"`, which is a
+pre-flight and never the release evidence. Smoke points 1, 4 and 5 are visual and
+are not covered by either mode.
 
 ## Build the client bundle
 
