@@ -260,7 +260,11 @@ def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
     from icor.api.app import ROOT
     from icor.preview.app import create_preview_app
     from icor.preview.runner import validate_runner
-    from scripts.generate_preview_credentials import session_secret
+
+    try:
+        from scripts.generate_preview_credentials import session_secret
+    except ModuleNotFoundError:  # run as a script rather than imported as a package
+        from generate_preview_credentials import session_secret
 
     asset_root = ROOT / ".local" / "client-release"
     snapshot_root = ROOT / ".local" / "client-evidence"

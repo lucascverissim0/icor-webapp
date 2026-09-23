@@ -246,8 +246,10 @@ After signing in over HTTPS:
 4. Search for at least Volkswagen Golf and Ford Focus, confirm their reviewed
    generation labels, select a registration year, and calculate 2028 and 2031
    forecasts.
-5. Confirm the eight configured market rows render and unavailable evidence is never
-   displayed as zero.
+5. Confirm all eight configured markets are present and unavailable evidence is never
+   displayed as zero. EU27 leads as the headline fleet figure; the seven national
+   markets are behind the "Per-market breakdown" disclosure, which reports how many
+   of them carry data.
 6. Confirm /evidence, /registrations, /completeness, /exports, /docs, and
    /openapi.json return 404 after authentication.
 7. Sign out and confirm protected pages return 401.

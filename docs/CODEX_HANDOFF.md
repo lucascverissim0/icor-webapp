@@ -5943,3 +5943,134 @@ Only the account-bound steps, in order:
 `snapshot-a20e1c00232b3603c1a1` — about **27 GB**. They are the rollback, so they
 should go only after the deployed URL has been verified, and they are chmod'd
 read-only so removal needs `-Force`.
+
+## 2026-09-23 afternoon — localhost is closed out; only the account-bound steps remain
+
+Three things were not true on this machine before this session, and the deploy
+would have been the first place any of them was tested.
+
+### Gate 7 was recorded against a superseded snapshot
+
+`docs/FORECAST_VALIDATION.md` still named `snapshot-a20e1c00232b3603c1a1`. The
+09-23 rebuild moved `reconciliation_method` to `single-coverage-corroboration-v2`
+and changed the registration totals, and the benchmark selects its targets by the
+`reconciled-registration-cohort` reason code, so the evaluated population could
+genuinely have moved. It had, slightly, and the margin held.
+
+    uv run python scripts/benchmark_registration_forecasts.py --root .local/evidence
+    uv run python scripts/benchmark_registration_forecasts.py --root .local/client-evidence
+
+| Root | snapshot | baseline WAPE | production WAPE | reduction | series |
+|---|---|---:|---:|---:|---:|
+| `.local/evidence` | `snapshot-579bf9a3c33adef9789d` | 0.780585 | 0.658760 | 15.61 % | 24,437 |
+| `.local/client-evidence` | `snapshot-b8f742ed9c71f14ac21e` | 0.780585 | 0.658760 | 15.61 % | 24,437 |
+| previous (superseded) | `snapshot-a20e1c00232b3603c1a1` | 0.829732 | 0.697648 | 15.92 % | 24,466 |
+
+Both errors fell and the ranking was already known to be undisturbed. **The client
+root returns figures identical to six decimals**, so pruning to client-release
+scope removed no series this benchmark evaluates: the shipped artifact carries the
+diagnostic rather than inheriting its claim. Raw JSON in
+`.local/benchmark-gate7-dev.json` and `.local/benchmark-gate7-client.json`.
+
+The other half of gate 7 was already satisfied and needed no work:
+`versions.forecast_method` is `validated-recency-damped-ensemble-v2` on both active
+snapshots, matching `src/icor/forecasting/registration_forecast.py:29` and
+`src/icor/evidence/source_registry.py:35`.
+
+### The authenticated gates had never been exercised anywhere
+
+The session cookie is `Secure` (`src/icor/preview/app.py:163-171`, no config
+bypass), so every check after sign-in was impossible over local plain HTTP — which
+is why `.local/smoke_container_locally.ps1` can only prove anonymous blocking. The
+first authenticated test of the real artifacts would have been the paid deployment.
+
+`scripts/verify_client_release.py` now has a pluggable transport and a `--local`
+mode that drives the real client snapshot and real bundle in process over an ASGI
+scope that declares https. `_is_tls` is then true, so the cookie is returned and
+the middleware really runs. The check functions are untouched: both modes assert
+the same things.
+
+    uv run python scripts/verify_client_release.py --local --username client-reviewer
+
+**22 checks, 0 failed**, `.local/verify-local.out.json`. Observed for the first
+time: sign-in 303, `gate4:client-release-scope-enforced` 422, all six blocked
+paths 404 *while authenticated*, `smoke7:sign-out-revokes-access` 401,
+`gate2:snapshot-id-reported` = `snapshot-b8f742ed9c71f14ac21e`,
+`smoke2:paginates` 1,959 pages. Boot — snapshot open plus the model-year warm —
+was **49.5 s**, against `fly.toml`'s 120 s `grace_period`.
+
+**It is a pre-flight, not the release evidence.** A declared https scope emits
+HSTS without a byte of TLS, so `gate5:url-is-https` and `gate5:hsts-present` are
+reported as `"evidence": "asserted"` and listed under `not_proven_locally`. A
+passing local run prints `"verdict": "local-preflight-passed"`; only a deployed run
+prints `"deployed-release-verified"`, which `docs/CLIENT_RELEASE.md` now requires as
+the pasted evidence. `--local` also runs `validate_runner` first, so it cannot
+quietly skip the preflight the container entrypoint performs.
+
+### CI had never run on this branch, and Playwright found a real staleness
+
+The branch was unpushed, so GitHub Actions has never seen any of it, and the last
+recorded local verification skipped Playwright. Run here in full:
+
+| Command | Result |
+|---|---|
+| `uv run pytest` | **910 passed, 14 skipped, 4 xfailed** |
+| `uv run ruff check` (CI list) | clean |
+| `uv lock --check` | clean |
+| web `typecheck` / `lint` | clean |
+| web `npm test -- --run` | **93 passed** (15 files) |
+| web `build` / `openapi:check` | clean, exit 0 |
+| `npm run e2e` | **26 passed** — after the fix below |
+
+Playwright initially failed one spec, and it was a genuine stale test rather than a
+flake: commit `3a6c269` promoted EU27 to the headline figure and moved the seven
+national markets behind a collapsed `<details>`
+(`web/src/features/planner/VehicleForecastSearch.tsx:141-143`), while
+`web/e2e/planner.spec.ts` still expected eight visible `rowheader`s. Because the
+suite had never run, nobody saw it. The test now asserts the EU27 headline, opens
+the disclosure, and checks the seven national rows. `docs/CLIENT_RELEASE.md` smoke
+item 5 said "the eight configured market rows render" and has been corrected to
+describe where the eighth market actually appears — the substance is unchanged, all
+eight are present.
+
+`scripts/verify_client_release.py` was missing from CI's ruff allowlist despite
+being release-critical; added at `.github/workflows/ci.yml:49`.
+
+### The shipping artifact, re-proved after the change
+
+    uv run python scripts/build_evidence_snapshot.py verify --root .local/client-evidence
+
+`state: verified`, `snapshot-b8f742ed9c71f14ac21e`, sha256 `d8bffb25…5cca3`,
+`warning_count 0`, 21 release ids — unchanged.
+
+`.local/smoke_container_locally.ps1` ran the real container entrypoint to
+`Application startup complete` on `0.0.0.0:8081`. Probed anonymously: `/healthz`
+200 `{"status":"ok"}`, `/auth/login` 200 serving the bundle, and `/`, `/api/health`,
+`/api/v1/opportunities`, `/evidence`, `/openapi.json` all **401**. The server was
+terminated afterwards; **no long-running process is active**.
+
+### What is left — this supersedes every earlier "what is left" list
+
+Nothing local. Gate 1 and the account-bound steps only:
+
+1. **Gate 1, the leaked OpenAI key — still open.** Revoke and rotate before any
+   internet launch. `docs/CLIENT_RELEASE.md` gate 1 blocks the deploy on it.
+2. Install flyctl; check `fly deploy --help` and `fly wireguard --help` for the
+   `--depot` and `websockets` escapes before trusting `--remote-only`.
+3. `fly auth login`, `fly apps create icor-client-preview`. **Never `fly launch`** —
+   it rewrites `fly.toml` and would discard the env block and health-check tuning.
+4. `generate_preview_credentials.py hash-user` and `session-secret` twice; build
+   `ICOR_PREVIEW_USERS` by concatenation, not inside a double-quoted PowerShell
+   string, because the argon2id hash contains `$`. `fly secrets import --stage`.
+5. `fly deploy --remote-only`, detached. **Context must report about 1.9 GB.**
+6. `verify_client_release.py --url https://icor-client-preview.fly.dev --username
+   client-reviewer`, password on stdin. Require `"failed": 0` **and**
+   `"verdict": "deployed-release-verified"`. This is the run that proves gate 5.
+7. The browser smoke test: points 1, 4 and 5 are visual and are covered by neither
+   `--local` nor the deployed verifier.
+8. Repeat the filtered/unfiltered score comparison against the Fly URL.
+
+Still true and still deliberate: Docker Desktop has never been installed, so the
+first real `docker build` happens on Fly's builder. The three superseded snapshots
+in `.local/evidence/snapshots/` (25.40 GiB) stay until the deployed URL verifies —
+they are the rollback.

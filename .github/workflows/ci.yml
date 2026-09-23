@@ -46,6 +46,7 @@ jobs:
           scripts/rebuild_active_snapshot.py scripts/run_container_preview.py
           scripts/build_client_snapshot.py
           scripts/preflight_client_evidence.py
+          scripts/verify_client_release.py
       - run: uv run pytest
 
   planner-web:

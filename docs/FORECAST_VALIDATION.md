@@ -17,11 +17,11 @@ Run:
 
     uv run python scripts/benchmark_registration_forecasts.py --root .local/evidence
 
-Against active snapshot `snapshot-a20e1c00232b3603c1a1`, the corrected benchmark:
+Against active snapshot `snapshot-579bf9a3c33adef9789d`, the corrected benchmark:
 
 - excludes every interpolated and forecast cohort target;
 - splits each reconciled source-backed history at gaps instead of filling them;
-- retained 24,466 contiguous runs with at least five annual values;
+- retained 24,437 contiguous runs with at least five annual values;
 - removed each series' newest two years before model fitting;
 - predicted those unseen years;
 - aggregated error with demand-weighted absolute percentage error (WAPE);
@@ -32,13 +32,28 @@ Verified result:
 
 | Method | Newest-two-year WAPE |
 | --- | ---: |
-| Replaced mean/linear selector | 0.829732 |
-| Validated recency/damped ensemble | 0.697648 |
+| Replaced mean/linear selector | 0.780585 |
+| Validated recency/damped ensemble | 0.658760 |
 
-The relative error reduction is 15.92%. Lower is better. This supersedes the earlier
+The relative error reduction is 15.61%. Lower is better. This supersedes the earlier
 0.503518 versus 0.628230 diagnostic, which included 95,176 interpolation-derived
 cohort rows in the available evaluation population. The corrected score is more
 honest but remains a diagnostic, not a promotion-grade result.
+
+Re-run after the 2026-09-23 registration-reconciliation rebuild, which moved
+`reconciliation_method` from `dependency-precedence-v1` to
+`single-coverage-corroboration-v2` and so changed the registration totals the
+benchmark scores. Both errors fell and the margin held: the previous snapshot
+`snapshot-a20e1c00232b3603c1a1` scored 0.829732 against 0.697648, a 15.92%
+reduction over 24,466 runs. The method is unchanged, and the ranking it produces
+was separately confirmed to be undisturbed.
+
+The same command against `--root .local/client-evidence`, the pruned artifact the
+client preview actually ships, returns the identical figures on
+`snapshot-b8f742ed9c71f14ac21e`: 0.780585 against 0.658760, 15.61%, 24,437 runs.
+Pruning to client-release scope therefore removed no series this benchmark
+evaluates, so the shipped artifact carries the diagnostic above rather than
+merely inheriting its claim.
 
 Run the fail-closed readiness audit:
 
