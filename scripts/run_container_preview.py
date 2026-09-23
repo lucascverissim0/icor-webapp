@@ -58,8 +58,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"preview refused to start: {type(error).__name__}", file=sys.stderr)
         return 2
 
-    executable = os.path.join(os.path.dirname(sys.executable), command[0])
-    os.execv(executable, list(command))
+    try:
+        executable = _server_executable(command[0])
+    except FileNotFoundError as error:
+        print(f"preview refused to start: {error}", file=sys.stderr)
+        return 2
+    os.execv(str(executable), list(command))
+
+
+def _server_executable(name: str) -> Path:
+    """Find the server beside this interpreter, whatever the platform calls it.
+
+    This resolved the bare name only, so on Windows it looked for `uvicorn`
+    where the file is `uvicorn.exe`, `os.execv` raised `FileNotFoundError`, and
+    that is not one of the exceptions caught above — a bare traceback instead of
+    a diagnosis. The image runs on Linux, where the bare name is right, so the
+    defect was invisible there and made this file impossible to exercise
+    anywhere else. It is the container's PID 1; it should be runnable locally.
+    """
+
+    directory = Path(sys.executable).parent
+    for candidate in (directory / name, directory / f"{name}.exe"):
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"{name} is not installed beside {sys.executable}")
 
 
 if __name__ == "__main__":
