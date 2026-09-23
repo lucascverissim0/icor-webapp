@@ -5754,3 +5754,58 @@ At 12:33 the rebuild was in `VACUUM`: `evidence.sqlite3` 9.92 GB with an
 8.68 GB rollback journal beside it, 45.9 GB free. The journal reaching roughly the
 size of the database and then vanishing is the signal that the build is about to
 name its candidate.
+
+### 2026-09-23 12:43 — the rebuild landed and the GB/DE gate passed
+
+**`snapshot-579bf9a3c33adef9789d`**, state `candidate`, `observation_count`
+1,555,677, `published_value_count` 0, `warning_count` 100, `database_sha256`
+`c1951a0ea3d6b9f30ea9e8eeab90ae0a5e5eaf2eea10d6e2858f5e9e0d22e6fd`, built from the
+same 21 release ids as the snapshot it replaces. The id differs from
+`snapshot-38878384744b4c9d310f` as predicted, because the reconciliation method
+version moved and `snapshot_id_for` hashes the versions. Started 09:05, candidate
+named 12:43 — about 3h40m, not the 4¼ h the docstring estimates.
+
+**The reconciliation gate passed in 22 seconds**, run with `--candidate` so the
+343 s verify of the active snapshot is skipped entirely. `gate: pass`, exit 0.
+This was the deploy blocker. **GB and DE are now quotable.**
+
+GB, the year the handoff has been tracking:
+
+| | historical | corrected | corr/act |
+|---|---|---|---|
+| **2018** | 4,696,855 | **2,355,350** | **0.9950** |
+
+Every GB year from 2010 to 2020 moved from `hist/act` about **1.98** to `corr/act`
+**0.993–0.997**; the years outside that window were never doubled and are
+unchanged. Modelled GB fleet at horizon: 42,139,597 historical →
+**26,315,679** corrected, against a 34,000,000 ceiling.
+
+DE:
+
+| | historical | corrected | corr/act |
+|---|---|---|---|
+| **2024** | 4,641,590 | **2,728,802** | **0.9686** |
+
+Note DE 2024's *historical* figure is 4,641,590 here rather than the 5,526,435
+recorded against the old snapshot — both columns moved, because the rebuild
+changed the reconciliation method, not just the correction. What matters is
+`corrected/actual`, and 0.9686 against the 2,817,331 reference is comfortably
+inside the 1.2 gate. Modelled DE fleet: 35,581,995 → **33,848,620**, ceiling
+49,000,000.
+
+Only 2024 has dropped keys in DE (179 of 2,446) and only 2010–2020 in GB, which is
+where the double counting was.
+
+Disk recovered to **63.3 GB free** once the VACUUM journal was released, so the
+remaining copies have ample room.
+
+### Fly pricing, read from the page rather than remembered
+
+`shared-cpu-2x` in `ams` is **$4.04/month** base at 512 MB, plus "about $5 per 30
+days per GB of additional RAM", so the 2 GB machine `fly.toml` describes costs
+roughly **$11.50–12.00/month** running continuously — slightly less than the
+$12–14 estimated earlier. "All organizations (except for Linked Organizations)
+require a credit card on file." **No free compute allowance is stated** and no
+minimum monthly charge is stated. European egress is **$0.02/GB**, negligible for
+a review deployment. Destroying the app when the review window closes stops the
+charge.
