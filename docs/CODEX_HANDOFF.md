@@ -5289,3 +5289,143 @@ session was idle. None of them failed; there is nothing in them to debug.
 This makes the promotion blocker worse rather than better: the candidate that
 was being built to replace the unpromotable active snapshot does not exist yet.
 An unrelated Python process is still listening on port 8000 and was left alone.
+
+## 2026-09-23 morning — the app serves again, and the Render path is built
+
+### The blocker was not what the last checkpoint recorded
+
+The previous entry said `open_active_snapshot()` failed because "a candidate was
+pointed at by `active.json` without ever being promoted". That is wrong, and
+acting on it would have cost a four-hour rebuild for nothing: `promote()`
+*requires* `manifest.status is CANDIDATE`, so a promoted snapshot keeps that
+status by design and the pointer is what makes it active.
+
+The real cause, confirmed by diffing the schema contract against the database:
+`_SCHEMA_VERSION` was raised to 7 when `uncertainty_method` was added to
+`opportunity_estimate`, but **the version stamped into the database was left at
+6**. `_migration_statements()` still calls `_schema_statements(version=6)`, and
+nothing has ever stamped 7. So a build from before that change and one from
+after it are both labelled 6 while differing structurally, and `_validate_schema`
+compared every version-6 database against the shape that carries the column.
+
+`_v4_extension_statements` creates `opportunity_estimate`, so the column is now
+a parameter of that extension rather than hardcoded in it — which also repairs
+the v4 and v5 contracts, which had silently begun demanding a column neither
+version ever had. Version 6 accepts exactly the two shapes that exist; an
+unknown shape is still refused.
+
+**Verified:** `open_active_snapshot()` returns `snapshot-38878384744b4c9d310f`
+in 334 s against the 9.25 GB database. `/api/health` answers
+`{"status":"ok","snapshot_ready":true,...}`. The ranking renders in a browser
+with real rows. This is the first time the application has served.
+
+The deeper defect — a schema change without a version bump, leaving two physical
+schemas sharing one number — is **not** fixed. Stamping 7 needs a v6→v7
+migration and would have disturbed the rebuild that was in flight. Do it next,
+deliberately.
+
+### Snapshot verification now happens once, at build time
+
+`fly.toml` avoids the per-boot verification cost by refusing to scale to zero.
+Render's free tier stops a service after fifteen minutes idle and gives it a
+tenth of a CPU, so that cost lands on the next visitor.
+
+`write_verified_marker` records a completed verification in `verified.json`
+beside `active.json`; `ICOR_SNAPSHOT_TRUST_BAKED=1` lets the runtime rely on it,
+**only** in `container` host mode. The Dockerfile writes the marker as part of
+the existing build-time assertion, and sets the flag in the image.
+
+**Measured on the same snapshot: 334 s → 0.09 s.**
+
+A trusted start still resolves the pointer, reads the manifest, hashes it, and
+requires pointer and marker to agree. Refused: missing marker, marker naming
+another snapshot, marker whose manifest digest moved, swapped `snapshot.json`.
+Promotion never consults the marker. What is given up — detecting corruption of
+the database file after the image was built — is written down in
+`docs/CLIENT_RELEASE.md`, along with the full Render procedure.
+
+`.local/evidence/verified.json` now exists locally, naming
+`snapshot-38878384744b4c9d310f`. **It will be stale the moment the rebuild is
+promoted**, and a trusted open will then refuse — correctly. Re-run
+`build_evidence_snapshot.py mark-verified` after promotion.
+
+### The ranking now describes one car once, and can be searched
+
+`snapshot_identity` materializes one canonical identity per vehicle id into a
+temp table, shared by the ranking and Model search so the two channels cannot
+disagree. Resolution has to be visible to SQL because the ranking groups, ranks
+and paginates there.
+
+Measured on the active snapshot: **22,892 brand/model pairs collapse to 4,872**,
+and the model-year ranking falls from **143,888 rows to 50,811**. All 22,892
+rankable vehicles survive — one the index cannot fold keeps its raw labels
+rather than being dropped. Ten Volkswagen spellings (`vw`, `volkswagen, vw`,
+`volksawgen, vw`, …) are now one brand.
+
+`/api/v1/opportunities` gained `q` and `sort`, both applied in the SQL and the
+in-memory rankings. Search text is a literal (`%` and `_` escaped with `@`,
+input capped at 64). The response also carries `available_markets` and
+`available_horizons`, read from the snapshot, so the filter controls offer what
+exists rather than a hand-written list. Measured over HTTP: unfiltered 50,811;
+`q=golf` 61; `q=golf&market=DE` 28; bad `sort` and overlong `q` both 422.
+
+**A behaviour worth knowing:** the demand percentile is computed over the
+filtered set, so narrowing changes what a score means. Market and horizon
+filters always did this; a search box makes it easy to hit. The screen now says
+so whenever anything narrows it. Nothing changed but the disclosure.
+
+### The rebuild
+
+Started 09:05 local, detached via `Start-Process` so Claude Code's memory reaper
+cannot take it, logging to `.local/rebuild-20260923.*.log`, candidate
+`.build-3defbb3f6ecb476fa23dab81cb5d3409`. Same arguments as the killed run:
+`--build-as-of 2026-09-22T12:00:00+00:00 --deterministic-seed 20260922`, so the
+data vintage is identical and the reconciler fix is the only change.
+
+At 6.0 GB after ~1h50m; 59 GB free. The abandoned `.build-c8f73d93…` stub (9.6 GB)
+was deleted, which the previous checkpoint authorized.
+
+`rebuild_active_snapshot.py` reads the release list as plain JSON and does **not**
+call `open_active_snapshot()`, so it could start before the schema fix landed.
+
+**GB and DE are still doubled until this is promoted.** Do not quote either.
+
+### The memory reaper is still taking processes
+
+Two API starts were killed mid-startup while the rebuild ran — the second had
+already logged `Application startup complete`. Anything long-running must be
+launched with `Start-Process … -PassThru`, not through the agent's shell.
+
+### Exact next actions
+
+1. Wait for the rebuild, then promote it and re-run
+   `scripts/replay_registration_reconciliation.py`. GB 2018 must fall from
+   4,696,855 to roughly 2.37M and DE 2024 from 5,526,435 to roughly 2.8M. That
+   is the gate on showing either market.
+2. `build_client_snapshot.py derive --active` then `promote`; copy the result to
+   `.local/client-evidence` (**it still does not exist**, and `Dockerfile:58`
+   copies it). Record the measured size and the measured trusted-open time.
+3. `mark-verified` again after promotion — the current marker will be stale.
+4. Rebuild the client bundle into `.local/client-release`.
+5. **Lucas**: install Docker Desktop (never installed; the Dockerfile has still
+   never been built), and make the GitHub repo private while signed in as
+   `lucascverissim0`. Confirmed this morning: an anonymous clone still succeeds,
+   and push from this machine now works (the earlier 403 is stale).
+6. Build, push to GHCR, create the Render service from the image. Env and the
+   `ICOR_PREVIEW_TRUSTED_PROXIES` decision are in `docs/CLIENT_RELEASE.md`.
+7. Gate 1 remains waived, not met.
+
+### Verification run this session
+
+`uv run pytest`: 886 passed, 14 skipped, 4 xfailed. `ruff`: clean.
+`web`: typecheck clean, lint clean, 93 vitest passed, build clean,
+`openapi:check` clean. Playwright **not** run.
+
+### Still open, unchanged
+
+`production_coverage` holds 0 rows, so "Exact ICOR coverage" is structurally 0
+and the score's 20-point readiness half cannot move. 19 reviewed generation
+families against 4,872 canonical identities. `_TARGETS` still hardcodes 8 of the
+30 markets that have data. `ConfigurationDetail` and `OpportunityDrillDown`
+remain unreachable. `AppShell` still navigates with `<a href>`. Windows CI is
+still red for an unidentified reason.
