@@ -682,7 +682,7 @@ class SQLiteEvidenceRepository:
     def _migrate_v3_to_v4(self, connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
         try:
-            for statement in self._v4_extension_statements():
+            for statement in self._v4_extension_statements(uncertainty_method=False):
                 connection.execute(statement)
             connection.execute("DROP TABLE schema_version")
             connection.execute(
@@ -815,15 +815,18 @@ class SQLiteEvidenceRepository:
             connection.commit()
 
     def _migration_statements(self) -> tuple[str, ...]:
+        return self._v6_migration_statements(uncertainty_method=True)
+
+    def _v6_migration_statements(self, *, uncertainty_method: bool) -> tuple[str, ...]:
         return self._schema_statements(
             version=6,
             model_year_sql="INTEGER",
             observation_year_sql=(
                 ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
             ),
-        ) + self._v4_extension_statements() + self._v5_extension_statements() + (
-            self._v6_extension_statements()
-        )
+        ) + self._v4_extension_statements(
+            uncertainty_method=uncertainty_method
+        ) + self._v5_extension_statements() + self._v6_extension_statements()
 
     def _v5_migration_statements(self) -> tuple[str, ...]:
         return self._schema_statements(
@@ -832,7 +835,9 @@ class SQLiteEvidenceRepository:
             observation_year_sql=(
                 ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
             ),
-        ) + self._v4_extension_statements() + self._v5_extension_statements()
+        ) + self._v4_extension_statements(
+            uncertainty_method=False
+        ) + self._v5_extension_statements()
 
     def _v4_migration_statements(self) -> tuple[str, ...]:
         return self._schema_statements(
@@ -841,7 +846,7 @@ class SQLiteEvidenceRepository:
             observation_year_sql=(
                 ", registration_cohort_year INTEGER, manufacture_year INTEGER, model_year INTEGER"
             ),
-        ) + self._v4_extension_statements()
+        ) + self._v4_extension_statements(uncertainty_method=False)
 
     def _v3_migration_statements(self) -> tuple[str, ...]:
         return self._schema_statements(
@@ -957,7 +962,15 @@ class SQLiteEvidenceRepository:
             if statement.strip()
         )
 
-    def _v4_extension_statements(self) -> tuple[str, ...]:
+    def _v4_extension_statements(
+        self, *, uncertainty_method: bool = True
+    ) -> tuple[str, ...]:
+        # `opportunity_estimate` is created here, so a database that reached
+        # schema 6 through the migration ladder never gained the column schema 7
+        # added. Both shapes are stamped 6, so the caller says which one it means.
+        uncertainty_method_sql = (
+            "uncertainty_method TEXT NOT NULL," if uncertainty_method else ""
+        )
         identity_kinds = self._enum_check(GenerationIdentityKind)
         assignment_methods = self._enum_check(AssignmentMethod)
         confidence_bands = self._enum_check(ConfidenceBand)
@@ -1018,7 +1031,7 @@ class SQLiteEvidenceRepository:
                     p10 TEXT NOT NULL, p50 TEXT NOT NULL, p90 TEXT NOT NULL,
                     active_fleet_p50 TEXT NOT NULL, hazard_method TEXT NOT NULL,
                     forecast_method TEXT NOT NULL,
-                    uncertainty_method TEXT NOT NULL,
+                    {uncertainty_method_sql}
                     confidence TEXT NOT NULL CHECK (confidence IN {confidence_bands}),
                     assumption_ids TEXT NOT NULL, reason_codes TEXT NOT NULL
                 );
@@ -1202,13 +1215,32 @@ class SQLiteEvidenceRepository:
         elif version == 5:
             statements = self._v5_migration_statements()
         else:
-            statements = self._migration_statements()
+            # Schema 7 added `uncertainty_method` to `opportunity_estimate` but
+            # never bumped the version stamped into the database, so a build from
+            # before that change and one from after it are both stamped 6 while
+            # differing structurally. Accept exactly those two shapes and no other:
+            # a database that predates the column is read through
+            # `UNRECORDED_UNCERTAINTY_METHOD` rather than being made to look as
+            # though it recorded one.
+            for carries_column in (True, False):
+                statements = self._v6_migration_statements(
+                    uncertainty_method=carries_column
+                )
+                if self._structure_matches(connection, statements):
+                    return version
+            raise EvidenceSchemaError("schema is structurally invalid")
         self._validate_structure(connection, statements)
         return version
 
     def _validate_structure(
         self, connection: sqlite3.Connection, statements: tuple[str, ...]
     ) -> None:
+        if not self._structure_matches(connection, statements):
+            raise EvidenceSchemaError("schema is structurally invalid")
+
+    def _structure_matches(
+        self, connection: sqlite3.Connection, statements: tuple[str, ...]
+    ) -> bool:
         expected_tables, expected_indexes = self._schema_contract(statements)
         actual_tables = {
             row["name"]: self._normalize_schema_sql(row["sql"])
@@ -1222,8 +1254,7 @@ class SQLiteEvidenceRepository:
                 "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL"
             )
         }
-        if actual_tables != expected_tables or actual_indexes != expected_indexes:
-            raise EvidenceSchemaError("schema is structurally invalid")
+        return actual_tables == expected_tables and actual_indexes == expected_indexes
 
     def _schema_contract(
         self, statements: tuple[str, ...]

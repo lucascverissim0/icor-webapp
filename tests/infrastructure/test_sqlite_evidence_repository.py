@@ -33,11 +33,13 @@ from icor.domain.generations import (
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.infrastructure.sqlite_evidence_repository import (
     _SCHEMA_VERSION,
+    UNRECORDED_UNCERTAINTY_METHOD,
     DuplicateEvidenceError,
     EvidenceSchemaError,
     ImmutableEvidenceError,
     SQLiteEvidenceRepository,
     _opportunity_attribution_units,
+    _uncertainty_method,
 )
 
 
@@ -1124,3 +1126,73 @@ def test_failed_migration_leaves_no_version_table(tmp_path: Path) -> None:
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
     assert tables == []
+
+
+def _build_schema(path: Path, statements: tuple[str, ...]) -> None:
+    with sqlite3.connect(path) as connection:
+        for statement in statements:
+            connection.execute(statement)
+
+
+def test_schema_six_without_uncertainty_method_is_accepted(tmp_path: Path) -> None:
+    """Snapshots migrated up to schema 6 never gained the column schema 7 added.
+
+    `opportunity_estimate` is created by the v4 extension, so a database that
+    reached 6 through the migration ladder carries the v4 shape. Both shapes are
+    stamped version 6, so both must open.
+    """
+    path = tmp_path / "migrated.sqlite3"
+    blueprint = SQLiteEvidenceRepository.__new__(SQLiteEvidenceRepository)
+    _build_schema(path, blueprint._v6_migration_statements(uncertainty_method=False))
+
+    repository = SQLiteEvidenceRepository(path)
+
+    assert repository.schema_version == 6
+    with repository._connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(opportunity_estimate)")
+        }
+    assert "uncertainty_method" not in columns
+
+
+def test_schema_six_with_uncertainty_method_is_accepted(tmp_path: Path) -> None:
+    """A database built by the current writer carries the column and is stamped 6."""
+    path = tmp_path / "current.sqlite3"
+    blueprint = SQLiteEvidenceRepository.__new__(SQLiteEvidenceRepository)
+    _build_schema(path, blueprint._v6_migration_statements(uncertainty_method=True))
+
+    repository = SQLiteEvidenceRepository(path)
+
+    assert repository.schema_version == 6
+    with repository._connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(opportunity_estimate)")
+        }
+    assert "uncertainty_method" in columns
+
+
+def test_schema_six_with_an_unknown_shape_is_still_refused(tmp_path: Path) -> None:
+    """Accepting two known shapes must not become accepting any shape."""
+    path = tmp_path / "unknown.sqlite3"
+    blueprint = SQLiteEvidenceRepository.__new__(SQLiteEvidenceRepository)
+    _build_schema(path, blueprint._v6_migration_statements(uncertainty_method=True))
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE opportunity_estimate ADD COLUMN invented TEXT")
+
+    with pytest.raises(EvidenceSchemaError, match="structurally invalid"):
+        SQLiteEvidenceRepository(path)
+
+
+def test_pre_seven_opportunity_rows_report_the_method_as_unrecorded() -> None:
+    """A missing column must never be read as the method the application uses."""
+    with sqlite3.connect(":memory:") as connection:
+        connection.row_factory = sqlite3.Row
+        without = connection.execute("SELECT 1 AS p10").fetchone()
+        with_column = connection.execute(
+            "SELECT 'split-normal-v2' AS uncertainty_method"
+        ).fetchone()
+
+    assert _uncertainty_method(without) == UNRECORDED_UNCERTAINTY_METHOD
+    assert _uncertainty_method(with_column) == "split-normal-v2"
