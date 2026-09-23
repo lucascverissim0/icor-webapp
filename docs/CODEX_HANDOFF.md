@@ -5429,3 +5429,258 @@ families against 4,872 canonical identities. `_TARGETS` still hardcodes 8 of the
 30 markets that have data. `ConfigurationDetail` and `OpportunityDrillDown`
 remain unreachable. `AppShell` still navigates with `<a href>`. Windows CI is
 still red for an unidentified reason.
+
+## 2026-09-23 midday — the score describes the car, and the deploy path is real
+
+Lucas's instruction: "score should always be given against the whole market, not
+just compared to our filters because even if the user filters something he wants
+to know the real score of the car compared to the whole market. Do what needs to
+be done to allow for the deploy fast and without mistakes. I cannot install
+anything in this computer since this is a work laptop."
+
+### Decisions taken with Lucas, so nobody relitigates them
+
+| Question | Decision |
+|---|---|
+| Percentile population | One global score per car: every group at that grouping level, all 30 markets, both horizons, ignoring market, horizon, `q`, `sort` and paging. |
+| Which halves go global | **Both.** Demand *and* readiness, so the number labelled "Score" is itself invariant. The units on screen stay filtered. |
+| Zero-demand groups | Excluded from the denominator. They still score 0 but stop inflating everyone else. |
+| Deploy target | Fly.io, `fly deploy --remote-only`. flyctl unpacks into `%USERPROFILE%\.fly` with no admin rights; Docker is never installed. |
+| Data gate | Wait for the rebuild, promote, prove the reconciliation, then derive the client snapshot. |
+| Release gate 1 | **Waived, as before.** The key stays live, the repo stays public, the URL is password-protected and goes to one named reviewer. |
+
+### What landed — commit 29ebab3
+
+`OpportunityUniverse` (`src/icor/infrastructure/snapshot_opportunity_universe.py`)
+groups the whole snapshot once at one grouping level with **no clause of the
+caller's applied**, ranks it, and is materialised into
+`temp.opportunity_universe` on each connection for the ranking to LEFT JOIN. The
+`ranked` and `percentile` CTEs are gone; `_scored_cte` reads the percentile and
+the readiness ratio from that join. `_grouped_cte` is now the one definition of a
+group key, shared by the ranking and the universe.
+
+`DemandPopulation` in `application/ranking.py` answers for a whole population
+what `demand_percentile_rank` answers for one value, because the per-member form
+is quadratic on fifty thousand groups. A test asserts the two agree — the SQL
+copy of the formula is deleted, so there is exactly one definition left.
+
+`RankingStrategy.score` takes `population=` (keyword, defaulting to the
+candidates), and `OpportunityService` builds the unfiltered candidate set via
+`_population(query)`. A candidate is scored from its **population entry**, not
+from the filtered units, which is what makes readiness invariant too.
+
+`OpportunityScore` and `OpportunityScoreResponse` gained `demand_rank`
+(1 = largest, null when unranked), `demand_population` and `demand_basis`.
+`OpportunityPage`/`OpportunityPageResponse` carry the last two as well, so a
+search matching nothing can still say what scores compare against.
+
+`create_app` calls `SnapshotOpportunityRepository.warm(MODEL_YEAR)` when
+`client_release`, inside `fly.toml`'s 120 s health-check grace period, rather
+than charging the first visitor for it.
+
+UI: the `narrowed` flag and the "relative to the rows currently shown" paragraph
+are gone. The note is unconditional and names the population. The ranking card
+shows the rank out of the market population; the detail page says the score is
+whole-market while its demand figures follow the filter.
+
+**Two defects found in the code being rewritten, both fixed here:**
+
+1. A text predicate naming the canonical identity was repeated inside
+   `_cohort_attribution_ctes`, which joins neither `canonical_vehicle` nor the
+   identity table. A searched **model-year** ranking was therefore a malformed
+   statement (`no such column: ident.brand`) on any snapshot **without** a
+   materialized attribution table. It never reached production because promoted
+   snapshots have the table; a new test caught it. Predicates are now split by
+   what each part of a statement may name (`_Filter`).
+2. The same repetition bound its parameters once for two placeholder sets.
+   `_grouped_cte` now returns the parameters beside the text.
+
+`get()` and `search()` agreed only when nothing was searched, because the detail
+route passes no text. They now agree by construction.
+
+### Measured on the promoted 9.25 GB snapshot
+
+Script: `.local/verify_whole_market_score.py`; output in
+`.local/verify-score.out.log`. `open_active_snapshot` took 343.5 s.
+
+| Filter | rows | total | shared | **every shared score identical** | some units differ | seconds |
+|---|---|---|---|---|---|---|
+| `q=golf` | 61 | 61 | 10 | **true** | false | 7.7 |
+| `market=DE` | 100 | 12,454 | 99 | **true** | true | 3.7 |
+| `horizon=2028` | 100 | 50,808 | 100 | **true** | true | 12.7 |
+| `market=DE&q=golf` | 28 | 28 | 10 | **true** | true | 2.2 |
+| `sort=vehicle` | 100 | 50,811 | 0 | **true** | false | 22.8 |
+
+`detail_score_matches_the_listed_score: true` with `market=DE&q=golf` on the
+detail query. Volkswagen Golf 2020: score **89.897**, percentile 0.998714,
+**rank 32 of 24,116**.
+
+Universe per grouping level: brand 457 groups / **339** ranked / 27.7 s; model
+4,872 / **4,022** / 20.4 s; model_year 50,811 / **24,116** / 25.4 s. So 26,695 of
+50,811 model years forecast nothing — had they counted, the smallest visible
+vehicle would have started at 42 of 80 demand points.
+
+Cost: first unfiltered page 43.2 s, repeat 0.015 s from `_uncovered_cache`.
+Materialising 50,811 universe rows is 0.196 s against the 1.5-2.3 s
+`materialize_identity_table` already costs per connection. The per-request SQL is
+strictly *less* work than before — three window functions over 50,811 groups
+replaced by one join on an indexed temp table — so nothing here is a regression,
+but the unfiltered first page was already slow and still is.
+
+Verification: `uv run pytest` **900 passed, 14 skipped, 4 xfailed**. `ruff`
+clean. `uv lock --check` clean. web: typecheck, lint, **93 vitest**, build and
+`openapi:check` all clean. Playwright **not** run — one e2e test was added
+("a searched ranking shows the same score as an unfiltered one") and has never
+been executed.
+
+### What landed — commit 76817af, and why it was not optional
+
+**The image's two stated guarantees were both false.**
+
+A PEP 621 extra is *additive*. `uv sync --locked --no-dev --extra preview`
+installed the whole of `[project.dependencies]` **and then** the extra, so
+`openai` and `streamlit` would have been in the running container for as long as
+they were listed there — plus pandas, altair, pyarrow and posthog, roughly a
+gigabyte of image. They now live in a non-default `legacy` **dependency group**,
+which `uv sync --no-dev` leaves out. Measured: `uv export --locked --no-dev
+--extra preview` yields **44 packages, zero** matches for
+openai/streamlit/altair/pydeck. CI still runs `tests/test_app_startup.py`
+because `--all-groups` installs the group; `quarterly-source-research.yml` now
+asks for it with `--group legacy`. `requirements.txt` regenerated.
+
+`.dockerignore` claimed everything under `.local` was excluded, then listed the
+paths that happened to be large — **missing `.local/evidence/snapshots/`, 26 GB**.
+`fly deploy` uploads the build context, so the first deploy would have tried to
+send about 27 GB. It is now an allowlist: deny `.local/**`, re-admit only
+`.local/client-evidence`. Both negations are required, because `.local/**` does
+not match `.local` itself. Also excluded: `.superpowers/`, which carries a live
+loopback session key in `*/state/server-info`, and `scripts/*` bar
+`run_container_preview.py`.
+
+`docs/CLIENT_RELEASE.md` said to promote the client snapshot into
+`.local/evidence`. Promotion rewrites `active.json` in whatever root it is given,
+so that would have made a **client-scoped** snapshot active in the development
+root, where `preview/app.py` refuses to start because it expects full scope — and
+it would have invalidated `verified.json`, costing another pass over 9.25 GB. The
+document now promotes into `.local/client-evidence` and states that the path is a
+whole **evidence root**, not a snapshot directory: the store resolves
+`<root>/snapshots/<id>` and refuses a snapshot directory holding anything but its
+three files.
+
+### The rebuild, still in flight
+
+`.build-3defbb3f6ecb476fa23dab81cb5d3409`, started 09:05, worker PID 46340 alive
+with 5,250 s CPU at 11:20. At 12:03 the outer `evidence.sqlite3` was 9.45 GB with
+a 470 MB WAL — that is `_replay_canonically`, the last long phase. Read progress
+from the filesystem: `.scratch/` disappearing means `_finalize_database`
+(checkpoint, `journal_mode = DELETE`, VACUUM) has started; the staging directory
+being **renamed** to `candidates/snapshot-<NEW>` means it is done.
+`.local/rebuild-20260923.out.log` is written only at the very end, so 0 bytes
+means "still running", never "failed silently". Expect 13:20-14:00.
+
+**The new snapshot id will differ** from `snapshot-38878384744b4c9d310f`: the
+active manifest carries `reconciliation_method: dependency-precedence-v1` while
+`source_registry.py:30` now says `single-coverage-corroboration-v2`, and
+`snapshot_id_for` hashes the versions.
+
+**GB and DE are still doubled until this is promoted. Do not quote either.**
+
+### Exact next actions
+
+1. **Wait for the rebuild.** Then gate it **on the candidate**, which skips the
+   343 s verify: `replay_registration_reconciliation.py --candidate
+   .local/evidence/candidates/snapshot-<NEW> --geography GB --geography DE
+   --horizon 2028 --check-projection`. Require `gate: pass`, exit 0, GB 2018
+   about 2.37 M (from 4,696,855) and DE 2024 about 2.8 M (from 5,526,435), every
+   year `corrected/actual <= 1.2`. **If it fails, stop: do not promote, derive or
+   deploy.** `hist/act` staying near 1.98 for GB 2018 is the historical rule being
+   reported, not a failure.
+2. `build_evidence_snapshot.py promote --root .local/evidence --snapshot <NEW>`
+   (three full sha256 passes plus a 9.25 GB copy; 20-30 min), then
+   `mark-verified --root .local/evidence` — the current `verified.json` names the
+   old snapshot and goes stale the moment step 2 lands.
+3. `build_client_snapshot.py --root .local/evidence derive --active`. Require
+   `scope client-release`, `observations 0`, size about 1.95 GB.
+4. Promote it into its **own** root per `docs/CLIENT_RELEASE.md`, then
+   **pre-flight it before paying for an upload** — the highest-value step in the
+   sequence, reproducing `Dockerfile:79-88` in 90 s:
+   `build_evidence_snapshot.py verify --root .local/client-evidence`, then open it
+   with `ICOR_EVIDENCE_ACTIVE_ROOT` set and assert it prints
+   `client-release snapshot-<CLIENT>`.
+5. flyctl: `iwr https://fly.io/install.ps1 | iex` unpacks to
+   `%USERPROFILE%\.fly\bin`; `fly auth login`; `fly apps create
+   icor-client-preview` (**never `fly launch`** — it rewrites `fly.toml` and would
+   discard the env block and the health-check tuning); `fly secrets import` with
+   `ICOR_PREVIEW_USERS` as a **JSON object** wrapping the argon2id hash (both
+   generator subcommands print a *labelled* line — strip the label), a session
+   secret (43 chars decoding to exactly the 32-byte minimum, do not truncate) and
+   a 32+ character `ICOR_EXPORT_TOKEN`. Never echo them.
+6. `fly deploy --remote-only`, detached. **Watch the reported context size before
+   the upload starts** — it must be about 2 GB, not 27.
+7. `verify_client_release.py --url https://icor-client-preview.fly.dev
+   --username client-reviewer`, password on stdin. Require `"failed": 0`.
+8. Repeat the filtered/unfiltered score comparison against the Fly URL, so the
+   whole-market score is proven in the artifact actually shipped.
+
+### Open risks and unknowns, stated rather than guessed
+
+- **Disk. 54 GB free of 476 GB, and the sequence needs roughly 32 GB of transient
+  headroom.** `.local/evidence/candidates/snapshot-38878384744b4c9d310f` is a
+  **byte-identical duplicate** of the promoted, active snapshot — verified: same
+  `snapshot_id`, same `database_sha256` (`4042e5db...72072f`), same
+  9,250,779,136 bytes, same manifest hash. Deleting it frees 9.25 GB and is safe.
+  **Waiting on Lucas.** The two superseded snapshots (`snapshot-7e0eb1d2...`,
+  `snapshot-a20e1c00...`, about 17 GB) free more, but only after the new one is
+  promoted and verified — they are the rollback.
+- **Fly cost.** `shared-cpu-2x` / 2 GB with `auto_stop_machines = false` bills
+  continuously by design: roughly **$12-14/month**, card required, and assume no
+  free allowance. Confirm against Fly's pricing page and `fly platform vm-sizes`
+  before `fly apps create`. Destroy the app when the review window closes.
+- **2 GB RAM is enough**, and the reason is better than "probably": the snapshot
+  is `journal_mode = delete` (verified — `snapshot_build.py:456-460` sets it at
+  the end of every build), so a read-only open needs no writable `-shm`; there is
+  no `mmap_size` pragma anywhere, so the file is never mapped; and a trusted open
+  hashes only `snapshot.json`, 4,890 bytes. The constraints are CPU and `/tmp`,
+  not memory — `base_atoms AS MATERIALIZED` is 883,172 rows unfiltered and
+  `SQLITE_TMPDIR=/tmp`. Check `fly ssh console -C "df -h /tmp"` after deploying.
+- **`fly deploy --remote-only` needs outbound UDP** for WireGuard, which a work
+  laptop often blocks. Symptom: a hang at `Waiting for remote builder`. Escapes:
+  `fly wireguard websockets enable` (WSS/443) or `fly deploy --depot`. **Flag
+  spellings unverified** against the flyctl version to be installed — check
+  `--help` immediately after installing.
+- **Whether flyctl re-uploads the full ~2 GB context on every deploy.** Measure
+  deploy #2. If it does, move the snapshot to object storage fetched at build
+  time before a third attempt; reordering `COPY`s cannot help, because the upload
+  happens before any layer-cache decision.
+- **`scripts/run_container_preview.py` has never run anywhere.** It cannot run on
+  Windows: `runner.py:144` returns `command[0] = "uvicorn"` and the script joins
+  it to the interpreter directory with no `.exe`, so `os.execv` raises
+  `FileNotFoundError`, which is not in the caught tuple. It is the container
+  ENTRYPOINT. A local container-mode smoke test must invoke uvicorn directly.
+- **The Dockerfile has still never been built.** Likeliest first failures, in
+  order: a missing or wrongly shaped `.local/client-evidence`; the
+  `manifest.scope == 'client-release'` assertion; `tsc --noEmit` in the web stage;
+  `uv sync --locked` drift; and `ICOR_PREVIEW_TRUSTED_PROXIES`, which
+  `run_container_preview.py` reads bare, so an unset value crashes at startup.
+- **Unchanged from before:** `production_coverage` holds 0 rows, so "Exact ICOR
+  coverage" is structurally 0 and the 20-point readiness half cannot move.
+  `_TARGETS` still hardcodes 8 of the 30 markets with data. `ConfigurationDetail`
+  and `OpportunityDrillDown` remain unreachable. `AppShell` still navigates with
+  `<a href>`. Windows CI is still red for an unidentified reason, so CI is not a
+  safety net.
+- **Pre-existing, out of scope, worth a ticket:** `contributions()` joins
+  `opportunity_cohort_attribution` unconditionally with no
+  `_materialized_attribution` guard, so it would fail on a snapshot lacking the
+  table. And the Model-search page's own percentile (`_demand_rank`, basis
+  `european_opportunity_p50_at_horizon`) ranks over EU27 at **one** horizon and at
+  **model** level, so it will not equal the opportunities score for the same car.
+  Aligning them means choosing one grouping level for both, which is a product
+  decision.
+
+### Processes running at the time of writing
+
+- Rebuild: PID 5688, worker 46340, detached. Closing the terminal does not stop it.
+- Stale dev API on `127.0.0.1:8000` (PID 42260) and Vite on `:5173` (PID 34028),
+  both started 2026-09-22 14:16 and therefore **predating every commit from
+  2026-09-23**. They ignore `q` and report the pre-fold 143,888 rows. Nothing they
+  return is evidence. Restart before any local verification.
