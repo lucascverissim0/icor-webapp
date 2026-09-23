@@ -17,6 +17,7 @@ from icor.application.opportunities import (
     OpportunityPage,
     OpportunityQuery,
     OpportunityRow,
+    OpportunitySort,
     OpportunitySummary,
     _coverage_status,
     world_region_for_market,
@@ -27,7 +28,12 @@ from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
 from icor.evidence.normalization import source_vehicle_display_label
+from icor.evidence.vehicle_identity import VehicleIdentityIndex
 from icor.generations.public_catalog import ranking_public_generation_catalog
+from icor.infrastructure.snapshot_identity import (
+    load_identity_index,
+    materialize_identity_table,
+)
 from icor.infrastructure.snapshot_planner_repository import (
     SnapshotPlannerRepository,
     _cohort_attribution_ctes,
@@ -35,6 +41,21 @@ from icor.infrastructure.snapshot_planner_repository import (
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 _GENERATION_REGISTRY = "public-generation-registry-v2"
+
+
+_SORT_ORDERS: dict[OpportunitySort, str] = {
+    # Every order ends in the same tie-break so a page boundary cannot show one
+    # row twice and hide another.
+    OpportunitySort.SCORE: (
+        "total_points DESC, base_units DESC, brand, model, model_year"
+    ),
+    OpportunitySort.DEMAND: (
+        "base_units DESC, total_points DESC, brand, model, model_year"
+    ),
+    OpportunitySort.VEHICLE: (
+        "brand COLLATE NOCASE, model COLLATE NOCASE, model_year, total_points DESC"
+    ),
+}
 
 
 class SnapshotOpportunityRepository:
@@ -64,6 +85,7 @@ class SnapshotOpportunityRepository:
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
+        self._identity_index: VehicleIdentityIndex | None = None
         with sqlite3.connect(
             f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
         ) as connection:
@@ -99,7 +121,7 @@ class SnapshotOpportunityRepository:
                     SUM(CASE WHEN demand_percentile >= 0.75
                         THEN uncovered_units ELSE 0 END) OVER () summary_high_uncovered
                 FROM scored
-                ORDER BY total_points DESC, base_units DESC, brand, model, model_year
+                ORDER BY {_SORT_ORDERS[query.sort]}
                 LIMIT ? OFFSET ?""",
                 (*parameters, query.page_size, offset),
             ).fetchall()
@@ -198,10 +220,10 @@ class SnapshotOpportunityRepository:
         identity = _decode_group_id(group_id, query.group_by)
         if identity is None:
             return ()
-        clauses = ["LOWER(TRIM(v.make)) = LOWER(TRIM(?))"]
+        clauses = ["ident.brand = ?"]
         parameters: list[object] = [identity[0]]
         if query.group_by is not OpportunityGroupBy.BRAND:
-            clauses.append("LOWER(TRIM(v.model)) = LOWER(TRIM(?))")
+            clauses.append("ident.model = ?")
             parameters.append(identity[1])
         if query.group_by is OpportunityGroupBy.MODEL_YEAR:
             clauses.append("a.registration_cohort_year = ?")
@@ -228,6 +250,8 @@ class SnapshotOpportunityRepository:
                 FROM opportunity_estimate o
                 JOIN canonical_vehicle v
                     ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN temp.canonical_identity ident
+                    ON ident.vehicle_id = o.canonical_vehicle_id
                 JOIN generation_entry g
                     ON g.generation_id = o.generation_id
                 JOIN opportunity_cohort_attribution a
@@ -355,8 +379,8 @@ class SnapshotOpportunityRepository:
             return ()
         clauses: list[str] = []
         parameters: list[object] = []
-        brand_expression = "v.make"
-        model_expression = "v.model"
+        brand_expression = "ident.brand"
+        model_expression = "ident.model"
         identity_join = ""
         if self._verified_only:
             identity_join = """JOIN temp.reviewed_vehicle_year reviewed
@@ -390,6 +414,8 @@ class SnapshotOpportunityRepository:
                     SUM(CAST(c.active_fleet_p50 AS NUMERIC)) estimated_fleet_units
                 FROM opportunity_estimate o
                 JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN temp.canonical_identity ident
+                    ON ident.vehicle_id = o.canonical_vehicle_id
                 JOIN opportunity_input i ON i.opportunity_id = o.opportunity_id
                 JOIN cohort_estimate c ON c.cohort_id = i.cohort_id
                 {identity_join}
@@ -482,6 +508,16 @@ class SnapshotOpportunityRepository:
                 f"o.horizon_year IN ({', '.join('?' for _ in query.horizons)})"
             )
             parameters.extend(query.horizons)
+        text = query.text.strip()
+        if text:
+            # Matched against the canonical labels rather than the raw ones, so
+            # searching "volkswagen" finds the rows filed under "vw" too.
+            clauses.append(
+                "(ident.brand LIKE ? ESCAPE '@' "
+                "OR ident.model LIKE ? ESCAPE '@')"
+            )
+            pattern = f"%{_escape_like(text)}%"
+            parameters.extend((pattern, pattern))
         where = " AND ".join(clauses) if clauses else "1 = 1"
         model = "model" if query.group_by is not OpportunityGroupBy.BRAND else "NULL"
         year = "model_year" if query.group_by is OpportunityGroupBy.MODEL_YEAR else "NULL"
@@ -565,8 +601,8 @@ class SnapshotOpportunityRepository:
             else "0"
         )
         identity_join = ""
-        brand_expression = "v.make"
-        model_expression = "v.model"
+        brand_expression = "ident.brand"
+        model_expression = "ident.model"
         if self._verified_only:
             identity_join = """JOIN temp.reviewed_vehicle_year reviewed
                 ON reviewed.brand = LOWER(TRIM(v.make))
@@ -584,6 +620,8 @@ class SnapshotOpportunityRepository:
                 {upside_units} upside_units
             FROM opportunity_estimate o
             JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+            JOIN temp.canonical_identity ident
+                ON ident.vehicle_id = o.canonical_vehicle_id
             {identity_join}
             {lineage_joins}
             WHERE {where}
@@ -650,6 +688,9 @@ class SnapshotOpportunityRepository:
                 for record in self._worked_models.records
             ),
         )
+        if self._identity_index is None:
+            self._identity_index = load_identity_index(connection)
+        materialize_identity_table(connection, self._identity_index)
         if self._verified_only:
             connection.execute(
                 "CREATE TEMP TABLE reviewed_vehicle_year "
@@ -784,6 +825,14 @@ class SnapshotOpportunityRepository:
             evidence_status=EvidenceStatus.VALIDATED,
             data_version=self.snapshot_id,
         )
+
+
+def _escape_like(value: str) -> str:
+    """Make a user's literal text mean itself inside a LIKE pattern."""
+
+    for character in ("@", "%", "_"):
+        value = value.replace(character, "@" + character)
+    return value
 
 
 def _encode_group_id(

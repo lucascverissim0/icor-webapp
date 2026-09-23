@@ -87,10 +87,29 @@ class OpportunityRepository(Protocol):
     ) -> tuple[OpportunityDrillDownRow, ...]: ...
 
 
+# A search box, not a query language: long input buys nothing and is a way to
+# make the database do unbounded work on an unauthenticated route.
+_MAX_TEXT_LENGTH = 64
+
+
 class OpportunityGroupBy(StrEnum):
     BRAND = "brand"
     MODEL = "model"
     MODEL_YEAR = "model_year"
+
+
+class OpportunitySort(StrEnum):
+    """The orders a ranking may be read in.
+
+    Score is the product's own ranking and stays the default. Demand answers
+    "which is the biggest", which the score deliberately does not, because it
+    mixes demand with readiness. Vehicle is for finding a known car rather than
+    discovering one.
+    """
+
+    SCORE = "score"
+    DEMAND = "demand"
+    VEHICLE = "vehicle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,12 +117,16 @@ class OpportunityQuery:
     group_by: OpportunityGroupBy
     markets: tuple[str, ...] = ()
     horizons: tuple[int, ...] = ()
+    text: str = ""
+    sort: OpportunitySort = OpportunitySort.SCORE
     page: int = 1
     page_size: int = 25
 
     def __post_init__(self) -> None:
         if self.page < 1 or not 1 <= self.page_size <= 100:
             raise ValueError("opportunity pagination is invalid")
+        if len(self.text) > _MAX_TEXT_LENGTH:
+            raise ValueError("opportunity search text is too long")
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +205,66 @@ class _DemandAtom:
     coverage_status: CoverageStatus
 
 
+def _matching_text(
+    rows: tuple[OpportunityRow, ...], text: str
+) -> tuple[OpportunityRow, ...]:
+    """Narrow a ranking to the vehicles whose visible labels contain the text."""
+
+    needle = text.strip().casefold()
+    if not needle:
+        return rows
+    return tuple(
+        row
+        for row in rows
+        if needle in row.brand.casefold()
+        or (row.model is not None and needle in row.model.casefold())
+    )
+
+
+def _sorted_rows(
+    rows: tuple[OpportunityRow, ...], sort: OpportunitySort
+) -> tuple[OpportunityRow, ...]:
+    """Order a ranking, ending every order on the same total tie-break.
+
+    A partial order would let one row appear on two pages while another appeared
+    on none, because the page boundary would fall in an arbitrary place.
+    """
+
+    if sort is OpportunitySort.DEMAND:
+        return tuple(
+            sorted(
+                rows,
+                key=lambda row: (
+                    -row.demand.base_units,
+                    -row.score.total_points,
+                    row.group_id,
+                ),
+            )
+        )
+    if sort is OpportunitySort.VEHICLE:
+        return tuple(
+            sorted(
+                rows,
+                key=lambda row: (
+                    row.brand.casefold(),
+                    (row.model or "").casefold(),
+                    row.model_year if row.model_year is not None else 0,
+                    row.group_id,
+                ),
+            )
+        )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                -row.score.total_points,
+                -row.demand.base_units,
+                row.group_id,
+            ),
+        )
+    )
+
+
 class OpportunityService:
     def __init__(
         self,
@@ -225,12 +308,8 @@ class OpportunityService:
             self._row(group_id, group_atoms, query.group_by, scores[group_id])
             for group_id, group_atoms in grouped.items()
         )
-        rows = tuple(
-            sorted(
-                rows,
-                key=lambda row: (-row.score.total_points, -row.demand.base_units, row.group_id),
-            )
-        )
+        rows = _matching_text(rows, query.text)
+        rows = _sorted_rows(rows, query.sort)
         total = len(rows)
         start = (query.page - 1) * query.page_size
         return OpportunityPage(

@@ -29,6 +29,7 @@ from icor.application.opportunities import (
     OpportunityGroupBy,
     OpportunityQuery,
     OpportunityService,
+    OpportunitySort,
 )
 
 router = APIRouter()
@@ -55,11 +56,18 @@ def _query(
     horizon: list[int] | None,
     page: int = 1,
     page_size: int = 25,
+    text: str = "",
+    sort: OpportunitySort = OpportunitySort.SCORE,
 ) -> OpportunityQuery:
+    # The detail routes resolve one group that the caller already holds, so they
+    # leave text and sort at their defaults: narrowing or reordering a lookup of
+    # a known row could only hide it.
     return OpportunityQuery(
         group_by=group_by,
         markets=tuple(market or ()),
         horizons=tuple(horizon or ()),
+        text=text,
+        sort=sort,
         page=page,
         page_size=page_size,
     )
@@ -92,6 +100,8 @@ def opportunities(
     horizon: Annotated[list[int] | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+    q: Annotated[str, Query(max_length=64)] = "",
+    sort: OpportunitySort = OpportunitySort.SCORE,
 ) -> OpportunityPageResponse | JSONResponse:
     if (
         getattr(request.app.state, "client_release", False)
@@ -106,7 +116,9 @@ def opportunities(
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
-    result = service.list(_query(group_by, market, horizon, page, page_size))
+    result = service.list(
+        _query(group_by, market, horizon, page, page_size, q, sort)
+    )
     return OpportunityPageResponse.model_validate(result)
 
 

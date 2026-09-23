@@ -219,3 +219,80 @@ def test_missing_group_drill_down_is_typed_404(client: TestClient) -> None:
     fleet = client.get("/api/v1/opportunities/missing/fleet?group_by=brand")
     assert fleet.status_code == 404
     assert fleet.json()["code"] == "opportunity_not_found"
+
+
+def test_search_text_narrows_the_ranking_and_its_summary(client: TestClient) -> None:
+    """A filtered page must not report the unfiltered total underneath it."""
+    everything = client.get("/api/v1/opportunities?group_by=model").json()
+    brand = everything["items"][0]["brand"]
+
+    narrowed = client.get(f"/api/v1/opportunities?group_by=model&q={brand}").json()
+
+    assert narrowed["total"] >= 1
+    assert narrowed["total"] <= everything["total"]
+    assert all(
+        brand.casefold() in item["brand"].casefold()
+        or brand.casefold() in (item["model"] or "").casefold()
+        for item in narrowed["items"]
+    )
+    assert narrowed["summary"]["base_units"] <= everything["summary"]["base_units"]
+
+
+def test_search_text_that_matches_nothing_is_an_empty_page_not_an_error(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/opportunities?group_by=model&q=zzzznotavehicle")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+    assert body["summary"]["base_units"] == 0
+
+
+def test_search_text_is_a_literal_not_a_wildcard(client: TestClient) -> None:
+    """`%` must match a percent sign, not every row."""
+    response = client.get("/api/v1/opportunities?group_by=model&q=%25")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+
+
+def test_overlong_search_text_is_refused(client: TestClient) -> None:
+    response = client.get(f"/api/v1/opportunities?group_by=model&q={'a' * 65}")
+
+    assert response.status_code == 422
+
+
+def test_sort_by_demand_orders_by_units_not_score(client: TestClient) -> None:
+    body = client.get("/api/v1/opportunities?group_by=model&sort=demand").json()
+
+    units = [item["demand"]["base_units"] for item in body["items"]]
+    assert units == sorted(units, reverse=True)
+
+
+def test_sort_by_vehicle_orders_alphabetically(client: TestClient) -> None:
+    body = client.get("/api/v1/opportunities?group_by=model&sort=vehicle").json()
+
+    labels = [
+        (item["brand"].casefold(), (item["model"] or "").casefold())
+        for item in body["items"]
+    ]
+    assert labels == sorted(labels)
+
+
+def test_default_sort_is_still_the_score(client: TestClient) -> None:
+    default = client.get("/api/v1/opportunities?group_by=model").json()
+    explicit = client.get("/api/v1/opportunities?group_by=model&sort=score").json()
+
+    assert [item["group_id"] for item in default["items"]] == [
+        item["group_id"] for item in explicit["items"]
+    ]
+    points = [item["score"]["total_points"] for item in default["items"]]
+    assert points == sorted(points, reverse=True)
+
+
+def test_an_unknown_sort_is_refused(client: TestClient) -> None:
+    response = client.get("/api/v1/opportunities?group_by=model&sort=cheapest")
+
+    assert response.status_code == 422

@@ -12,6 +12,7 @@ from icor.application.opportunities import (
     OpportunityFleetEstimate,
     OpportunityGroupBy,
     OpportunityQuery,
+    OpportunitySort,
 )
 from icor.application.ranking import DemandReadinessV1
 from icor.application.worked_models import IcorWorkedModelCatalog
@@ -643,3 +644,123 @@ def test_snapshot_scope_and_row_scope_provenance_stay_distinct(
     assert record.row_methods is not None
     assert record.row_methods.hazard_method == "hazard-v1"
     assert record.row_methods.uncertainty_method == "uncertainty-v1"
+
+
+def _opportunity_repository(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> SnapshotOpportunityRepository:
+    return SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+
+
+def test_sqlite_search_text_narrows_the_ranking(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = _opportunity_repository(sqlite_repository, tmp_path)
+
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="golf")
+    )
+
+    assert page.total == 1
+    assert page.items[0].model == "Golf"
+    assert page.summary.base_units == 13
+
+
+def test_sqlite_search_text_matches_the_brand_as_well_as_the_model(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = _opportunity_repository(sqlite_repository, tmp_path)
+
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="volkswagen")
+    )
+
+    assert page.total == 2
+
+
+def test_sqlite_search_text_is_a_literal_not_a_wildcard(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = _opportunity_repository(sqlite_repository, tmp_path)
+
+    assert (
+        repository.search(
+            OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="%")
+        ).total
+        == 0
+    )
+    assert (
+        repository.search(
+            OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="_olf")
+        ).total
+        == 0
+    )
+
+
+def test_sqlite_sort_by_demand_puts_the_largest_first(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = _opportunity_repository(sqlite_repository, tmp_path)
+
+    page = repository.search(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL, sort=OpportunitySort.DEMAND
+        )
+    )
+
+    units = [row.demand.base_units for row in page.items]
+    assert units == sorted(units, reverse=True)
+
+
+def test_sqlite_sort_by_vehicle_is_alphabetical(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = _opportunity_repository(sqlite_repository, tmp_path)
+
+    page = repository.search(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL, sort=OpportunitySort.VEHICLE
+        )
+    )
+
+    assert [row.model for row in page.items] == ["Golf", "Polo"]
+
+
+def test_sqlite_ranking_groups_publisher_spellings_into_one_vehicle(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    """`VW Golf` and `Volkswagen Golf` are one car, so they are one row."""
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "INSERT INTO canonical_vehicle VALUES (?, ?, ?)",
+            ("vehicle-golf-vw", "VW", "Golf"),
+        )
+        connection.execute(
+            "INSERT INTO generation_entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "generation-golf-vw", "Golf generation", "2020-01-01", "2024-12-01",
+                "estimated", "Hatchback", None, '["estimated"]', '["obs"]',
+            ),
+        )
+        connection.execute(
+            "INSERT INTO opportunity_estimate VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "opportunity-golf-vw", "generation-golf-vw", "vehicle-golf-vw",
+                "DE", 2028, "3", "5", "8", "90",
+                "hazard-v1", "forecast-v1", "uncertainty-v1",
+                "low", '["assumption"]', '["reason"]',
+            ),
+        )
+
+    repository = _opportunity_repository(sqlite_repository, tmp_path)
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="golf")
+    )
+
+    assert page.total == 1
+    assert page.items[0].demand.base_units == 18

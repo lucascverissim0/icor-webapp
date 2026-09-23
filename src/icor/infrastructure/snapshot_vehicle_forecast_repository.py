@@ -28,6 +28,7 @@ from icor.generations.public_catalog import (
     VehicleGenerationProfile,
     ranking_public_generation_catalog,
 )
+from icor.infrastructure.snapshot_identity import load_identity_index
 
 _GENERATION_REGISTRY = "public-generation-registry-v2"
 _EU27 = frozenset(
@@ -630,30 +631,10 @@ class SnapshotVehicleForecastRepository:
         )
 
     def _identity_index(self, connection: sqlite3.Connection) -> VehicleIdentityIndex:
-        """Build the canonical make/model index once per repository instance.
-
-        Both subqueries are aggregated before they meet, because joining
-        `opportunity_estimate` straight onto `cohort_estimate` fans out to one
-        row per opportunity-cohort pair and multiplies the registration volume
-        that the brand ranking depends on.
-        """
+        """Build the canonical make/model index once per repository instance."""
 
         if self._index is None:
-            self._index = VehicleIdentityIndex.from_rows(
-                connection.execute(
-                    """SELECT v.vehicle_id, v.make, v.model, COALESCE(c.registrations, 0)
-                    FROM canonical_vehicle v
-                    JOIN (
-                        SELECT DISTINCT canonical_vehicle_id AS vehicle_id
-                        FROM opportunity_estimate
-                    ) o ON o.vehicle_id = v.vehicle_id
-                    LEFT JOIN (
-                        SELECT canonical_vehicle_id AS vehicle_id,
-                            SUM(CAST(registrations AS REAL)) AS registrations
-                        FROM cohort_estimate GROUP BY canonical_vehicle_id
-                    ) c ON c.vehicle_id = v.vehicle_id"""
-                ).fetchall()
-            )
+            self._index = load_identity_index(connection)
         return self._index
 
     def _brands(
