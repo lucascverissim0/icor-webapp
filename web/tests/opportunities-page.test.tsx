@@ -377,3 +377,29 @@ describe('OpportunitiesWorkbench filters', () => {
     }
   })
 })
+
+describe('score scope disclosure', () => {
+  it('says nothing about scope when the ranking is unfiltered', async () => {
+    renderOpportunities(successFetcher())
+    await screen.findByText(/How the opportunity score is calculated/i)
+
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it('warns that scores are relative once the ranking is narrowed', async () => {
+    const client = new PlannerApiClient(successFetcher())
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders queryClient={queryClient}>
+        <OpportunitiesWorkbench
+          apiClient={client}
+          onOpenDetails={vi.fn()}
+          onSearchChange={vi.fn()}
+          search={{ groupBy: 'model_year', page: 1, q: 'Golf' }}
+        />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByRole('note')).toHaveTextContent(/relative to the rows currently shown/i)
+  })
+})

@@ -233,6 +233,10 @@ export function OpportunitiesWorkbench({
     queryKey: queryKeys.opportunities(opportunityQuery),
     queryFn: ({ signal }) => apiClient.opportunities(opportunityQuery, signal),
   })
+  const narrowed =
+    (search.market?.length ?? 0) > 0 ||
+    (search.horizon?.length ?? 0) > 0 ||
+    Boolean(search.q)
   const registrationSummary = useQuery({
     queryKey: ['registrations', 'summary'],
     queryFn: () => apiClient.registrationSummary(),
@@ -270,6 +274,14 @@ export function OpportunitiesWorkbench({
           <p><strong>Readiness points = (exact units + 0.5 × fallback units) ÷ total units × 20</strong><span>Exact ICOR configuration coverage gets full weight. Vehicle-year and legacy worked-model matches get half weight. Uncovered units get zero.</span></p>
           <p><strong>Total score = demand points + readiness points</strong><span>Maximum 100 points: 80 for market demand and 20 for ICOR readiness.</span></p>
         </div>
+        {narrowed && (
+          <p className="score-method__scope" role="note">
+            These scores are relative to the rows currently shown. The demand
+            percentile is measured against this filtered set, not against every
+            vehicle in the snapshot, so a score here is not comparable with one
+            from an unfiltered ranking.
+          </p>
+        )}
       </section>
 
       {invalidKeys.length > 0 && (
