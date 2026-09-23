@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-09-14
+Last updated: 2026-09-23
 
 ## Project objective
 
@@ -12,25 +12,31 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
 
 - GitHub owner: `lucascverissim0`
 - Repository: `lucascverissim0/icor-webapp` (public)
-- Local clone: `C:\Users\LucasCravoVERISSIMO\icor-webapp`
 - Remote: `https://github.com/lucascverissim0/icor-webapp.git`
-- Production branch: `main`
-- Development branch: `development/windshield-demand-platform`
-- Review baseline HEAD: `1ba1d7c`
-- At the end of the initial review, the tracked worktree was clean.
-- Existing Windows Git Credential Manager credentials identified the account as `lucascverissim0` without exposing the token.
-- All future Git network commands must be non-interactive. Use `GCM_INTERACTIVE=never`; if authentication expires, stop rather than triggering an account-selection pop-up.
-- Clearing a Codex conversation or terminal screen does not normally erase Windows Credential Manager credentials. Credentials can still expire or be revoked externally.
-- Protected local production checkout: `C:\Users\LucasCravoVERISSIMO\icor-webapp`, branch `main`, reset to and tracking `origin/main` at `1ba1d7c` on 2026-08-25.
-- Long-lived development worktree: `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`, branch `development/windshield-demand-platform`, created at `f5d0bf4` on 2026-08-25.
-- All subsequent edits, tests, local servers, and commits must run from the development worktree. Treat the production checkout as read-only. Merging to `main`, pushing, or deploying requires Lucas's explicit authorization after final review.
+- Production branch: `main` (review baseline `1ba1d7c`, still untouched on the remote).
+- Development branch: `development/windshield-demand-platform`; the newest work is on
+  `fix/client-release-production`, which contains all of it (224 commits ahead of `main`).
+- **Active machine since 2026-09-23: Lucas's Mac.** A single clone at `~/ICOR`, branch
+  `fix/client-release-production`. The Windows machine is retired.
+- Git authentication on the Mac: GitHub CLI `gh` as `lucascverissim0`, used by git as the
+  credential helper. `gh` also holds an unrelated work account (`lverissimo-01`); check
+  `gh auth status` shows `lucascverissim0` active before any network write. If
+  authentication is missing or expired, stop and tell Lucas instead of prompting.
+- Commits on the Mac use the repository-local identity `Lucas Cravo Verissimo
+  <lucas.c.verissimo@gmail.com>`. The commits made on Windows used `lverissimo@peble.be`.
+- `main` stays the protected production line: merging to `main`, pushing to it, or
+  deploying requires Lucas's explicit authorization after final review.
+- Retired Windows layout, kept for reading older entries: a production checkout at
+  `C:\Users\LucasCravoVERISSIMO\icor-webapp` (`main`), a development worktree at
+  `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`, and Windows Git Credential
+  Manager with `GCM_INTERACTIVE=never`. Older entries that give PowerShell commands or
+  `C:\` paths refer to that machine.
 
 ## User decisions and working rules
 
-- This Codex conversation and all of its terminal work are anchored to
-  `C:\Users\LucasCravoVERISSIMO\icor-webapp-development`. Run every project
-  command from that development worktree; do not switch this conversation to
-  `Video_app`, the protected production checkout, or another repository.
+- Agent sessions and their terminal work are anchored to the project clone (`~/ICOR` on
+  the Mac since 2026-09-23; formerly the Windows development worktree). Run every project
+  command from it; do not switch a session to `Video_app` or another repository.
 - Lucas explicitly requires strict isolation from the simultaneously open Video Flow
   terminal session: do not read, write, launch, reference, or transfer files, context,
   processes, or decisions between that session and this ICOR conversation.
@@ -6074,3 +6080,58 @@ Still true and still deliberate: Docker Desktop has never been installed, so the
 first real `docker build` happens on Fly's builder. The three superseded snapshots
 in `.local/evidence/snapshots/` (25.40 GiB) stay until the deployed URL verifies —
 they are the rollback.
+
+## 2026-09-23 evening — moved to the Mac; the store does not run on macOS yet
+
+Lucas retired the Windows machine. The Mac is now the only active machine; the
+repository-access section above is updated, and `CLAUDE.md` now loads `AGENTS.md`
+for Claude Code sessions.
+
+### State on the Mac
+
+- A fresh clone at `~/ICOR`, on `fix/client-release-production` at `80edb9b`, level
+  with the remote. Repo-local identity `lucas.c.verissimo@gmail.com`.
+- Pushing waits on `gh auth login` as `lucascverissim0`. `gh` was signed in only
+  to the unrelated `lverissimo-01` account.
+- **`.local/` did not come across.** It is git-ignored, so the Mac has neither
+  `.local/client-evidence` (the verified 1.93 GB snapshot
+  `snapshot-b8f742ed9c71f14ac21e`) nor `.local/evidence` (the snapshots kept for
+  rollback), nor the benchmark and verify outputs. Every step in the 09-23
+  afternoon "What is left" list needs the client snapshot. Either copy it from the
+  Windows machine or rebuild it here, and a rebuild needs the fix below.
+- Toolchain: `uv` is installed in `~/.local/bin`, with Python 3.12.14 managed by
+  uv. `uv sync --locked --all-groups` works. **Node, npm, flyctl and Docker are not
+  installed**, and there is no Homebrew. The web package needs Node `^22.22.2 ||
+  ^24.15.0 || >=26`.
+
+### Test run on macOS (`uv run pytest`)
+
+**24 failed, 836 passed, 7 skipped, 4 xfailed, 57 errors.** `uv run ruff check src
+tests` is clean. On Windows the same commit passed 910. There are three causes:
+
+1. `src/icor/infrastructure/release_store.py` `_publish_no_replace` supports only
+   Windows (`MoveFileW`) and Linux (`renameat2` with `RENAME_NOREPLACE`). On macOS
+   it raises "platform lacks non-replacing release publication". macOS equivalent:
+   `renamex_np(from, to, RENAME_EXCL)`. This one cause also produces the 57 errors
+   in `test_snapshot_store.py`, `test_snapshot_build.py` and `evidence/test_validation.py`,
+   plus most of `test_release_store.py`.
+2. `src/icor/infrastructure/snapshot_filesystem.py` `_operation_root_for_handle`
+   anchors the pinned root through `/proc/self/fd/N` or `/dev/fd/N`. macOS's
+   `/dev/fd` cannot be walked as a directory prefix, so it raises "platform cannot
+   anchor the evidence root safely". This is a security design question,
+   not a one-line port. `fcntl(F_GETPATH)` plus the existing identity checks
+   is weaker than walking beneath the descriptor. The alternative is to run
+   store operations in a Linux container, which matches the Fly runtime.
+   Undecided.
+3. `node` is missing, so `scripts/run_planner_dev.py` and `tests/test_e2e_fixture.py` fail.
+
+The clean-room integration failures follow from 1 and 2.
+
+### Next actions
+
+1. Lucas: finish `gh auth login`, then push the doc commit.
+2. Decide how `.local/client-evidence` reaches the Mac: copy it, or rebuild after fixing 1 and 2.
+3. Install Node 22+ and rerun web checks and Playwright.
+4. Choose the macOS approach for cause 2, fix cause 1, and rerun the full suite.
+
+No long-running process is active.

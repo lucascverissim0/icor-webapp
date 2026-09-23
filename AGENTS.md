@@ -55,7 +55,7 @@ Use `SAFE TO CLEAR` only after the handoff has been updated and verified. “Cle
 
 - Never place API keys, access tokens, passwords, credential material, or customer/private data in source files, documentation, commands whose output is shown, commits, or the handoff.
 - Treat the historical OpenAI key exposure documented in the handoff as compromised until Lucas confirms revocation and rotation.
-- Avoid interactive Git credential prompts and account-selection pop-ups. Use existing non-interactive credentials (for example, Git Credential Manager with `GCM_INTERACTIVE=never`) for network operations. If authentication is unavailable or expired, stop and tell Lucas instead of opening an interactive authenticator.
+- Avoid interactive Git credential prompts and account-selection pop-ups. Use existing non-interactive credentials (on the Mac, the `gh` credential helper for account `lucascverissim0`) for network operations. If authentication is unavailable or expired, stop and tell Lucas instead of opening an interactive authenticator.
 - Public read access may be used without credentials. Pushing, deploying, rotating secrets, rewriting history, and other consequential remote actions require explicit user authorization.
 
 ## Engineering workflow
