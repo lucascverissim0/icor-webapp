@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import sqlite3
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
 from pathlib import Path
@@ -22,7 +24,11 @@ from icor.application.opportunities import (
     _coverage_status,
     world_region_for_market,
 )
-from icor.application.ranking import RankingStrategy
+from icor.application.ranking import (
+    DEMAND_POINTS_MAX,
+    READINESS_POINTS_MAX,
+    RankingStrategy,
+)
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
@@ -34,6 +40,12 @@ from icor.infrastructure.snapshot_identity import (
     load_identity_index,
     materialize_identity_table,
 )
+from icor.infrastructure.snapshot_opportunity_universe import (
+    TABLE as _UNIVERSE_TABLE,
+)
+from icor.infrastructure.snapshot_opportunity_universe import (
+    OpportunityUniverse,
+)
 from icor.infrastructure.snapshot_planner_repository import (
     SnapshotPlannerRepository,
     _cohort_attribution_ctes,
@@ -41,6 +53,22 @@ from icor.infrastructure.snapshot_planner_repository import (
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 _GENERATION_REGISTRY = "public-generation-registry-v2"
+
+
+@dataclass(frozen=True, slots=True)
+class _Filter:
+    """A query's predicates, split by what each part of a statement may name."""
+
+    #: Predicates naming only the opportunity estimate, safe anywhere.
+    estimates: str
+    estimate_parameters: tuple[object, ...]
+    #: Every predicate, for the one place the canonical identity is in scope.
+    atoms: str
+    atom_parameters: tuple[object, ...]
+
+
+#: No filter at all: the population a whole-market score is measured against.
+_WHOLE_MARKET = _Filter("1 = 1", (), "1 = 1", ())
 
 
 _SORT_ORDERS: dict[OpportunitySort, str] = {
@@ -87,6 +115,13 @@ class SnapshotOpportunityRepository:
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
         self._identity_index: VehicleIdentityIndex | None = None
         self._facets: tuple[tuple[str, ...], tuple[int, ...]] | None = None
+        # The snapshot is immutable and opened read-only, so a population built
+        # from it never goes stale on its own. Production coverage is the one
+        # mutable input, and the fingerprint below is what notices it moving.
+        self._universes: dict[
+            tuple[OpportunityGroupBy, bool], OpportunityUniverse
+        ] = {}
+        self._coverage_fingerprint: tuple[object, ...] | None = None
         with sqlite3.connect(
             f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
         ) as connection:
@@ -100,19 +135,16 @@ class SnapshotOpportunityRepository:
 
     def search(self, query: OpportunityQuery) -> OpportunityPage:
         offset = (query.page - 1) * query.page_size
-        with self._connect() as connection:
-            has_manual_coverage = bool(
-                connection.execute(
-                    "SELECT EXISTS(SELECT 1 FROM coverage_db.production_coverage)"
-                ).fetchone()[0]
-            )
-            if not has_manual_coverage:
-                cached = self._uncovered_cache.get(query)
-                if cached is not None:
-                    return cached
+        has_manual_coverage = self._refresh_for_coverage()
+        if not has_manual_coverage:
+            cached = self._uncovered_cache.get(query)
+            if cached is not None:
+                return cached
+        include_coverage = has_manual_coverage or bool(self._worked_models.records)
+        universe = self._universe(query.group_by, include_coverage)
+        with self._connect(universe) as connection:
             cte, parameters = self._scored_cte(
-                query,
-                include_coverage=has_manual_coverage or bool(self._worked_models.records),
+                query, include_coverage=include_coverage
             )
             rows = connection.execute(
                 f"""{cte}
@@ -120,7 +152,8 @@ class SnapshotOpportunityRepository:
                     SUM(base_units) OVER () summary_base_units,
                     SUM(exact_units) OVER () summary_exact_units,
                     SUM(CASE WHEN demand_percentile >= 0.75
-                        THEN uncovered_units ELSE 0 END) OVER () summary_high_uncovered
+                        THEN uncovered_units ELSE 0 END) OVER () summary_high_uncovered,
+                    SUM(universe_missing) OVER () summary_universe_missing
                 FROM scored
                 ORDER BY {_SORT_ORDERS[query.sort]}
                 LIMIT ? OFFSET ?""",
@@ -136,13 +169,26 @@ class SnapshotOpportunityRepository:
                         COALESCE(SUM(exact_units), 0) summary_exact_units,
                         COALESCE(SUM(CASE WHEN demand_percentile >= 0.75
                             THEN uncovered_units ELSE 0 END), 0)
-                            summary_high_uncovered
+                            summary_high_uncovered,
+                        COALESCE(SUM(universe_missing), 0)
+                            summary_universe_missing
                     FROM scored""",
                     parameters,
                 ).fetchone()
             warnings = self._integrity_warnings(connection)
+            unranked = int(summary["summary_universe_missing"])
+            if unranked:
+                # Filtering can only remove atoms, so every group on screen
+                # should also be in the unfiltered population. If one is not,
+                # the population is stale rather than the row being wrong, and
+                # saying so beats serving a silent zero.
+                warnings = (
+                    *warnings,
+                    f"{unranked} groups are missing from the ranked market "
+                    "population and are reported unscored.",
+                )
             markets, horizons = self._available_facets(connection)
-        items = tuple(self._row(row, query.group_by) for row in rows)
+        items = tuple(self._row(row, query.group_by, universe) for row in rows)
         total = int(summary["summary_total"])
         result = OpportunityPage(
             items=items,
@@ -164,6 +210,8 @@ class SnapshotOpportunityRepository:
             pages=ceil(total / query.page_size),
             available_markets=markets,
             available_horizons=horizons,
+            demand_population=universe.population,
+            demand_basis=universe.basis,
         )
         if not has_manual_coverage:
             if len(self._uncovered_cache) >= 128:
@@ -175,34 +223,31 @@ class SnapshotOpportunityRepository:
         identity = _decode_group_id(group_id, query.group_by)
         if identity is None:
             return None
-        with self._connect() as connection:
-            has_coverage = bool(
-                connection.execute(
-                    "SELECT EXISTS(SELECT 1 FROM coverage_db.production_coverage)"
-                ).fetchone()[0]
-            )
-            if not has_coverage:
-                for cached_query, cached_page in reversed(
-                    tuple(self._uncovered_cache.items())
+        has_coverage = self._refresh_for_coverage()
+        if not has_coverage:
+            for cached_query, cached_page in reversed(
+                tuple(self._uncovered_cache.items())
+            ):
+                if (
+                    cached_query.group_by is query.group_by
+                    and cached_query.markets == query.markets
+                    and cached_query.horizons == query.horizons
                 ):
-                    if (
-                        cached_query.group_by is query.group_by
-                        and cached_query.markets == query.markets
-                        and cached_query.horizons == query.horizons
-                    ):
-                        cached_row = next(
-                            (
-                                item
-                                for item in cached_page.items
-                                if item.group_id == group_id
-                            ),
-                            None,
-                        )
-                        if cached_row is not None:
-                            return cached_row
+                    cached_row = next(
+                        (
+                            item
+                            for item in cached_page.items
+                            if item.group_id == group_id
+                        ),
+                        None,
+                    )
+                    if cached_row is not None:
+                        return cached_row
+        include_coverage = has_coverage or bool(self._worked_models.records)
+        universe = self._universe(query.group_by, include_coverage)
+        with self._connect(universe) as connection:
             cte, parameters = self._scored_cte(
-                query,
-                include_coverage=has_coverage or bool(self._worked_models.records),
+                query, include_coverage=include_coverage
             )
             clauses = ["brand = ?"]
             identity_parameters: list[object] = [identity[0]]
@@ -216,7 +261,7 @@ class SnapshotOpportunityRepository:
                 f"{cte} SELECT * FROM scored WHERE {' AND '.join(clauses)}",
                 (*parameters, *identity_parameters),
             ).fetchone()
-        return self._row(row, query.group_by) if row is not None else None
+        return self._row(row, query.group_by, universe) if row is not None else None
 
     def contributions(
         self, group_id: str, query: OpportunityQuery
@@ -497,21 +542,110 @@ class SnapshotOpportunityRepository:
             for demand in record.model_year_demand
         }
 
-    def _scored_cte(
-        self, query: OpportunityQuery, *, include_coverage: bool = True
-    ) -> tuple[str, tuple[object, ...]]:
-        clauses: list[str] = []
-        parameters: list[object] = []
+    def warm(self, group_by: OpportunityGroupBy) -> None:
+        """Build the market population before the first visitor waits for it.
+
+        Grouping the whole snapshot takes seconds, so a lazy first request pays
+        for it while somebody watches. A host that keeps one machine running and
+        gives its health check a grace period can pay it at boot instead.
+        """
+
+        has_manual_coverage = self._refresh_for_coverage()
+        self._universe(
+            group_by, has_manual_coverage or bool(self._worked_models.records)
+        )
+
+    def _refresh_for_coverage(self) -> bool:
+        """Report manual coverage, and drop what a change to it invalidates.
+
+        Readiness is part of the whole-market population now, so recording
+        coverage for one vehicle changes the score of vehicles nobody mentioned.
+        Both the population and the cached pages have to go.
+
+        Read through its own connection rather than the snapshot's, so a cached
+        page can be served without opening the snapshot at all.
+        """
+
+        with contextlib.closing(
+            sqlite3.connect(
+                f"{self._coverage_path.resolve().as_uri()}?mode=ro", uri=True
+            )
+        ) as connection:
+            count, updated, newest, oldest = connection.execute(
+                """SELECT COUNT(*), COALESCE(MAX(updated_at), ''),
+                    COALESCE(MAX(coverage_id), ''),
+                    COALESCE(MIN(coverage_id), '')
+                FROM production_coverage"""
+            ).fetchone()
+        fingerprint = (int(count), str(updated), str(newest), str(oldest))
+        if fingerprint != self._coverage_fingerprint:
+            self._universes.clear()
+            self._uncovered_cache.clear()
+            self._coverage_fingerprint = fingerprint
+        return int(count) > 0
+
+    def _universe(
+        self, group_by: OpportunityGroupBy, include_coverage: bool
+    ) -> OpportunityUniverse:
+        """The market this grouping is ranked against.
+
+        Keyed on ``include_coverage`` as well as the grouping level because it
+        decides where a group's units come from — summed cohort attribution or a
+        rounded opportunity quantile — and the two are not interchangeable.
+
+        Built on a connection of its own the first time, because the population
+        has to exist before the connection that will join against it can be set
+        up. That is one extra connection on the cold path, where seconds are
+        already being spent, and none afterwards.
+        """
+
+        key = (group_by, include_coverage)
+        universe = self._universes.get(key)
+        if universe is not None:
+            return universe
+        grouped, parameters = self._grouped_cte(
+            group_by=group_by,
+            include_coverage=include_coverage,
+            predicates=_WHOLE_MARKET,
+            atoms_name="universe_atoms",
+        )
+        assert not parameters, "the whole market binds no filter"
+        with self._connect() as connection:
+            universe = OpportunityUniverse.read(
+                connection,
+                grouped,
+                group_by=group_by,
+                needs_model_year=self._needs_model_year(group_by, include_coverage),
+            )
+        self._universes[key] = universe
+        return universe
+
+    @staticmethod
+    def _filter(query: OpportunityQuery) -> _Filter:
+        """Split a query into what each part of the statement may mention.
+
+        The cohort-attribution CTEs join only the estimate, its inputs and their
+        cohorts, so a predicate naming the canonical identity cannot be repeated
+        inside them — it used to be, which made a searched model-year ranking a
+        malformed statement on any snapshot without a materialized attribution
+        table. They take the estimate-scoped predicates only; the identity match
+        is applied where the identity is in scope.
+        """
+
+        estimate: list[str] = []
+        estimate_parameters: list[object] = []
         if query.markets:
-            clauses.append(
+            estimate.append(
                 f"o.geography IN ({', '.join('?' for _ in query.markets)})"
             )
-            parameters.extend(query.markets)
+            estimate_parameters.extend(query.markets)
         if query.horizons:
-            clauses.append(
+            estimate.append(
                 f"o.horizon_year IN ({', '.join('?' for _ in query.horizons)})"
             )
-            parameters.extend(query.horizons)
+            estimate_parameters.extend(query.horizons)
+        clauses = list(estimate)
+        parameters = list(estimate_parameters)
         text = query.text.strip()
         if text:
             # Matched against the canonical labels rather than the raw ones, so
@@ -522,27 +656,65 @@ class SnapshotOpportunityRepository:
             )
             pattern = f"%{_escape_like(text)}%"
             parameters.extend((pattern, pattern))
-        where = " AND ".join(clauses) if clauses else "1 = 1"
-        model = "model" if query.group_by is not OpportunityGroupBy.BRAND else "NULL"
-        year = "model_year" if query.group_by is OpportunityGroupBy.MODEL_YEAR else "NULL"
-        group_columns = ["brand"]
-        if query.group_by is not OpportunityGroupBy.BRAND:
-            group_columns.append("model")
-        if query.group_by is OpportunityGroupBy.MODEL_YEAR:
-            group_columns.append("model_year")
-        groups = ", ".join(group_columns)
-        needs_model_year = (
+        return _Filter(
+            estimates=" AND ".join(estimate) if estimate else "1 = 1",
+            estimate_parameters=tuple(estimate_parameters),
+            atoms=" AND ".join(clauses) if clauses else "1 = 1",
+            atom_parameters=tuple(parameters),
+        )
+
+    def _needs_model_year(
+        self, group_by: OpportunityGroupBy, include_coverage: bool
+    ) -> bool:
+        return (
             include_coverage
-            or query.group_by is OpportunityGroupBy.MODEL_YEAR
+            or group_by is OpportunityGroupBy.MODEL_YEAR
             or self._verified_only
             or self._model_year_catalog
         )
-        if needs_model_year:
-            cte_prefix = (
-                "WITH "
-                if self._materialized_attribution
-                else f"WITH {_cohort_attribution_ctes(where)}, "
-            )
+
+    def _grouped_cte(
+        self,
+        *,
+        group_by: OpportunityGroupBy,
+        include_coverage: bool,
+        predicates: _Filter,
+        atoms_name: str,
+    ) -> tuple[str, tuple[object, ...]]:
+        """The atoms-to-groups chain, and the values its placeholders need.
+
+        Shared by the ranking and by the whole-market universe, which is this
+        same chain with no filter. One definition of a group key means the two
+        cannot disagree about which rows are one vehicle — including the
+        canonical identity folding that makes ten spellings of Volkswagen one
+        brand.
+
+        A snapshot without a materialized attribution table computes the
+        attribution inline, which binds the estimate-scoped predicates a second
+        time; the parameters are returned beside the text so that no caller can
+        get that count wrong.
+        """
+
+        model = "model" if group_by is not OpportunityGroupBy.BRAND else "NULL"
+        year = "model_year" if group_by is OpportunityGroupBy.MODEL_YEAR else "NULL"
+        group_columns = ["brand"]
+        if group_by is not OpportunityGroupBy.BRAND:
+            group_columns.append("model")
+        if group_by is OpportunityGroupBy.MODEL_YEAR:
+            group_columns.append("model_year")
+        groups = ", ".join(group_columns)
+        parameters = predicates.atom_parameters
+        if self._needs_model_year(group_by, include_coverage):
+            if self._materialized_attribution:
+                cte_prefix = "WITH "
+            else:
+                cte_prefix = (
+                    f"WITH {_cohort_attribution_ctes(predicates.estimates)}, "
+                )
+                parameters = (
+                    *predicates.estimate_parameters,
+                    *predicates.atom_parameters,
+                )
             model_year = "attribution.registration_cohort_year"
             lineage_joins = (
                 "JOIN "
@@ -569,25 +741,25 @@ class SnapshotOpportunityRepository:
                 "CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER)"
             )
         coverage_status = (
-            """CASE
+            f"""CASE
                     WHEN EXISTS (
                         SELECT 1 FROM coverage_db.production_coverage pc
                         WHERE pc.match_type = 'exact_configuration'
-                        AND pc.configuration_id = base_atoms.opportunity_id
-                        AND pc.model_year = base_atoms.model_year
+                        AND pc.configuration_id = {atoms_name}.opportunity_id
+                        AND pc.model_year = {atoms_name}.model_year
                     ) THEN 'exact_covered'
                     WHEN EXISTS (
                         SELECT 1 FROM coverage_db.production_coverage pc
                         WHERE pc.match_type = 'vehicle_year_fallback'
-                        AND pc.brand = base_atoms.brand
-                        AND pc.model = base_atoms.model
-                        AND pc.model_year = base_atoms.model_year
+                        AND pc.brand = {atoms_name}.brand
+                        AND pc.model = {atoms_name}.model
+                        AND pc.model_year = {atoms_name}.model_year
                     ) THEN 'fallback_only'
                     WHEN EXISTS (
                         SELECT 1 FROM temp.icor_worked_model wm
-                        WHERE wm.brand = LOWER(base_atoms.brand)
-                        AND wm.model = LOWER(base_atoms.model)
-                        AND wm.model_year = base_atoms.model_year
+                        WHERE wm.brand = LOWER({atoms_name}.brand)
+                        AND wm.model = LOWER({atoms_name}.model)
+                        AND wm.model_year = {atoms_name}.model_year
                     ) THEN 'fallback_only'
                     ELSE 'uncovered'
                 END"""
@@ -595,11 +767,11 @@ class SnapshotOpportunityRepository:
             else "'uncovered'"
         )
         icor_worked = (
-            """CASE WHEN EXISTS (
+            f"""CASE WHEN EXISTS (
                     SELECT 1 FROM temp.icor_worked_model wm
-                    WHERE wm.brand = LOWER(base_atoms.brand)
-                    AND wm.model = LOWER(base_atoms.model)
-                    AND wm.model_year = base_atoms.model_year
+                    WHERE wm.brand = LOWER({atoms_name}.brand)
+                    AND wm.model = LOWER({atoms_name}.model)
+                    AND wm.model_year = {atoms_name}.model_year
                 ) THEN 1 ELSE 0 END"""
             if include_coverage
             else "0"
@@ -615,7 +787,7 @@ class SnapshotOpportunityRepository:
                     attribution.registration_cohort_year"""
             brand_expression = "reviewed.canonical_brand"
             model_expression = "reviewed.canonical_model"
-        cte = f"""{cte_prefix}base_atoms AS MATERIALIZED (
+        cte = f"""{cte_prefix}{atoms_name} AS MATERIALIZED (
             SELECT o.opportunity_id, {brand_expression} brand,
                 {model_expression} model,
                 {model_year} model_year,
@@ -628,11 +800,11 @@ class SnapshotOpportunityRepository:
                 ON ident.vehicle_id = o.canonical_vehicle_id
             {identity_join}
             {lineage_joins}
-            WHERE {where}
+            WHERE {predicates.atoms}
         ), atoms AS (
-            SELECT base_atoms.*, {coverage_status} coverage_status,
+            SELECT {atoms_name}.*, {coverage_status} coverage_status,
                 {icor_worked} icor_worked
-            FROM base_atoms
+            FROM {atoms_name}
         ), grouped AS (
             SELECT brand, {model} model, {year} model_year,
                 SUM(downside_units) downside_units,
@@ -647,32 +819,47 @@ class SnapshotOpportunityRepository:
                 SUM(CASE WHEN icor_worked = 1 THEN base_units ELSE 0 END)
                     icor_worked_units
             FROM atoms GROUP BY {groups}
-        ), ranked AS (
-            SELECT *, RANK() OVER (ORDER BY base_units) demand_rank,
-                COUNT(*) OVER (PARTITION BY base_units) tie_count,
-                COUNT(*) OVER () group_count
-            FROM grouped
-        ), percentile AS (
-            SELECT *, CASE
-                WHEN base_units = 0 THEN 0.0
-                WHEN group_count = 1 THEN 1.0
-                ELSE (demand_rank - 1 + (tie_count - 1) / 2.0) / (group_count - 1)
-                END demand_percentile
-            FROM ranked
-        ), scored AS (
-            SELECT *, demand_percentile * 80.0 demand_points,
-                CASE WHEN base_units = 0 THEN 0.0
-                    ELSE (exact_units + fallback_units * 0.5) * 1.0 / base_units
-                    END readiness_ratio,
-                CASE WHEN base_units = 0 THEN 0.0
-                    ELSE (exact_units + fallback_units * 0.5) * 20.0 / base_units
-                    END readiness_points,
-                demand_percentile * 80.0 + CASE WHEN base_units = 0 THEN 0.0
-                    ELSE (exact_units + fallback_units * 0.5) * 20.0 / base_units
-                    END total_points
-            FROM percentile
         )"""
-        return cte, tuple(parameters)
+        return cte, parameters
+
+    def _scored_cte(
+        self, query: OpportunityQuery, *, include_coverage: bool = True
+    ) -> tuple[str, tuple[object, ...]]:
+        """Score the filtered rows against the unfiltered market.
+
+        The percentile and the readiness ratio are read from
+        ``temp.opportunity_universe`` rather than computed here, so a filter
+        changes which rows appear and what units they carry but never what a
+        score means. The join is NULL-safe with ``IS`` because ``model`` and
+        ``model_year`` are NULL at the coarser grouping levels, where ``=``
+        would never match and every score would silently be zero.
+        """
+
+        grouped, parameters = self._grouped_cte(
+            group_by=query.group_by,
+            include_coverage=include_coverage,
+            predicates=self._filter(query),
+            atoms_name="base_atoms",
+        )
+        cte = f"""{grouped}, positioned AS (
+            SELECT grouped.*,
+                COALESCE(universe.universe_percentile, 0.0) demand_percentile,
+                universe.universe_rank demand_rank,
+                COALESCE(universe.universe_readiness_ratio, 0.0) readiness_ratio,
+                universe.brand IS NULL universe_missing
+            FROM grouped
+            LEFT JOIN temp.{_UNIVERSE_TABLE} universe
+                ON universe.brand = grouped.brand
+                AND universe.model IS grouped.model
+                AND universe.model_year IS grouped.model_year
+        ), scored AS (
+            SELECT *, demand_percentile * {DEMAND_POINTS_MAX} demand_points,
+                readiness_ratio * {READINESS_POINTS_MAX} readiness_points,
+                demand_percentile * {DEMAND_POINTS_MAX}
+                    + readiness_ratio * {READINESS_POINTS_MAX} total_points
+            FROM positioned
+        )"""
+        return cte, parameters
 
     def _available_facets(
         self, connection: sqlite3.Connection
@@ -701,7 +888,9 @@ class SnapshotOpportunityRepository:
             self._facets = (markets, horizons)
         return self._facets
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(
+        self, universe: OpportunityUniverse | None = None
+    ) -> sqlite3.Connection:
         connection = sqlite3.connect(
             f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
         )
@@ -756,6 +945,10 @@ class SnapshotOpportunityRepository:
                     == 1
                 ),
             )
+        if universe is not None:
+            # Before the pragma: a temp table is a write, even though it never
+            # touches the snapshot. Only the two methods that score pay for it.
+            universe.materialize(connection)
         connection.execute("PRAGMA query_only = ON")
         return connection
 
@@ -781,7 +974,12 @@ class SnapshotOpportunityRepository:
             for row in rows
         )
 
-    def _row(self, row: sqlite3.Row, group_by: OpportunityGroupBy) -> OpportunityRow:
+    def _row(
+        self,
+        row: sqlite3.Row,
+        group_by: OpportunityGroupBy,
+        universe: OpportunityUniverse,
+    ) -> OpportunityRow:
         identity = (row["brand"], row["model"], row["model_year"])
         group_id = _encode_group_id(group_by, identity)
         demand = DemandRange(
@@ -794,10 +992,14 @@ class SnapshotOpportunityRepository:
         uncovered = int(row["uncovered_units"])
         demand_points = float(row["demand_points"])
         readiness_points = float(row["readiness_points"])
+        rank = row["demand_rank"]
         score = OpportunityScore(
             group_id=group_id,
             demand_percentile=float(row["demand_percentile"]),
             demand_points=demand_points,
+            demand_rank=None if rank is None else int(rank),
+            demand_population=universe.population,
+            demand_basis=universe.basis,
             readiness_ratio=float(row["readiness_ratio"]),
             readiness_points=readiness_points,
             total_points=float(row["total_points"]),

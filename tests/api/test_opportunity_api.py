@@ -43,8 +43,46 @@ def test_opportunities_reconcile_and_expose_score_components(client: TestClient)
     assert body["summary"]["base_units"] == 6_560
     assert body["strategy_name"] == "demand_readiness"
     assert body["strategy_version"] == "1"
-    assert body["items"][0]["score"]["demand_points"] <= 80
-    assert body["items"][0]["score"]["readiness_points"] <= 20
+    score = body["items"][0]["score"]
+    assert score["demand_points"] <= 80
+    assert score["readiness_points"] <= 20
+    assert score["demand_population"] == body["demand_population"]
+    assert score["demand_basis"] == body["demand_basis"]
+    assert 1 <= score["demand_rank"] <= score["demand_population"]
+
+
+def test_the_same_group_scores_identically_with_and_without_a_filter(
+    client: TestClient,
+) -> None:
+    """The acceptance test for the whole change.
+
+    A reader who filters a market or types a search still wants the vehicle's
+    real standing in the market. The units on the row follow the filter; the
+    whole score object does not move at all.
+    """
+
+    everything = client.get("/api/v1/opportunities?group_by=model").json()
+    by_group = {item["group_id"]: item for item in everything["items"]}
+    brand = everything["items"][0]["brand"]
+
+    narrowed = client.get(f"/api/v1/opportunities?group_by=model&q={brand}").json()
+
+    assert narrowed["items"]
+    for item in narrowed["items"]:
+        assert item["score"] == by_group[item["group_id"]]["score"], item["group_id"]
+    assert narrowed["demand_population"] == everything["demand_population"]
+
+
+def test_a_page_that_matches_nothing_still_reports_what_scores_compare_against(
+    client: TestClient,
+) -> None:
+    body = client.get(
+        "/api/v1/opportunities?group_by=model&q=zzzznotavehicle"
+    ).json()
+
+    assert body["items"] == []
+    assert body["demand_population"] > 0
+    assert body["demand_basis"]
 
 
 def test_client_release_rejects_groupings_without_generation_identity(

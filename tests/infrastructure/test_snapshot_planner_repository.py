@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import shutil
 import sqlite3
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -14,14 +16,17 @@ from icor.application.opportunities import (
     OpportunityQuery,
     OpportunitySort,
 )
-from icor.application.ranking import DemandReadinessV1
+from icor.application.ranking import DemandReadinessV1, demand_percentile_rank
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
 from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
-from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
+from icor.infrastructure.snapshot_planner_repository import (
+    SnapshotPlannerRepository,
+    _cohort_attribution_ctes,
+)
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 
@@ -538,8 +543,8 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     statements: list[str] = []
     connect = repository._connect
 
-    def traced_connection():  # type: ignore[no-untyped-def]
-        connection = connect()
+    def traced_connection(*args, **kwargs):  # type: ignore[no-untyped-def]
+        connection = connect(*args, **kwargs)
         connection.set_trace_callback(statements.append)
         return connection
 
@@ -558,6 +563,13 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     assert len(scored) == 1
     assert "GROUP BY o.opportunity_id" not in scored[0]
     assert "summary_total" in scored[0]
+    # Grouping the whole snapshot is what makes a score comparable across
+    # filters, and what cannot be afforded per request. It happens once.
+    universe = [
+        statement for statement in statements if "WITH universe_atoms" in statement
+    ]
+    assert len(universe) == 1
+
     base_atoms = scored[0].split("WITH base_atoms AS", 1)[1].split(
         "), atoms AS", 1
     )[0]
@@ -572,6 +584,93 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     assert "cohort_attribution AS" in model_year_cte
     assert "i.input_position = 0" not in model_year_cte
     assert "GROUP BY o.opportunity_id" not in model_year_cte
+
+
+def test_sqlite_scores_are_identical_filtered_and_unfiltered(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    """A filter changes the rows and their units, never what a score means."""
+
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    unfiltered = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100)
+    )
+    by_group = {row.group_id: row for row in unfiltered.items}
+
+    for narrowed in (
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR, text="golf", page_size=100
+        ),
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR,
+            markets=("DE",),
+            page_size=100,
+        ),
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR,
+            sort=OpportunitySort.VEHICLE,
+            page_size=100,
+        ),
+    ):
+        page = repository.search(narrowed)
+        assert page.items, narrowed
+        for row in page.items:
+            assert row.score == by_group[row.group_id].score, (narrowed, row.group_id)
+        assert page.demand_population == unfiltered.demand_population
+
+
+def test_sqlite_detail_scores_identically_while_the_listing_is_searched(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    listed = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100)
+    )
+    selected = listed.items[0]
+
+    detail = repository.get(
+        selected.group_id,
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, text="golf"),
+    )
+
+    assert detail is not None
+    assert detail.score == selected.score
+
+
+def test_sqlite_zero_demand_groups_are_unranked_and_leave_the_population(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    """A vehicle forecasting nothing scores nothing without inflating the rest."""
+
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100)
+    )
+
+    ranked = [row for row in page.items if row.demand.base_units > 0]
+    unranked = [row for row in page.items if row.demand.base_units == 0]
+    assert page.demand_population == len(ranked)
+    for row in ranked:
+        assert row.score.demand_rank is not None
+        assert 1 <= row.score.demand_rank <= page.demand_population
+    for row in unranked:
+        assert row.score.demand_rank is None
+        assert row.score.demand_percentile == 0.0
 
 
 def test_row_provenance_is_read_from_the_served_rows_not_the_manifest(
@@ -764,3 +863,78 @@ def test_sqlite_ranking_groups_publisher_spellings_into_one_vehicle(
 
     assert page.total == 1
     assert page.items[0].demand.base_units == 18
+
+
+def test_the_universe_is_the_same_whether_attribution_is_materialized(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    """The unfiltered population must not depend on how it was computed.
+
+    A promoted snapshot carries `opportunity_cohort_attribution` as a table; an
+    older one makes the planner compute it inline. The inline form is safe to run
+    unfiltered because every window inside it partitions by `opportunity_id`, so
+    an opportunity's allocation never depended on which *other* opportunities
+    passed a filter. That is the claim, and this is the test of it.
+    """
+
+    inline = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "inline-coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    assert inline._materialized_attribution is False
+
+    baked_path = tmp_path / "baked.sqlite3"
+    shutil.copyfile(sqlite_repository._ledger.path, baked_path)
+    with contextlib.closing(sqlite3.connect(baked_path)) as connection:
+        connection.execute(
+            "CREATE TABLE opportunity_cohort_attribution AS "
+            f"WITH {_cohort_attribution_ctes('1 = 1')} "
+            "SELECT opportunity_id, cohort_id, registration_cohort_year, "
+            "downside_units, base_units, upside_units FROM cohort_attribution"
+        )
+        connection.commit()
+    baked = SnapshotOpportunityRepository(
+        SnapshotPlannerRepository(SQLiteLedger(baked_path), _manifest()),
+        SQLiteCoverageRepository(tmp_path / "baked-coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+    assert baked._materialized_attribution is True
+
+    for group_by in OpportunityGroupBy:
+        assert inline._universe(group_by, True).groups == baked._universe(
+            group_by, True
+        ).groups, group_by
+
+
+def test_the_universe_percentile_matches_the_single_value_definition(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+) -> None:
+    """The SQL channel and the forecast channel must agree about a percentile.
+
+    The repository does not call the ranking strategy, so nothing else would
+    notice the two definitions drifting apart.
+    """
+
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandReadinessV1(),
+    )
+
+    universe = repository._universe(OpportunityGroupBy.MODEL_YEAR, True)
+
+    ranked = sorted(
+        group.base_units for group in universe.groups if group.base_units > 0
+    )
+    assert universe.population == len(ranked)
+    assert ranked
+    for group in universe.groups:
+        if group.base_units == 0:
+            assert group.percentile == 0.0
+            assert group.rank is None
+            continue
+        assert group.percentile == demand_percentile_rank(ranked, group.base_units)
+        assert group.rank == sum(1 for item in ranked if item > group.base_units) + 1

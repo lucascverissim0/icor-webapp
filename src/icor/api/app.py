@@ -25,7 +25,7 @@ from icor.application.completeness import CompletenessQueryService
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
 from icor.application.evidence_review import EvidenceReviewService
 from icor.application.ml_export import MLExportService
-from icor.application.opportunities import OpportunityService
+from icor.application.opportunities import OpportunityGroupBy, OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandReadinessV1
 from icor.application.registrations import RegistrationService
@@ -126,16 +126,27 @@ def create_app(
     if isinstance(selected_repository, SnapshotPlannerRepository) and isinstance(
         selected_coverage_repository, SQLiteCoverageRepository
     ):
-        app.state.opportunity_service = OpportunityService(
-            repository=SnapshotOpportunityRepository(
-                selected_repository,
-                selected_coverage_repository,
-                DemandReadinessV1(),
-                worked_models=IcorWorkedModelCatalog.from_path(
-                    ROOT / "data" / "icor_supported_models.txt"
-                ),
-                model_year_catalog=client_release,
+        opportunity_repository = SnapshotOpportunityRepository(
+            selected_repository,
+            selected_coverage_repository,
+            DemandReadinessV1(),
+            worked_models=IcorWorkedModelCatalog.from_path(
+                ROOT / "data" / "icor_supported_models.txt"
+            ),
+            model_year_catalog=client_release,
+        )
+        if client_release:
+            # Grouping the whole snapshot is what makes a score comparable
+            # across filters, and it takes seconds. The client release serves
+            # one grouping level, so build that population at boot rather than
+            # charging the first visitor for it; the host's health check has a
+            # grace period, a visitor has none.
+            opportunity_repository.warm(OpportunityGroupBy.MODEL_YEAR)
+            LOGGER.info(
+                "Ranked market population ready group_by=%s", OpportunityGroupBy.MODEL_YEAR
             )
+        app.state.opportunity_service = OpportunityService(
+            repository=opportunity_repository
         )
     elif selected_repository is not None:
         app.state.opportunity_service = OpportunityService(

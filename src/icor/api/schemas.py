@@ -254,6 +254,14 @@ class ProductionCoverageResponse(ApiModel):
 class OpportunityScoreResponse(ApiModel):
     demand_percentile: float
     demand_points: float
+    # Where the vehicle stands in the whole market and how large that market is.
+    # A percentile on its own cannot say whether it was measured against fifty
+    # vehicles or fifty thousand, and the score is only meaningful because the
+    # population is the market rather than whatever the caller filtered to. A
+    # vehicle with no forecast demand is unranked.
+    demand_rank: int | None
+    demand_population: int
+    demand_basis: str
     readiness_ratio: float
     readiness_points: float
     total_points: float
@@ -322,6 +330,11 @@ class OpportunityPageResponse(ApiModel):
     pages: int
     available_markets: tuple[str, ...] = ()
     available_horizons: tuple[int, ...] = ()
+    # Repeated from the rows so an empty result — a search that matches nothing,
+    # which is exactly when the claim matters most — can still say what the
+    # scores would have been measured against.
+    demand_population: int = 0
+    demand_basis: str = ""
 
 
 class OpportunityDrillDownResponse(ApiModel):

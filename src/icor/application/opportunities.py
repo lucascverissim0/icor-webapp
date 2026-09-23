@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from math import ceil
 from typing import Protocol
 
 from icor.application.coverage import CoverageRepository
 from icor.application.planner import PlannerRepository
-from icor.application.ranking import RankingStrategy
+from icor.application.ranking import (
+    WHOLE_MARKET_BASIS,
+    DemandPopulation,
+    RankingStrategy,
+)
 from icor.domain.opportunities import (
     CoverageMatchType,
     CoverageStatus,
@@ -193,6 +197,11 @@ class OpportunityPage:
     # exists instead of a list written by hand that drifts from the data.
     available_markets: tuple[str, ...] = ()
     available_horizons: tuple[int, ...] = ()
+    # The population every score on this page was measured against. Reported on
+    # the page and not only on a row because an empty result — the moment the
+    # claim matters most — has no row to read it from.
+    demand_population: int = 0
+    demand_basis: str = WHOLE_MARKET_BASIS
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +216,33 @@ class _DemandAtom:
     configuration: PlanningConfiguration
     model_year_demand: ModelYearDemand
     coverage_status: CoverageStatus
+
+
+def _candidates(
+    grouped: dict[str, tuple[_DemandAtom, ...]],
+) -> tuple[OpportunityCandidate, ...]:
+    return tuple(
+        OpportunityCandidate(
+            group_id=group_id,
+            demand=_sum_demand(group_atoms),
+            exact_covered_base_units=_sum_coverage(
+                group_atoms, CoverageStatus.EXACT_COVERED
+            ),
+            fallback_covered_base_units=_sum_coverage(
+                group_atoms, CoverageStatus.FALLBACK_ONLY
+            ),
+            uncovered_base_units=_sum_coverage(group_atoms, CoverageStatus.UNCOVERED),
+        )
+        for group_id, group_atoms in grouped.items()
+    )
+
+
+def _demand_population(population: tuple[OpportunityCandidate, ...]) -> int:
+    """How many vehicles a percentile is measured against, for an empty page."""
+
+    return DemandPopulation.of(
+        candidate.demand.base_units for candidate in population
+    ).size
 
 
 def _matching_text(
@@ -289,24 +325,13 @@ class OpportunityService:
         assert self._ranking_strategy is not None
         atoms, warnings = self._resolved_atoms(query)
         grouped = self._group(atoms, query.group_by)
-        candidates = tuple(
-            OpportunityCandidate(
-                group_id=group_id,
-                demand=_sum_demand(group_atoms),
-                exact_covered_base_units=_sum_coverage(
-                    group_atoms, CoverageStatus.EXACT_COVERED
-                ),
-                fallback_covered_base_units=_sum_coverage(
-                    group_atoms, CoverageStatus.FALLBACK_ONLY
-                ),
-                uncovered_base_units=_sum_coverage(
-                    group_atoms, CoverageStatus.UNCOVERED
-                ),
-            )
-            for group_id, group_atoms in grouped.items()
-        )
+        candidates = _candidates(grouped)
+        population = self._population(query)
         scores = {
-            score.group_id: score for score in self._ranking_strategy.score(candidates)
+            score.group_id: score
+            for score in self._ranking_strategy.score(
+                candidates, population=population
+            )
         }
         rows = tuple(
             self._row(group_id, group_atoms, query.group_by, scores[group_id])
@@ -341,7 +366,27 @@ class OpportunityService:
             pages=ceil(total / query.page_size),
             available_markets=markets,
             available_horizons=horizons,
+            demand_population=(
+                scores[rows[0].group_id].demand_population
+                if rows
+                else _demand_population(population)
+            ),
+            demand_basis=WHOLE_MARKET_BASIS,
         )
+
+    def _population(
+        self, query: OpportunityQuery
+    ) -> tuple[OpportunityCandidate, ...]:
+        """Every vehicle in the source at this grouping level, unfiltered.
+
+        A market or horizon chosen in the interface says which figures to show,
+        not which vehicles a score may be compared with, so the population is
+        read with those filters removed.
+        """
+
+        whole_market = replace(query, markets=(), horizons=())
+        atoms, _warnings = self._resolved_atoms(whole_market)
+        return _candidates(self._group(atoms, query.group_by))
 
     def _available_facets(self) -> tuple[tuple[str, ...], tuple[int, ...]]:
         """Every market and horizon the source holds, not just this page's."""
@@ -362,21 +407,13 @@ class OpportunityService:
         selected = grouped.get(group_id)
         if selected is None:
             return None
-        candidates = tuple(
-            OpportunityCandidate(
-                group_id=identity,
-                demand=_sum_demand(group_atoms),
-                exact_covered_base_units=_sum_coverage(group_atoms, CoverageStatus.EXACT_COVERED),
-                fallback_covered_base_units=_sum_coverage(
-                    group_atoms, CoverageStatus.FALLBACK_ONLY
-                ),
-                uncovered_base_units=_sum_coverage(
-                    group_atoms, CoverageStatus.UNCOVERED
-                ),
+        candidates = _candidates(grouped)
+        scores = {
+            score.group_id: score
+            for score in self._ranking_strategy.score(
+                candidates, population=self._population(query)
             )
-            for identity, group_atoms in grouped.items()
-        )
-        scores = {score.group_id: score for score in self._ranking_strategy.score(candidates)}
+        }
         return self._row(group_id, selected, query.group_by, scores[group_id])
 
     def drill_down(

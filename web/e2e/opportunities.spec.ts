@@ -31,6 +31,26 @@ test('opens model-year opportunities from the app home', async ({ page }) => {
   )
 })
 
+test('a searched ranking shows the same score as an unfiltered one', async ({ page }) => {
+  // The user-visible form of the whole-market rule: the number on the card is a
+  // property of the vehicle, so narrowing the list must not move it.
+  await page.goto('/opportunities?groupBy=model_year')
+  const card = page.locator('.opportunity-card').first()
+  await expect(card).toBeVisible()
+  const heading = (await card.getByRole('heading').first().textContent()) ?? ''
+  const unfiltered = await card.locator('.opportunity-score strong').textContent()
+  const basis = page.getByRole('note').filter({ hasText: /whole-market/i })
+  await expect(basis).toBeVisible()
+  const population = (await basis.textContent()) ?? ''
+
+  await page.goto(`/opportunities?groupBy=model_year&q=${encodeURIComponent(heading.split(' ')[0])}`)
+  const narrowed = page.locator('.opportunity-card').first()
+  await expect(narrowed).toBeVisible()
+
+  await expect(narrowed.locator('.opportunity-score strong')).toHaveText(unfiltered ?? '')
+  await expect(page.getByRole('note').filter({ hasText: /whole-market/i })).toHaveText(population)
+})
+
 test('opens a reloadable explanation for an individual ranking', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await page.goto('/opportunities?groupBy=model_year')

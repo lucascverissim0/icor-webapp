@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import axe from 'axe-core'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -56,6 +56,9 @@ export const opportunities = {
     score: {
       demand_percentile: 1,
       demand_points: 80,
+      demand_rank: 1,
+      demand_population: 4872,
+      demand_basis: 'whole_market_base_units_all_markets_all_horizons',
       readiness_ratio: 0.1163,
       readiness_points: 2.326,
       total_points: 82.3,
@@ -80,6 +83,8 @@ export const opportunities = {
   pages: 2,
   available_markets: ['DE', 'FR', 'GB'],
   available_horizons: [2028, 2031],
+  demand_population: 4872,
+  demand_basis: 'whole_market_base_units_all_markets_all_horizons',
 } as const
 
 const registrationSummary = {
@@ -378,15 +383,19 @@ describe('OpportunitiesWorkbench filters', () => {
   })
 })
 
-describe('score scope disclosure', () => {
-  it('says nothing about scope when the ranking is unfiltered', async () => {
+describe('score basis disclosure', () => {
+  it('names the whole market as what a score is measured against', async () => {
     renderOpportunities(successFetcher())
-    await screen.findByText(/How the opportunity score is calculated/i)
 
-    expect(screen.queryByRole('note')).toBeNull()
+    const note = await screen.findByRole('note')
+    expect(note).toHaveTextContent(/whole-market/i)
+    // The population arrives with the ranking, so the claim is only complete
+    // once the request has answered.
+    await waitFor(() => expect(note).toHaveTextContent(/4,872 ranked model years/))
+    expect(note).not.toHaveTextContent(/relative to the rows currently shown/i)
   })
 
-  it('warns that scores are relative once the ranking is narrowed', async () => {
+  it('says the same thing when the ranking is narrowed', async () => {
     const client = new PlannerApiClient(successFetcher())
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -400,6 +409,8 @@ describe('score scope disclosure', () => {
       </AppProviders>,
     )
 
-    expect(await screen.findByRole('note')).toHaveTextContent(/relative to the rows currently shown/i)
+    const note = await screen.findByRole('note')
+    await waitFor(() => expect(note).toHaveTextContent(/4,872 ranked model years/))
+    expect(note).toHaveTextContent(/never the score/i)
   })
 })

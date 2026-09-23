@@ -105,14 +105,19 @@ def test_exact_match_precedes_fallback_without_double_counting() -> None:
     assert row.coverage_status is CoverageStatus.MIXED
 
 
-def test_filters_apply_before_percentile_ranking_and_summary() -> None:
-    result = service().list(
-        OpportunityQuery(
-            group_by=OpportunityGroupBy.BRAND,
-            markets=("FR",),
-            horizons=(2030,),
-        )
+def test_filters_narrow_the_rows_and_units_but_not_the_score() -> None:
+    """Filtering answers "show me France", not "re-rank against France".
+
+    The rows and their units follow the filter. The score does not, because a
+    reader comparing two screens has no way to know the number changed meaning.
+    """
+
+    narrowed = OpportunityQuery(
+        group_by=OpportunityGroupBy.BRAND, markets=("FR",), horizons=(2030,)
     )
+    result = service().list(narrowed)
+    whole_market = service().list(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
+    by_brand = {row.brand: row for row in whole_market.items}
 
     assert result.summary.base_units == 2_720
     assert {row.brand for row in result.items} == {
@@ -121,12 +126,52 @@ def test_filters_apply_before_percentile_ranking_and_summary() -> None:
         "Meridian Motors",
     }
     assert result.items[0].score.total_points >= result.items[-1].score.total_points
+    for row in result.items:
+        assert row.score == by_brand[row.brand].score, row.brand
+        assert row.demand.base_units <= by_brand[row.brand].demand.base_units
+    assert result.demand_population == whole_market.demand_population
+
+
+def test_search_text_does_not_change_a_score() -> None:
+    whole_market = service().list(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
+    by_brand = {row.brand: row for row in whole_market.items}
+
+    result = service().list(
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND, text="aurora")
+    )
+
+    assert [row.brand for row in result.items] == ["Aurora Mobility"]
+    assert result.items[0].score == by_brand["Aurora Mobility"].score
+
+
+def test_a_page_that_matches_nothing_still_reports_the_population() -> None:
+    """The moment the claim matters most is the moment there is no row to carry it."""
+
+    result = service().list(
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND, text="zzzznotavehicle")
+    )
+
+    assert result.items == ()
+    assert result.total == 0
+    assert result.demand_population > 0
+    assert result.demand_basis
 
 
 def test_high_demand_quartile_summary_uses_tie_aware_percentiles() -> None:
-    result = service().list(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
+    """Run narrowed on purpose: unfiltered, this passed whatever the population.
 
-    high_demand_rows = [row for row in result.items if row.score.demand_percentile >= 0.75]
+    "High demand" now means high in the market, so the summary counts the
+    uncovered units of the rows on screen whose *market* percentile clears the
+    quartile — not the rows that happen to be the biggest of what survived.
+    """
+
+    result = service().list(
+        OpportunityQuery(group_by=OpportunityGroupBy.BRAND, markets=("FR",))
+    )
+
+    high_demand_rows = [
+        row for row in result.items if row.score.demand_percentile >= 0.75
+    ]
     assert result.summary.high_demand_uncovered_base_units == sum(
         row.uncovered_base_units for row in high_demand_rows
     )

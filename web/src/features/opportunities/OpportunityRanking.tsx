@@ -54,7 +54,12 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
                 <div className="opportunity-score">
                   <strong aria-describedby={descriptionId}>Score {row.score.total_points.toFixed(1)}</strong>
                   <span id={descriptionId}>{row.score.demand_points.toFixed(1)} demand + {row.score.readiness_points.toFixed(1)} readiness</span>
-                  <span>{Math.round(row.score.demand_percentile * 100)}th demand percentile</span>
+                  <span>
+                    {Math.round(row.score.demand_percentile * 100)}th demand percentile
+                    {row.score.demand_rank !== null && row.score.demand_population > 0
+                      ? ` · #${format(row.score.demand_rank)} of ${format(row.score.demand_population)} in the market`
+                      : ' · no forecast demand to rank'}
+                  </span>
                 </div>
                 <button
                   aria-expanded={selectedGroup === row.group_id}

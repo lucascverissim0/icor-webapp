@@ -741,6 +741,16 @@ export interface components {
              * @default []
              */
             available_markets: string[];
+            /**
+             * Demand Basis
+             * @default
+             */
+            demand_basis: string;
+            /**
+             * Demand Population
+             * @default 0
+             */
+            demand_population: number;
             /** Integrity Warnings */
             integrity_warnings: string[];
             /** Items */
@@ -799,10 +809,16 @@ export interface components {
         };
         /** OpportunityScoreResponse */
         OpportunityScoreResponse: {
+            /** Demand Basis */
+            demand_basis: string;
             /** Demand Percentile */
             demand_percentile: number;
             /** Demand Points */
             demand_points: number;
+            /** Demand Population */
+            demand_population: number;
+            /** Demand Rank */
+            demand_rank: number | null;
             /** Explanation */
             explanation: string;
             /** Readiness Points */

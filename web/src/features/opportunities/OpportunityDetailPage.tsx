@@ -103,6 +103,11 @@ export function OpportunityDetailView({
         <div><p className="eyebrow">Ranking detail</p><h2>{title}</h2><p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>{row.generation_source_url && <><a className="generation-source" href={row.generation_source_url} rel="noreferrer" target="_blank">Manufacturer generation source ↗</a><p className="detail-note">Mapped from the manufacturer production window. A registration-year cohort can include transition-year stock.</p></>}</div>
         <div className="detail-score"><span>Opportunity score</span><strong>{row.score.total_points.toFixed(1)}</strong><small>out of 100</small></div>
       </header>
+      <p className="detail-note" role="note">
+        The score compares this vehicle with the whole market and does not move
+        when the ranking is filtered. The demand figures below do follow the
+        markets and horizons the ranking was filtered to.
+      </p>
 
       <section aria-labelledby="demand-title" className="detail-section">
         <div className="detail-section__heading"><p className="eyebrow">Forecast outcome</p><h2 id="demand-title">Replacement demand behind the rank</h2></div>
@@ -118,7 +123,9 @@ export function OpportunityDetailView({
       <section aria-labelledby="score-title" className="detail-section detail-score-breakdown">
         <div className="detail-section__heading"><p className="eyebrow">Transparent calculation</p><h2 id="score-title">Why this opportunity ranks here</h2></div>
         <div className="score-bars">
-          <div><div><strong>Demand</strong><span>{row.score.demand_points.toFixed(1)} / 80</span></div><progress aria-label="Demand score" max="80" value={row.score.demand_points} /><p>{Math.round(row.score.demand_percentile * 100)}th percentile among the current filtered ranking.</p></div>
+          <div><div><strong>Demand</strong><span>{row.score.demand_points.toFixed(1)} / 80</span></div><progress aria-label="Demand score" max="80" value={row.score.demand_points} /><p>{row.score.demand_rank === null || row.score.demand_population === 0
+            ? 'No forecast demand to rank against the market.'
+            : `${Math.round(row.score.demand_percentile * 100)}th percentile of all ${format(row.score.demand_population)} ranked vehicles in the market — rank #${format(row.score.demand_rank)}.`}</p></div>
           <div><div><strong>ICOR readiness</strong><span>{row.score.readiness_points.toFixed(1)} / 20</span></div><progress aria-label="Readiness score" max="20" value={row.score.readiness_points} /><p>Exact coverage receives full weight; vehicle-year or worked-model fallback receives half weight.</p></div>
         </div>
       </section>

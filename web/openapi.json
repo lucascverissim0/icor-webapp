@@ -1094,6 +1094,16 @@
             "title": "Available Markets",
             "type": "array"
           },
+          "demand_basis": {
+            "default": "",
+            "title": "Demand Basis",
+            "type": "string"
+          },
+          "demand_population": {
+            "default": 0,
+            "title": "Demand Population",
+            "type": "integer"
+          },
           "integrity_warnings": {
             "items": {
               "type": "string"
@@ -1304,6 +1314,10 @@
       "OpportunityScoreResponse": {
         "additionalProperties": false,
         "properties": {
+          "demand_basis": {
+            "title": "Demand Basis",
+            "type": "string"
+          },
           "demand_percentile": {
             "title": "Demand Percentile",
             "type": "number"
@@ -1311,6 +1325,21 @@
           "demand_points": {
             "title": "Demand Points",
             "type": "number"
+          },
+          "demand_population": {
+            "title": "Demand Population",
+            "type": "integer"
+          },
+          "demand_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demand Rank"
           },
           "explanation": {
             "title": "Explanation",
@@ -1340,6 +1369,9 @@
         "required": [
           "demand_percentile",
           "demand_points",
+          "demand_rank",
+          "demand_population",
+          "demand_basis",
           "readiness_ratio",
           "readiness_points",
           "total_points",

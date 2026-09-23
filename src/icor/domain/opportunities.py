@@ -87,6 +87,15 @@ class OpportunityScore:
     group_id: str
     demand_percentile: float
     demand_points: float
+    #: Position among every vehicle worth ranking, one being the largest, and
+    #: the size of that population. Both are reported because a percentile
+    #: alone cannot say whether it was measured against fifty vehicles or fifty
+    #: thousand, and the point of the score is that the population is the whole
+    #: market rather than whatever the caller filtered to. A vehicle with no
+    #: forecast demand is unranked.
+    demand_rank: int | None
+    demand_population: int
+    demand_basis: str
     readiness_ratio: float
     readiness_points: float
     total_points: float
