@@ -69,19 +69,30 @@ SQLiteCoverageRepository(Path('/var/lib/icor/production-coverage.sqlite3'))" \
 # Fail the build, not the deploy, if the baked snapshot is not a verifiable
 # client-scoped snapshot. A bad bake becomes a red build instead of a machine
 # that crash-loops in production.
+#
+# This is also the only time the database is hashed and revalidated. The image
+# is immutable and the snapshot is read-only inside it, so repeating that work
+# on every cold start would buy nothing and cost the visitor minutes on a host
+# that stops idle containers. The marker records what passed here, and
+# ICOR_SNAPSHOT_TRUST_BAKED below is what lets the runtime rely on it; the
+# runtime still checks the pointer, the manifest and its digest.
 RUN PYTHONPATH=/app/src ICOR_EVIDENCE_ACTIVE_ROOT=/srv/icor/evidence \
     /app/.venv/bin/python -c "\
 from pathlib import Path; \
-from icor.infrastructure.snapshot_store import SnapshotStore; \
-manifest, _ = SnapshotStore(Path('/srv/icor/evidence')).open_active_snapshot(); \
+from icor.infrastructure.snapshot_store import SnapshotStore, write_verified_marker; \
+root = Path('/srv/icor/evidence'); \
+manifest, _ = SnapshotStore(root).open_active_snapshot(); \
 assert manifest.scope == 'client-release', manifest.scope; \
-print('baked', manifest.snapshot_id)"
+marker = write_verified_marker(root); \
+print('baked', manifest.snapshot_id, marker.name)" \
+ && chown -R icor:icor /srv/icor/evidence
 
 ENV ICOR_PREVIEW_HOST_MODE=container \
     ICOR_CLIENT_RELEASE_MODE=verified \
     ICOR_PREVIEW_ASSET_ROOT=/app/client-release \
     ICOR_EVIDENCE_ACTIVE_ROOT=/srv/icor/evidence \
     ICOR_COVERAGE_DB=/var/lib/icor/production-coverage.sqlite3 \
+    ICOR_SNAPSHOT_TRUST_BAKED=1 \
     ICOR_PREVIEW_PORT=8080 \
     SQLITE_TMPDIR=/tmp
 

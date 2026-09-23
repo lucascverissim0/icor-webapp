@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import stat
@@ -40,6 +41,8 @@ from icor.infrastructure.snapshot_store import (
     SnapshotPromotionError,
     SnapshotStore,
     SnapshotUnavailableError,
+    trusts_baked_snapshot,
+    write_verified_marker,
 )
 from icor.infrastructure.sqlite_evidence_repository import (
     ImmutableEvidenceError,
@@ -974,3 +977,142 @@ with SnapshotFilesystem().promotion_lock(Path(sys.argv[1])):
     promoted = SnapshotStore(evidence_root).promote(candidate.manifest.snapshot_id)
 
     assert promoted == candidate.manifest
+
+
+def _promoted(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+) -> str:
+    snapshot_id = builder.build(build_request).manifest.snapshot_id
+    snapshot_store.promote(snapshot_id)
+    return snapshot_id
+
+
+def test_trusted_store_opens_without_rehashing_the_database(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    evidence_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bake-time verification is what a trusted open relies on."""
+    snapshot_id = _promoted(snapshot_store, builder, build_request)
+    write_verified_marker(evidence_root)
+
+    def refuse(path: Path) -> str:
+        raise AssertionError("a trusted open must not rehash the database")
+
+    monkeypatch.setattr(
+        "icor.infrastructure.snapshot_store.sha256_file",
+        lambda path: refuse(path) if path.name == "evidence.sqlite3" else sha256_file(path),
+    )
+    manifest = SnapshotStore(evidence_root, trust_verified_marker=True).active_manifest()
+
+    assert manifest.snapshot_id == snapshot_id
+
+
+def test_trusted_store_refuses_a_missing_marker(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    evidence_root: Path,
+) -> None:
+    """Trust is granted by the build, so an unverified tree cannot claim it."""
+    _promoted(snapshot_store, builder, build_request)
+
+    with pytest.raises(SnapshotUnavailableError):
+        SnapshotStore(evidence_root, trust_verified_marker=True).active_manifest()
+
+
+def test_trusted_store_refuses_a_marker_for_another_snapshot(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    evidence_root: Path,
+) -> None:
+    """A marker left behind by an earlier image must not vouch for a new one."""
+    _promoted(snapshot_store, builder, build_request)
+    write_verified_marker(evidence_root)
+    marker = evidence_root / "verified.json"
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    payload["snapshot_id"] = "snapshot-somethingelse"
+    marker.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SnapshotUnavailableError):
+        SnapshotStore(evidence_root, trust_verified_marker=True).active_manifest()
+
+
+def test_trusted_store_refuses_a_marker_whose_manifest_digest_moved(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    evidence_root: Path,
+) -> None:
+    """The manifest is still hashed, so a swapped snapshot.json is still caught."""
+    _promoted(snapshot_store, builder, build_request)
+    write_verified_marker(evidence_root)
+    marker = evidence_root / "verified.json"
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    payload["manifest_sha256"] = "0" * 64
+    marker.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(SnapshotUnavailableError):
+        SnapshotStore(evidence_root, trust_verified_marker=True).active_manifest()
+
+
+def test_untrusted_store_still_hashes_the_database(
+    snapshot_store: SnapshotStore,
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    evidence_root: Path,
+) -> None:
+    """A marker must not weaken a store that was not asked to trust one."""
+    _promoted(snapshot_store, builder, build_request)
+    write_verified_marker(evidence_root)
+    database = next((evidence_root / "snapshots").glob("*/evidence.sqlite3"))
+    database.chmod(stat.S_IWRITE | stat.S_IREAD)
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE tampered (value TEXT)")
+
+    with pytest.raises(SnapshotUnavailableError):
+        SnapshotStore(evidence_root).active_manifest()
+
+
+def test_promotion_never_trusts_a_marker(
+    builder: SnapshotBuilder,
+    build_request: SnapshotBuildRequest,
+    evidence_root: Path,
+) -> None:
+    """Trust describes an artifact already verified, so it cannot verify one."""
+    snapshot_id = builder.build(build_request).manifest.snapshot_id
+    store = SnapshotStore(
+        evidence_root,
+        clock=lambda: datetime(2026, 8, 26, 13, 0, tzinfo=UTC),
+        trust_verified_marker=True,
+    )
+    database = store.candidate_path(snapshot_id) / "evidence.sqlite3"
+    database.chmod(stat.S_IWRITE | stat.S_IREAD)
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE tampered (value TEXT)")
+
+    with pytest.raises(SnapshotPromotionError):
+        store.promote(snapshot_id)
+
+
+@pytest.mark.parametrize(
+    ("environment", "trusted"),
+    (
+        ({"ICOR_SNAPSHOT_TRUST_BAKED": "1", "ICOR_PREVIEW_HOST_MODE": "container"}, True),
+        ({"ICOR_SNAPSHOT_TRUST_BAKED": "1"}, False),
+        ({"ICOR_SNAPSHOT_TRUST_BAKED": "1", "ICOR_PREVIEW_HOST_MODE": "codespaces"}, False),
+        ({"ICOR_SNAPSHOT_TRUST_BAKED": "true", "ICOR_PREVIEW_HOST_MODE": "container"}, False),
+        ({"ICOR_PREVIEW_HOST_MODE": "container"}, False),
+        ({}, False),
+    ),
+)
+def test_baked_trust_needs_both_the_flag_and_the_container(
+    environment: dict[str, str], trusted: bool
+) -> None:
+    """Outside a container the snapshot changes under the process, so it is checked."""
+    assert trusts_baked_snapshot(environment) is trusted

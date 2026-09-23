@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from re import fullmatch
@@ -23,6 +23,8 @@ _IDENTIFIER_PATTERN = r"[a-z0-9][a-z0-9._-]{0,79}"
 _SHA256_PATTERN = r"[0-9a-f]{64}"
 _POINTER_FIELDS = frozenset({"snapshot_id", "manifest_sha256", "promoted_at"})
 _CANDIDATE_FILES = frozenset({"evidence.sqlite3", "snapshot.json", "validation.json"})
+_VERIFIED_MARKER = "verified.json"
+_MARKER_FIELDS = frozenset({"snapshot_id", "manifest_sha256", "verified_at"})
 
 
 class SnapshotPromotionError(RuntimeError):
@@ -43,8 +45,16 @@ class SnapshotStore:
         clock: Callable[[], datetime] | None = None,
         validator: SnapshotValidator | None = None,
         filesystem: SnapshotFilesystem | None = None,
+        trust_verified_marker: bool = False,
     ) -> None:
         self.root = Path(root)
+        # Hashing and revalidating a multi-gigabyte database costs the same on
+        # every process start, which a host that stops an idle container makes
+        # the visitor wait for. When the snapshot is baked into an immutable,
+        # read-only image, that work can be done once while the image is built.
+        # The marker records which snapshot was verified then; everything cheap
+        # is still checked here, so only the whole-database rehash is skipped.
+        self.trust_verified_marker = trust_verified_marker
         self.clock = clock or (lambda: datetime.now(UTC))
         self.validator = validator or SnapshotValidator()
         self.filesystem = filesystem or SnapshotFilesystem()
@@ -135,10 +145,76 @@ class SnapshotStore:
         pointer = self._load_active_pointer()
         snapshot_id = pointer["snapshot_id"]
         target = self.root / "snapshots" / snapshot_id
-        manifest, manifest_digest, _ = self._verify_snapshot_directory(target, snapshot_id)
+        if self.trust_verified_marker:
+            manifest, manifest_digest = self._read_verified_snapshot(target, snapshot_id)
+        else:
+            manifest, manifest_digest, _ = self._verify_snapshot_directory(
+                target, snapshot_id
+            )
         if manifest_digest != pointer["manifest_sha256"]:
             raise SnapshotUnavailableError("active snapshot manifest does not match pointer")
         return manifest, target
+
+    def _read_verified_snapshot(
+        self, target: Path, snapshot_id: str
+    ) -> tuple[SnapshotManifest, str]:
+        """Open a snapshot a build already verified, checking everything cheap.
+
+        The manifest is still read and hashed, so a swapped `snapshot.json` is
+        still caught, and the marker must name this snapshot and that digest.
+        What is given up is detecting corruption of the database file itself
+        after the image was built, which an immutable read-only image is what
+        stands in for.
+        """
+
+        marker = self._load_verified_marker()
+        try:
+            directory = self.filesystem.require_directory(target, self.root)
+            manifest_path = self.filesystem.require_file(
+                directory / "snapshot.json", self.root
+            )
+            self.filesystem.require_file(directory / "evidence.sqlite3", self.root)
+            manifest = load_snapshot_manifest(manifest_path)
+            manifest_digest = sha256_file(manifest_path)
+        except SnapshotPathError as error:
+            raise SnapshotUnavailableError(
+                "active snapshot path is unsafe or not contained"
+            ) from error
+        except (OSError, RuntimeError, ValueError) as error:
+            raise SnapshotUnavailableError("active snapshot cannot be read") from error
+        if manifest.snapshot_id != snapshot_id:
+            raise SnapshotUnavailableError("active snapshot identity does not match")
+        if marker["snapshot_id"] != snapshot_id:
+            raise SnapshotUnavailableError("verified marker names another snapshot")
+        if marker["manifest_sha256"] != manifest_digest:
+            raise SnapshotUnavailableError("verified marker does not match the manifest")
+        return manifest, manifest_digest
+
+    def _load_verified_marker(self) -> dict[str, str]:
+        path = self.root / _VERIFIED_MARKER
+        if not os.path.lexists(path):
+            raise SnapshotUnavailableError("no verified marker is available")
+        try:
+            marker_path = self.filesystem.require_file(path, self.root)
+            payload = json.loads(
+                marker_path.read_text(encoding="utf-8"),
+                object_pairs_hook=self._reject_duplicate_fields,
+            )
+        except SnapshotPathError as error:
+            raise SnapshotUnavailableError(
+                "verified marker path is unsafe or not contained"
+            ) from error
+        except (OSError, ValueError) as error:
+            raise SnapshotUnavailableError("verified marker cannot be read") from error
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != _MARKER_FIELDS
+            or not all(isinstance(value, str) for value in payload.values())
+            or not fullmatch(_IDENTIFIER_PATTERN, payload["snapshot_id"])
+            or not fullmatch(_SHA256_PATTERN, payload["manifest_sha256"])
+        ):
+            raise SnapshotUnavailableError("verified marker is incomplete")
+        return payload
 
     def _publish_candidate(self, candidate: Path, snapshot_id: str) -> Path:
         snapshots_root = self.filesystem.prepare_directory(
@@ -380,3 +456,45 @@ class SnapshotStore:
     def _require_identifier(value: object) -> None:
         if type(value) is not str or fullmatch(_IDENTIFIER_PATTERN, value) is None:
             raise ValueError("snapshot identifier is invalid")
+
+
+def write_verified_marker(root: Path, *, clock: Callable[[], datetime] | None = None) -> Path:
+    """Record that this tree's active snapshot was fully verified here.
+
+    Called while an image is built, after an untrusted open has already hashed
+    and revalidated the database. Writing it by hand would be writing a claim
+    nobody checked, so it is derived from the store rather than supplied.
+    """
+
+    store = SnapshotStore(root)
+    manifest, target = store._resolve_active_snapshot()
+    now = (clock or (lambda: datetime.now(UTC)))()
+    marker = Path(root) / _VERIFIED_MARKER
+    marker.write_text(
+        json.dumps(
+            {
+                "snapshot_id": manifest.snapshot_id,
+                "manifest_sha256": sha256_file(target / "snapshot.json"),
+                "verified_at": now.isoformat(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return marker
+
+
+def trusts_baked_snapshot(environment: Mapping[str, str] | None = None) -> bool:
+    """Whether this process may open the active snapshot on the build's word.
+
+    Honoured only in container host mode. Outside a container the snapshot is a
+    working directory that changes under the process, so the expensive check is
+    the only thing that would notice.
+    """
+
+    source = os.environ if environment is None else environment
+    return (
+        source.get("ICOR_SNAPSHOT_TRUST_BAKED", "").strip() == "1"
+        and source.get("ICOR_PREVIEW_HOST_MODE", "").strip() == "container"
+    )

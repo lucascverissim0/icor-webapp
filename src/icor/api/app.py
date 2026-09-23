@@ -32,7 +32,11 @@ from icor.application.registrations import RegistrationService
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
-from icor.infrastructure.snapshot_store import SnapshotStore, SnapshotUnavailableError
+from icor.infrastructure.snapshot_store import (
+    SnapshotStore,
+    SnapshotUnavailableError,
+    trusts_baked_snapshot,
+)
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
     SnapshotVehicleForecastRepository,
 )
@@ -94,7 +98,9 @@ def create_app(
     if selected_repository is None and not has_explicit_service_override:
         root = snapshot_root or Path(os.getenv("ICOR_EVIDENCE_ACTIVE_ROOT", DEFAULT_EVIDENCE_ROOT))
         try:
-            snapshot_manifest, snapshot_ledger = SnapshotStore(root).open_active_snapshot()
+            snapshot_manifest, snapshot_ledger = SnapshotStore(
+                root, trust_verified_marker=trusts_baked_snapshot()
+            ).open_active_snapshot()
             if snapshot_manifest.versions.generation_registry.endswith(
                 "-v0"
             ) or snapshot_manifest.versions.generation_resolver.endswith("-v0"):

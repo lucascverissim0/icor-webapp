@@ -56,6 +56,76 @@ evidence path the Dockerfile copies. The image builds the bundle itself with
 `openai` and `streamlit` packages are absent from the runtime, and fails the
 build if the baked snapshot is not client-scoped.
 
+## Snapshot verification is done once, at build time
+
+Opening the active snapshot normally hashes the whole database and re-runs the
+validator. On the promoted full snapshot that is about five and a half minutes;
+on the client-scoped one it is proportionally less but still far from free.
+
+Paying it on every process start is reasonable on a host that keeps the machine
+running. It is not reasonable on one that stops an idle container, because the
+next visitor waits for it, and `fly.toml` only avoids that by refusing to scale
+to zero. Render's free tier stops a service after fifteen minutes of inactivity
+and gives it a tenth of a CPU, which turns that wait into minutes.
+
+So the image does the verification once, while it is built, and records the
+result in `verified.json` beside `active.json`. `ICOR_SNAPSHOT_TRUST_BAKED=1`,
+set in the image, is what allows the runtime to rely on it. The marker is
+written by `write_verified_marker`, which derives it from a real verification;
+it is never written by hand.
+
+A trusted start still resolves the active pointer, reads the manifest, hashes it
+and requires both the pointer and the marker to agree with it. A swapped
+`snapshot.json`, a marker naming another snapshot, a marker left behind by an
+earlier image, and a missing marker are all refused. Promotion never consults
+the marker: trust describes an artifact that was already verified, so it cannot
+be what verifies one. Outside `container` host mode the flag is ignored, because
+a working directory changes under the process and the expensive check is the
+only thing that would notice.
+
+**What this gives up:** detecting corruption of the database file after the
+image was built. The container filesystem is immutable and the snapshot is
+read-only within it, so the property that remains is "this container serves the
+artifact that was verified when its image was built". On a host where that is
+not true, unset the flag.
+
+## Deploying to Render instead of Fly
+
+Render builds from a Git clone, and the client snapshot is roughly two gigabytes
+of ignored data that cannot live in Git. So Render is given a prebuilt image
+rather than the repository: build locally, push to a registry, and create the
+service with "Deploy an existing image". Render documents the free compute plan
+as selectable for that, for a `linux/amd64` image under 10 GB compressed.
+
+Render sets `PORT` and expects the service to bind it. This app reads
+`ICOR_PREVIEW_PORT`, so set that to Render's port explicitly rather than relying
+on `PORT`; it already binds `0.0.0.0`.
+
+Set on the service, beyond what the image already carries:
+
+    ICOR_PREVIEW_PORT=10000
+    ICOR_PREVIEW_PUBLIC_ORIGIN=https://<service>.onrender.com
+    ICOR_PREVIEW_TRUSTED_PROXIES=<see below>
+    ICOR_EXPORT_TOKEN=<32 or more characters>
+    ICOR_PREVIEW_USERS={"client-reviewer":"$argon2id$..."}
+    ICOR_PREVIEW_SESSION_SECRET=<base64url of at least 32 bytes>
+
+`ICOR_PREVIEW_PUBLIC_ORIGIN` must be a plain HTTPS origin with no port and no
+path, or the runner refuses to start. `ICOR_PREVIEW_USERS` is a JSON object;
+`generate_preview_credentials.py hash-user` prints the bare hash, so wrap it.
+
+`ICOR_PREVIEW_TRUSTED_PROXIES` is the one value that needs a decision rather
+than a copy. `*` is safe only where the container port cannot be reached
+directly, because otherwise `X-Forwarded-For` becomes spoofable and login
+throttling stops working. Render exposes services only through its own proxy,
+which is the same posture `fly.toml` relies on, but Render publishes no stable
+proxy CIDR to narrow it to.
+
+Free-tier limits worth knowing before sharing the URL: the service sleeps after
+fifteen minutes idle and takes about a minute to wake, the filesystem is
+ephemeral, a new deploy has fifteen minutes to pass its health check, and the
+workspace has five gigabytes of outbound bandwidth a month.
+
 Deployment needs flyctl, an authenticated Fly account, and the three secrets set
 through `fly secrets import` so no value ever reaches a command line, a shell
 history or a transcript:

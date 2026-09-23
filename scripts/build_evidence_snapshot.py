@@ -39,6 +39,7 @@ from icor.infrastructure.snapshot_store import (
     SnapshotPromotionError,
     SnapshotStore,
     SnapshotUnavailableError,
+    write_verified_marker,
 )
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
@@ -112,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = commands.add_parser("verify")
     _add_root_arguments(verify)
+
+    mark = commands.add_parser("mark-verified")
+    _add_root_arguments(mark)
     return parser
 
 
@@ -254,6 +258,28 @@ def _verify(
     return 0, payload
 
 
+def _mark_verified(
+    root: Path,
+    filesystem: SnapshotFilesystem,
+) -> tuple[int, dict[str, object]]:
+    """Fully verify the active snapshot, then record that this tree passed.
+
+    Run while an image is built. A container started with
+    `ICOR_SNAPSHOT_TRUST_BAKED=1` then opens the snapshot on this result instead
+    of rehashing a multi-gigabyte database on every cold start. The marker is
+    derived from a real verification here, never written by hand.
+    """
+
+    store = SnapshotStore(root, filesystem=filesystem)
+    manifest, repository = store.open_active_snapshot()
+    marker = write_verified_marker(root)
+    payload = _snapshot_payload(manifest, state="verified")
+    payload["active_snapshot_id"] = manifest.snapshot_id
+    payload["verified_marker"] = marker.name
+    payload["repository_observation_count"] = len(repository.list_observations())
+    return 0, payload
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -294,6 +320,8 @@ def main(
                 code, payload = _promote(args, pinned_root, filesystem)
             elif args.command == "status":
                 code, payload = _status(pinned_root, filesystem)
+            elif args.command == "mark-verified":
+                code, payload = _mark_verified(pinned_root, filesystem)
             else:
                 code, payload = _verify(pinned_root, filesystem)
     except UnsupportedParserError:

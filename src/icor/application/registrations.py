@@ -15,7 +15,7 @@ from icor.application.evidence_review import EvidenceReviewService
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.snapshots import SnapshotManifest, SnapshotVersions
 from icor.generations.public_catalog import ranking_public_generation_catalog
-from icor.infrastructure.snapshot_store import SnapshotStore
+from icor.infrastructure.snapshot_store import SnapshotStore, trusts_baked_snapshot
 
 _EEA_SOURCE_ID = "eea-co2-monitoring"
 _IDENTITY_REGISTRY = "exact-normalized-model-family-v1"
@@ -148,7 +148,9 @@ class RegistrationService:
     @classmethod
     def from_active(cls, root: Path) -> RegistrationService:
         try:
-            manifest, repository = SnapshotStore(root).open_active_snapshot()
+            manifest, repository = SnapshotStore(
+                root, trust_verified_marker=trusts_baked_snapshot()
+            ).open_active_snapshot()
             if manifest.versions.identity_registry != _IDENTITY_REGISTRY:
                 raise ValueError("canonical identity registry is unavailable")
             return cls(repository.path, manifest)
