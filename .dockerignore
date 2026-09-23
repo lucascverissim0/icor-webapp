@@ -31,12 +31,30 @@ web/test-results/
 **/__pycache__/
 **/*.py[cod]
 
-# Evidence. The client snapshot is copied in explicitly by path; everything
-# else under .local is tens of gigabytes of full-scope corpora.
-.local/evidence/candidates/
-.local/evidence/releases/
-.local/e2e-fixture-*/
-.local/*.sqlite3
+# Evidence and local state. Deny everything under .local and re-admit exactly
+# the one thing an image needs. The previous form listed the paths that happened
+# to be large, and missed `.local/evidence/snapshots/` -- 26 GB -- so a build
+# context would have tried to upload the whole corpus. An allowlist cannot rot
+# that way: a new directory under .local can never join a context silently, and
+# if this rule ever over-excludes, the COPY in the Dockerfile fails the build
+# loudly instead of a 27 GB upload succeeding quietly.
+#
+# Both negations are needed. `.local/**` does not match `.local` itself, so the
+# walker still descends; the first re-admits the directory entry and the second
+# its contents.
+.local/**
+!.local/client-evidence/
+!.local/client-evidence/**
+
+# Local agent state, which includes a live loopback session key under
+# .superpowers/*/state/server-info.
+.superpowers/
+
+# The legacy Streamlit app's siblings. `ui/` above is the app itself; these are
+# the research scripts that construct an OpenAI client. Neither belongs in an
+# image, and the Dockerfile names the one script it does need.
+scripts/*
+!scripts/run_container_preview.py
 
 # Not needed at runtime.
 tests/

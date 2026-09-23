@@ -48,13 +48,47 @@ prunes and re-validates in minutes, where a second build would repeat the whole
 replay:
 
     uv run python scripts/build_client_snapshot.py --root .local/evidence derive --active
-    uv run python scripts/build_client_snapshot.py --root .local/evidence promote --snapshot <id>
 
-Copy the promoted client snapshot to `.local/client-evidence`, which is the only
-evidence path the Dockerfile copies. The image builds the bundle itself with
-`VITE_ICOR_CLIENT_RELEASE=verified`, installs the `preview` extra only so the
-`openai` and `streamlit` packages are absent from the runtime, and fails the
-build if the baked snapshot is not client-scoped.
+Then promote it into `.local/client-evidence`, **not** into `.local/evidence`:
+
+    mkdir .local/client-evidence/candidates
+    mv .local/evidence/candidates/<derived-id> .local/client-evidence/candidates/
+    uv run python scripts/build_evidence_snapshot.py promote         --root .local/client-evidence --snapshot <derived-id>
+    rm -r .local/client-evidence/candidates
+
+Promotion rewrites `active.json` in whatever root it is given. Promoting a
+client-scoped snapshot into the development root makes it the *active* snapshot
+there, and the internal app then refuses to start, because outside client-release
+mode it requires a full-scope snapshot. It also leaves `verified.json` naming a
+snapshot that is no longer active, so `mark-verified` has to be re-run against a
+9.25 GB database. Give the client artifact its own root and none of that happens.
+
+`.local/client-evidence` is a whole **evidence root**, not a snapshot directory
+-- `Dockerfile:58` copies it to `/srv/icor/evidence` and the store resolves
+`<root>/snapshots/<snapshot_id>`. It must contain exactly:
+
+    .local/client-evidence/active.json
+    .local/client-evidence/snapshots/<derived-id>/evidence.sqlite3
+    .local/client-evidence/snapshots/<derived-id>/snapshot.json
+    .local/client-evidence/snapshots/<derived-id>/validation.json
+
+A stray file in the snapshot directory fails the build, `candidates/` would put a
+second two-gigabyte copy into the build context, and `verified.json` must not be
+pre-seeded because the image writes it. Prove the whole thing before paying for
+an upload:
+
+    uv run python scripts/build_evidence_snapshot.py verify --root .local/client-evidence
+
+The image builds the bundle itself with `VITE_ICOR_CLIENT_RELEASE=verified`, and
+fails the build if the baked snapshot is not client-scoped.
+
+`openai` and `streamlit` are absent from the runtime, but not because of the
+`preview` extra: a PEP 621 extra is additive, so `--extra preview` installs the
+whole of `[project.dependencies]` too. They are absent because they live in a
+non-default `legacy` dependency group that `uv sync --no-dev` leaves out. Confirm
+it on a built image rather than trusting this paragraph:
+
+    ls /app/.venv/lib/python3.12/site-packages | grep -E 'openai|streamlit'
 
 ## Snapshot verification is done once, at build time
 

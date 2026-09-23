@@ -7,27 +7,26 @@ name = "icor-windshield-demand"
 version = "0.1.0"
 description = "Auditable windshield demand forecasting application"
 requires-python = ">=3.12,<3.13"
+# The API, the evidence pipeline and the tests. An extra is *additive* to this
+# list, never a replacement for it, so anything the container must not carry
+# cannot live here — which is why openai and streamlit are in `legacy` below.
 dependencies = [
   "argon2-cffi>=25.1,<26",
   "bcrypt>=4.1,<5",
   "beautifulsoup4>=4.12,<5",
   "fastapi>=0.116,<1",
   "numpy>=1.26,<3",
-  "openai>=1.10,<2",
   "openpyxl>=3.1,<4",
   "pandas>=2.2,<3",
   "posthog>=3.6,<4",
   "requests>=2.32.4,<3",
-  "streamlit>=1.54,<2",
-  "streamlit-authenticator>=0.4,<0.5",
   "tabulate>=0.9,<1",
   "uvicorn[standard]>=0.35,<1",
 ]
 
 [project.optional-dependencies]
-# The client preview runtime. Deliberately excludes openai and streamlit: the
-# container must not carry a client for the API whose key is still exposed in
-# this repository's history, and it never runs the legacy Streamlit app.
+# The client preview runtime, named so the container's dependency set is stated
+# rather than implied. It is a subset of the base list and adds nothing.
 preview = [
   "argon2-cffi>=25.1,<26",
   "fastapi>=0.116,<1",
@@ -36,6 +35,15 @@ preview = [
 ]
 
 [dependency-groups]
+# The legacy Streamlit app, its test, and the research scripts. A group rather
+# than an extra, and not a default group, so `uv sync --no-dev` in the container
+# leaves it out while CI's `--all-groups` still runs the Streamlit startup test.
+# Anything under ui/ or scripts/script*.py needs `uv sync --group legacy`.
+legacy = [
+  "openai>=1.10,<2",
+  "streamlit>=1.54,<2",
+  "streamlit-authenticator>=0.4,<0.5",
+]
 dev = [
   "httpx2>=2,<3",
   "pip-audit>=2.9,<3",

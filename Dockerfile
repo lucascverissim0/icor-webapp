@@ -8,10 +8,16 @@
 #   1. There is no `COPY . .` anywhere. Every file is named. The repository's Git
 #      history still contains a leaked OpenAI key, so the history must never be
 #      able to reach an image, and an allowlist is the only way to be sure.
-#   2. The runtime image installs the `preview` extra only, so the `openai` and
-#      `streamlit` packages are physically absent from the running container.
-#      That does not un-leak the key, but it removes the client from anything
-#      that could use it.
+#   2. The `openai` and `streamlit` packages are physically absent from the
+#      running container. Note how that is achieved, because the obvious way
+#      does not work: a PEP 621 extra is *additive*, so `--extra preview` alone
+#      installed the whole of `[project.dependencies]` as well and the guarantee
+#      was false for as long as those two were listed there. They now live in a
+#      non-default `legacy` dependency group, which `uv sync --no-dev` leaves
+#      out. That does not un-leak the key; it removes the client from anything
+#      in the image that could use it.
+#      Verify on a built image with:
+#        ls /app/.venv/lib/python3.12/site-packages | grep -E 'openai|streamlit'
 
 # ---------------------------------------------------------------- client bundle
 FROM node:24.15.0-bookworm-slim AS web

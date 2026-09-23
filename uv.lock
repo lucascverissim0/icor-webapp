@@ -509,13 +509,10 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },
     { name = "numpy" },
-    { name = "openai" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "posthog" },
     { name = "requests" },
-    { name = "streamlit" },
-    { name = "streamlit-authenticator" },
     { name = "tabulate" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -536,6 +533,11 @@ dev = [
     { name = "pytest-socket" },
     { name = "ruff" },
 ]
+legacy = [
+    { name = "openai" },
+    { name = "streamlit" },
+    { name = "streamlit-authenticator" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -547,13 +549,10 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'preview'", specifier = ">=0.116,<1" },
     { name = "numpy", specifier = ">=1.26,<3" },
     { name = "numpy", marker = "extra == 'preview'", specifier = ">=1.26,<3" },
-    { name = "openai", specifier = ">=1.10,<2" },
     { name = "openpyxl", specifier = ">=3.1,<4" },
     { name = "pandas", specifier = ">=2.2,<3" },
     { name = "posthog", specifier = ">=3.6,<4" },
     { name = "requests", specifier = ">=2.32.4,<3" },
-    { name = "streamlit", specifier = ">=1.54,<2" },
-    { name = "streamlit-authenticator", specifier = ">=0.4,<0.5" },
     { name = "tabulate", specifier = ">=0.9,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'preview'", specifier = ">=0.35,<1" },
@@ -567,6 +566,11 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3,<10" },
     { name = "pytest-socket", specifier = ">=0.7,<1" },
     { name = "ruff", specifier = ">=0.12,<1" },
+]
+legacy = [
+    { name = "openai", specifier = ">=1.10,<2" },
+    { name = "streamlit", specifier = ">=1.54,<2" },
+    { name = "streamlit-authenticator", specifier = ">=0.4,<0.5" },
 ]
 
 [[package]]

@@ -22,7 +22,9 @@ jobs:
           version: "0.11.3"
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --locked --no-dev
+      # The research script is the only consumer of the openai client, which
+      # lives in the non-default `legacy` group so the container cannot carry it.
+      - run: uv sync --locked --no-dev --group legacy
       - name: Require the dedicated project key
         shell: bash
         run: test -n "$OPENAI_API_KEY" || { echo "Missing OPENAI_API_KEY repository secret"; exit 2; }
