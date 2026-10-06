@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-09-23
+Last updated: 2026-10-06
 
 ## Project objective
 
@@ -18,9 +18,15 @@ On 2026-08-25 Lucas clarified the business outcome: the app must forecast how ma
   `fix/client-release-production`, which contains all of it (224 commits ahead of `main`).
 - **Active machine since 2026-09-23: Lucas's Mac.** A single clone at `~/ICOR`, branch
   `fix/client-release-production`. The Windows machine is retired.
-- Git authentication on the Mac: GitHub CLI `gh` as `lucascverissim0`, used by git as the
-  credential helper. `gh` also holds an unrelated work account (`lverissimo-01`); check
-  `gh auth status` shows `lucascverissim0` active before any network write. If
+- Git authentication on the Mac (set up 2026-10-06): `gh` holds two accounts. The work
+  account `lverissimo-01` stays the **active** one because another VS Code session uses
+  it; never run `gh auth switch` or `gh auth login` without switching back. This repo's
+  `.git/config` resets the global helper and sets a repo-local
+  `credential.https://github.com.helper` that answers with
+  `gh auth token --user lucascverissim0`, so git in `~/ICOR` always authenticates as
+  `lucascverissim0` whichever account is active (verified: `git credential fill` returns
+  `username=lucascverissim0`; `git ls-remote origin HEAD` succeeded). For `gh` commands
+  on this repo, prefix `GH_TOKEN=$(gh auth token --user lucascverissim0)`. If
   authentication is missing or expired, stop and tell Lucas instead of prompting.
 - Commits on the Mac use the repository-local identity `Lucas Cravo Verissimo
   <lucas.c.verissimo@gmail.com>`. The commits made on Windows used `lverissimo@peble.be`.
@@ -6135,3 +6141,180 @@ The clean-room integration failures follow from 1 and 2.
 4. Choose the macOS approach for cause 2, fix cause 1, and rerun the full suite.
 
 No long-running process is active.
+
+## 2026-10-06 — post-ICOR-meeting programme (Claude Code, Mac)
+
+Lucas met ICOR. Requirements, in delivery order (data quality matters most to him):
+1. ICOR readiness must **not** affect the score; show it instead.
+2. Much easier UI and data tables, designed with Claude Design, little text.
+3. More and better data so less popular cars work well.
+4. Last: identify cars by **EUROCODE** (Lucas has an Excel mapping; not started).
+
+Approved plan: `~/.claude/plans/ok-great-now-know-structured-waterfall.md`. Decisions
+taken with Lucas on 2026-10-06: score = demand only, 0–100; port the store to macOS
+and rebuild here; free/public data only; UI focus = ranking and search tables, ICOR
+cyan/navy, sharp corners, audit pages simplified rather than redesigned.
+
+### Commits (branch `fix/client-release-production`, not pushed)
+
+| Commit | What |
+|---|---|
+| `93d3c63` | macOS store port. Root pinning uses volfs `/.vol/<dev>/<ino>`, which follows a directory across renames like `/proc/self/fd/N` (verified on APFS, macOS 26.6), so the guarantee is Linux-grade, not weaker. Publication uses `renamex_np(RENAME_EXCL)`. `resolve_strict` resolves volfs paths via `F_GETPATH`. One test made portable (POSIX needs a writable dir for SQLite's journal). |
+| `0b174b7` | Score = `DemandScoreV2` (`strategy_name="demand"`, version `"2"`): whole-market percentile × 100, in `ranking.py` and the snapshot SQL. Readiness fields removed from the score/API; rows gain `icor_worked`; `/api/v1/opportunities?icor_worked=true|false` filter (never moves a score). Coverage edits no longer clear the market populations. UI: formula panel/bars updated, "ICOR worked" badge and filter. Spec note added to the 2026-08-26 ranking design. |
+| `a52770a` | `scripts/measure_long_tail.py`: per volume decile of EEA 2010–2024 registrations, share of canonical vehicles with a forecast, share of their volume forecast, share ranked; plus a 48-model low-volume panel. |
+| `562ce67` | Planning: (a) series with 1–2 annual values are planned (label `short-registration-history`) instead of dropped; (b) an **estimated** generation's end (= last year any data mentions it) is no longer read as discontinuation: a series has ended only if its market reports later years without it. Before, no model outside the 19 reviewed families got a single future registration. |
+| `c8feaa6` | Model search returns all 30 markets (+EU27), those with data first by volume. |
+| `54266a5` | DfT republished VEH0160/VEH0120 on 2026-09-23 (2026 Q1–Q2 added). The 2026-07-13 pins' URLs now 301 to new files and Wayback has no copy, so the old bytes are unobtainable. New pins `uk-dft-veh0160-gb-2025-final-20261006` and `uk-dft-veh0120-gb-2025-final-20261006` (size, sha256, parser counts). Measured: **0 suppressed (`[c]`) groups** in either table, so the planned UK-suppression fix is unnecessary and was dropped. |
+| `6db6432` | Stock anchoring: where a market's registrations are planned and a register reports cars on the road by cohort, complete cohorts (`date(c,12,31) <= stock date`) come from that stock × the survival curve's conditional ratio S(h)/S(stock age); later cohorts still come from the registration forecast. Stock for a territory with no planned registrations (DfT VEH0124 = `UK` vs registrations `GB`) is ignored, never added. Estimation version `observed-stock-anchored-cohorts-v2`. Benchmark gains `--database` and `--exclude-geography`. |
+
+### Environment facts found this session
+
+- Python's default CA file on this Mac fails EEA TLS ("self-signed certificate in
+  chain"); curl and certifi succeed. Run acquisitions with
+  `SSL_CERT_FILE=$(uv run python -c "import certifi;print(certifi.where())")`.
+- zsh does not word-split `$VAR`; multi-`--release` builds go through
+  `.local/run_build.sh <worktree> <log>` (untracked).
+- Node 24.21 and Playwright Chromium are now installed; all web gates pass on the Mac.
+- `.local/evidence/releases` now holds all 21 pinned releases (checksums verified on stage).
+
+### National registers added as observed stock (commits `8fbab16`, `85b533c`, `c2004d1`)
+
+- **RDW Netherlands** (`rdw-nl-registered-cars-20261006`, Public Domain): registrable
+  passenger cars by `merk`/`handelsbenaming`/first-admission year, acquired through the
+  Socrata API (`scripts/acquire_rdw_fleet.py`) into a deterministic CSV: 5,535,649
+  bytes, sha256 `4b83b77f…59c54e`, 195,582 groups (194,352 accepted, 1,230 rejected),
+  10,142,067 cars. The register changes daily, so the pin is a dated snapshot that
+  re-acquisition cannot reproduce; the artifact is kept at
+  `.local/pinned-artifacts/rdw-nl-registered-cars-20261006.csv`.
+  Measured before integrating: for cohort 2019, 96% of RDW stock matches an EEA NL label
+  exactly and 99.8% of EEA NL volume has a folded match. RDW 2019 = 542k cars vs EEA NL
+  new registrations of 395k, the difference being used imports. 2000–2009 cohorts
+  are about 1.9M cars that the EEA never covers.
+- **Traficom Finland** (`traficom-fi-vehicles-20260630`, CC BY 4.0, "Source: Traficom"):
+  the official quarterly ZIP pinned directly (208,492,096 bytes, sha256 `81fdd696…35da0`;
+  the CSV inside is dated 30.06.2026). Rows: 5,296,749 raw; 2,693,484 M1/M1G accepted;
+  2,603,265 rejected. Cohort = year of `kayttoonottopvm` (first use). Rows with no
+  `kaupallinenNimi` are **rejected**: the subagent's fallback to `mallimerkinta` was
+  removed because that field holds body-type strings ("2DSEDAN 1300-11/2400"). Traficom
+  replaces the ZIP in place each quarter, so the pin fails once a newer edition appears.
+  The copy is kept at `.local/pinned-artifacts/traficom-fi-vehicles-20260630.zip`.
+- Both sources were implemented by Sonnet subagents in worktrees, then reviewed and
+  cherry-picked. The bootstrap plan now holds **23 releases**. NL and FI cohorts become
+  stock-anchored automatically through `6db6432`.
+
+### Baseline measured (`snapshot-fccad643f981f5b6468e`, built in ~25 min on the Mac)
+
+The Mac builds a full snapshot in about 25 minutes, against about 3h40 on Windows.
+
+The baseline is a candidate, not promoted: 1,557,286 observations. Raw outputs are in
+`.local/longtail-baseline.json`, `.local/bench-baseline.json` and
+`.local/bench-baseline-exnlfi.json`.
+
+- Long tail, by EEA 2010–2024 registrations per canonical vehicle (bands; about 10,700
+  of 14,023 identities are typos with fewer than 100 registrations):
+
+  | Registrations | Vehicles | Share with a forecast | Share of volume forecast |
+  |---|---:|---:|---:|
+  | 100–1k | 1,502 | 45.5% | 46.1% |
+  | 1k–10k | 891 | 70.4% | 67.5% |
+  | 10k–100k | 598 | 87.6% | 86.6% |
+  | 100k+ | 323 | 98.5% | 96.9% |
+
+  Overall 94.97% of observed volume is forecast. Tail panel: 46 of 48 have a
+  forecast; Lynk & Co 01 and BYD Atto 3 do not.
+- Benchmark (`--database`): production WAPE **0.657514** against replaced 0.778914
+  (24,446 series). Without NL and FI: 0.653886 against 0.775013 (22,896 series). It
+  cannot equal Windows' 0.658760 because DfT's data changed.
+- Rounding measured and the fix dropped: 65,294 of 140,808 vehicle×cohort groups
+  show 0 at 2031. Only 1,336 would reach 0.5 if summed fractionally, and the total
+  lost is 7,226 of 5.95M units (0.12%). The zeros are genuinely tiny vehicles.
+- First candidate build failed: "official generation mapping is incomplete". The
+  registers report Golf cohorts back to the 1970s, outside the reviewed Mk6–Mk8
+  windows, so the resolver could not place them. Fixed in `9e7d8ca`: each stretch of
+  uncovered years gets its own estimated generation. The build CLI swallows tracebacks;
+  `.local/debug_build.py`, run via `BUILD_SCRIPT=… .local/run_build.sh`, prints them.
+
+### Data phase result — promoted `snapshot-b05d20c2d34a9b0a340d` (2026-10-06 15:18)
+
+Built from `6d60a94` (worktree `~/ICOR-candidate`), 23 releases, as-of
+2026-09-22T12:00Z, seed 20260922. Database sha256 `ab9b923e…079529`, 1,815,398
+observations. Promoted and `mark-verified` into `.local/evidence`, which is now
+active. Two superseded candidates sit read-only in `.local/superseded-candidate-*`;
+the baseline candidate `snapshot-fccad643f981f5b6468e` is still in `candidates/`.
+All three can be deleted.
+
+Defects found and fixed while validating (each with tests):
+
+- `9e7d8ca`: register cohorts back to the 1970s lie outside the reviewed Golf windows,
+  so the resolver could not place them and the build aborted. Each uncovered stretch
+  of years now gets its own estimated generation.
+- `476ef82`: **gap interpolation and forecasts filled years the market had
+  reported.** On the baseline that put **32.3M interpolated and 11.4M forecast
+  registrations** inside reported market-years against 214M real ones, so
+  historical cohorts ran about 20% high. The planning logic is the same as the
+  client-release snapshot's. The old gates replayed observations and never saw it.
+  Interpolation and forecasts now fill only years with no market data, and the
+  forecaster uses the latest unbroken run. Check with `.local/check_invented.sql`
+  (untracked): it must return only `reconciled-registration-cohort`.
+- `6d60a94`: a series has ended when its market reports later years without it,
+  whatever its generation. Before, 7 reviewed DE series absent from 2025 still
+  forecast 210k cars for 2026. Estimation method is now
+  `reported-years-stock-anchored-cohorts-v3`.
+- `2e3abfe`, `cadcdc1` (query-time identity): bare 1–2 digit numbers were stripped
+  as engine sizes, so **Tesla Model 3 folded into "Model", Kia EV 6 into "EV", and
+  BYD Atto 3 into "Atto" beside the Atto 2** — different windshields summed. Engine
+  sizes are now decimals or 3–4 digits only. Spelling variants that differ by
+  spaces or hyphens (`mx-5`/`mx5`/`mx 5`, `c4picasso`) resolve to the
+  highest-volume spelling. `&amp`/`&AMP` are decoded, and Lynk & Co make aliases
+  were added. Remaining under-merges (safe direction): "LYNKAMPCO" models, French
+  "Classe C", `C220`.
+
+Verification of the promoted snapshot:
+
+| Check | Result |
+|---|---|
+| GB/DE reconciliation gate | `gate: pass`; GB 2018 2,355,350 (identical to Windows), DE 2024 0.9686 |
+| Invented cohorts in reported years | 0 |
+| Cohort totals vs actual registrations | DE 2012 2.566M = reconciled; GB 2012 2.035M, GB 2019 2.305M (≈ DfT) |
+| Volume with a forecast | 94.97% → **100%** |
+| Share of vehicles forecast, 100–1k / 1k–10k / 10k–100k regs | 45% / 70% / 88% → **99.8% / 99.7% / 100%** |
+| 48-model low-volume panel | 46 → **48** |
+| Per-series forecast WAPE, excluding NL/FI | 0.653886, identical to the baseline (22,896 series) |
+| Market-total backtest from 2023 (`scripts/backtest_market_totals.py`) | summed bias +1.7%, market WAPE 5.9% (direct total forecast −4.2%, 6.7%); the old baseline was +12.6% |
+| Fleet 2028 | DE 42.6M, FR 27.8M, IT 23.0M, GB 32.6M, NL 9.24M (anchored stock 9.56M, incl. 2.13M pre-2010), FI 2.28M (anchored 2.63M, incl. 0.82M pre-2010) |
+| Europe-wide 2028 / 2031 | fleet 196.9M / 206.0M; replacements P50 8.44M / 8.83M |
+| Live API (`planner_service.py`, port 8000) | score strategy `demand` v2; 121,579 model-year rows; 48 ICOR-worked; worked + not worked = total; 48/48 worked rows score identically in list and detail |
+| Rare cars in search | Tonale 26 markets, Lynk & Co 01 12, Polestar 2 17, Alpine A110 18, Jeep Avenger 30 |
+
+Known caveats:
+
+- Finland's fleet falls from 2.28M (2028) to 1.82M (2031). The UK survival curve
+  applied conditionally to Finland's unusually old fleet probably overstates its
+  scrappage.
+- DE registrations are forecast to rise from 2.77M (2025) to 3.33M (2031) through
+  per-model damped trends. That is only backtested two years ahead.
+
+The local planner service runs detached on 127.0.0.1:8000 (API) and :5173 (web)
+against this snapshot. Stop it with `uv run python scripts/planner_service.py stop`.
+It survives clearing the conversation, but not a reboot.
+
+The client snapshot has not been re-derived yet; do it after the UI phase.
+
+### Claude Design prototype (awaiting Lucas's approval before any UI code)
+
+https://claude.ai/artifact/TNA1qhnu8BYoWEoDge7TRP — boards: Opportunities table with
+filters/side panel, vehicle Search with all-markets table, phone, and states
+(empty/loading/error/"registered, no forecast"). Figures are sample values except VW
+Golf 2020 (89.9, rank 32 of 24,694). The fleet/fleet-growth columns need a backend
+addition (rows carry no fleet today). IBM Plex Sans/Mono proposed; must be
+self-hosted because the CSP blocks font CDNs.
+
+### Deferred, with reasons
+
+- Folding spellings before planning: after `562ce67` a fragment that stops is closed
+  and the new spelling starts its own series, so most of the loss is gone; measure
+  `forecast_registration_share` on the candidate before deciding.
+- Fractional demand (per-market/per-year integer rounding before summing): measure on
+  the baseline first — no rebuild is needed to quantify it.
+- Further free sources worth checking next: Finland Traficom open vehicle data
+  (per vehicle, CC BY 4.0), KBA FZ10 pre-2010 (terms unverified).
