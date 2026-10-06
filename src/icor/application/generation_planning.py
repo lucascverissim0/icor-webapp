@@ -240,6 +240,12 @@ class GenerationPlanningService:
             cohort_buffer.clear()
             opportunity_buffer.clear()
 
+        # Every year each market's coverage source reported. A vehicle absent
+        # from a reported year is not a gap to fill.
+        covered_years: dict[str, set[int]] = defaultdict(set)
+        for geography, year in coverage:
+            covered_years[geography].add(year)
+
         # The newest year any vehicle was observed in each market. A series that
         # reaches it is still on sale there; one that stops short has ended.
         latest_year: dict[str, int] = {}
@@ -281,7 +287,7 @@ class GenerationPlanningService:
                 end_year = _end_year(
                     generation, max(observed_years), latest_year[geography]
                 )
-                values = _fill_internal_gaps(observed_years)
+                values = _fill_internal_gaps(observed_years, covered_years[geography])
                 if end_year is not None:
                     values = {
                         year: annual for year, annual in values.items() if year <= end_year
@@ -308,7 +314,10 @@ class GenerationPlanningService:
                             if year <= end_year
                         }
                     for year, value in forecasts.items():
-                        values[year] = _AnnualValue(value, all_input_ids, "forecast")
+                        # A year the market reported is evidence, not a gap:
+                        # a vehicle absent from it sold none under this name.
+                        if year not in covered_years[geography]:
+                            values[year] = _AnnualValue(value, all_input_ids, "forecast")
             stock = anchored_stock.get(series_key, {})
             if geography in anchor_year:
                 values = {
@@ -495,6 +504,12 @@ class GenerationPlanningService:
         self, values: dict[int, _AnnualValue], horizon: int
     ) -> tuple[str, dict[int, Decimal]]:
         observed = {year: value.registrations for year, value in values.items()}
+        # Forecast from the latest unbroken run: a reported year the vehicle is
+        # absent from is a break in its history, not a value to invent.
+        run_start = max(observed)
+        while run_start - 1 in observed:
+            run_start -= 1
+        observed = {year: value for year, value in observed.items() if year >= run_start}
         latest = max(observed)
         if latest >= horizon:
             return "observed-history-only-v1", {}
@@ -565,7 +580,9 @@ def _end_year(generation, last_observed: int, market_latest: int) -> int | None:
     return None
 
 
-def _fill_internal_gaps(values: dict[int, _AnnualValue]) -> dict[int, _AnnualValue]:
+def _fill_internal_gaps(
+    values: dict[int, _AnnualValue], reported_years: set[int] | frozenset[int] = frozenset()
+) -> dict[int, _AnnualValue]:
     completed = dict(values)
     years = sorted(values)
     all_inputs = tuple(
@@ -578,7 +595,7 @@ def _fill_internal_gaps(values: dict[int, _AnnualValue]) -> dict[int, _AnnualVal
         )
     )
     for year in range(years[0], years[-1] + 1):
-        if year in completed:
+        if year in completed or year in reported_years:
             continue
         before = max(candidate for candidate in years if candidate < year)
         after = min(candidate for candidate in years if candidate > year)

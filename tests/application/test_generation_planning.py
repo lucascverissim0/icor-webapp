@@ -635,3 +635,60 @@ def test_stock_in_a_geography_without_registrations_is_never_added_on_top() -> N
 
     assert {item.geography for item in repository.cohorts} == {"DE"}
     assert {item.geography for item in repository.opportunities} == {"DE"}
+
+
+def test_a_gap_in_a_year_the_market_reported_is_not_invented() -> None:
+    """A complete country-year that omits a vehicle says it sold none under that name.
+
+    Interpolating across it added registrations the publisher already filed
+    under another label: 1.36M extra German 2012 registrations on the baseline.
+    """
+
+    repository = Repository()
+    # Golf observed 2020 and 2022 only; another vehicle shows DE reported 2021.
+    repository.observations[1].registration_cohort_year = 2022
+    repository.observations[1].period_start = date(2022, 1, 1)
+    repository.observations[1].period_end = date(2022, 12, 31)
+    repository.observations = repository.observations[:2]
+    repository.assignments = repository.assignments[:2]
+    _add_vehicle(repository, "witness", ((2020, "5"), (2021, "5"), (2022, "5")))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    golf_years = _cohort_years(repository, "vehicle-volkswagen-golf-eu")
+    assert 2021 not in golf_years
+    assert {2020, 2022} <= golf_years
+
+
+def test_a_gap_in_a_year_the_market_never_reported_is_still_estimated() -> None:
+    repository = Repository()
+    repository.observations[1].registration_cohort_year = 2022
+    repository.observations[1].period_start = date(2022, 1, 1)
+    repository.observations[1].period_end = date(2022, 12, 31)
+    repository.observations = repository.observations[:2]
+    repository.assignments = repository.assignments[:2]
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    estimated = next(
+        item
+        for item in repository.cohorts
+        if item.registration_cohort_year == 2021 and item.as_of_year == 2028
+    )
+    assert estimated.registrations == Decimal("105")
+    assert "estimated-registration-cohort" in estimated.reason_codes
+
+
+def test_a_forecast_never_fills_a_year_the_market_reported() -> None:
+    """A reviewed generation that ended in 2022 but whose 2022 cars were filed
+    under its successor must not get a forecast 2022 cohort on top."""
+
+    repository = Repository()
+    repository.generation.end_month = date(2023, 12, 1)
+    repository.observations = repository.observations[:2]
+    repository.assignments = repository.assignments[:2]
+    _add_vehicle(repository, "successor", ((2022, "50"), (2023, "60")))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021}
