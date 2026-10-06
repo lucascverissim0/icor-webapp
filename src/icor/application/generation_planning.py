@@ -567,17 +567,21 @@ def _collect_stock(observation, assignment, stock_dates, stock_series) -> None:
 def _end_year(generation, last_observed: int, market_latest: int) -> int | None:
     """The last cohort year a series may hold, or None while it is on sale.
 
-    A reviewed generation's end is a documented manufacturer fact. An estimated
-    generation's end is only the last year any data mentions it, so it says
-    nothing about discontinuation by itself: the series has ended only if the
-    market reports later years without it.
+    A series has ended when its market reports later years without it, whatever
+    its generation: a reviewed window says when a generation may sell, not that
+    it still does, and its cars may already sit under a new label. A reviewed
+    window's documented end can only stop it earlier. An estimated generation's
+    end is just the last year any data mentions it, so it adds nothing.
     """
 
-    if getattr(generation, "identity_kind", None) is GenerationIdentityKind.ESTIMATED:
-        return None if last_observed >= market_latest else last_observed
-    if generation.end_month is not None:
-        return generation.end_month.year
-    return None
+    ended = last_observed if last_observed < market_latest else None
+    if (
+        getattr(generation, "identity_kind", None) is not GenerationIdentityKind.ESTIMATED
+        and generation.end_month is not None
+    ):
+        documented = generation.end_month.year
+        return documented if ended is None else min(documented, ended)
+    return ended
 
 
 def _fill_internal_gaps(

@@ -692,3 +692,18 @@ def test_a_forecast_never_fills_a_year_the_market_reported() -> None:
     GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
 
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021}
+
+
+def test_a_reviewed_series_absent_from_a_later_reported_year_has_ended() -> None:
+    """A reviewed window says when a generation may sell, not that it still does.
+
+    Seven reviewed series absent from German 2025 still forecast 210k cars for
+    2026 while their 2025 registrations sat under a new label.
+    """
+
+    repository = Repository()  # reviewed (identity kind unset), open window
+    _add_vehicle(repository, "relabelled", ((2022, "50"), (2023, "60")))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
