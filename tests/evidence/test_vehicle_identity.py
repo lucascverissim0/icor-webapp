@@ -241,3 +241,108 @@ class TestVehicleIdentityIndex:
         self, index: VehicleIdentityIndex
     ) -> None:
         assert index.match(parse_vehicle_query("ferrari f40")) == ()
+
+
+def _models(rows: list[tuple[str, str, str, float]]) -> dict[str, tuple[str, ...]]:
+    index = VehicleIdentityIndex.from_rows(rows)
+    return {
+        f"{identity.display_make} {identity.display_model}": index.vehicle_ids(
+            identity.make, identity.model
+        )
+        for identity in index.identities()
+    }
+
+
+def test_a_one_or_two_digit_model_number_is_never_an_engine_size() -> None:
+    """`Model 3` folded to `Model`, merging the Model 3 with other Teslas, and
+    `EV 6` folded to `EV`: different cars, different windshields."""
+
+    models = _models(
+        [
+            ("t3", "TESLA", "MODEL 3", 900_000.0),
+            ("ty", "TESLA", "MODEL Y", 1_000_000.0),
+            ("k6", "KIA", "EV 6", 80_000.0),
+            ("k9", "KIA", "EV 9", 20_000.0),
+            ("b3", "BYD", "ATTO 3", 50_000.0),
+            ("b2", "BYD", "ATTO 2", 20_000.0),
+            ("m5", "MAZDA", "MX-5", 60_000.0),
+            ("m30", "MAZDA", "MX-30", 30_000.0),
+        ]
+    )
+
+    assert models["Tesla Model 3"] == ("t3",)
+    assert len({ids for ids in models.values()}) == 8
+
+
+def test_engine_sizes_and_class_designations_still_fold_onto_the_model() -> None:
+    models = _models(
+        [
+            ("a", "AUDI", "A4", 1_000_000.0),
+            ("b", "AUDI", "A4 2.0 TDI", 50_000.0),
+            ("c", "FIAT", "PUNTO", 200_000.0),
+            ("d", "FIAT", "PUNTO 1200", 5_000.0),
+        ]
+    )
+
+    assert set(models["Audi A4"]) == {"a", "b"}
+    assert set(models["Fiat Punto"]) == {"c", "d"}
+
+
+def test_spacing_variants_of_one_name_are_one_vehicle() -> None:
+    models = _models(
+        [
+            ("spaced", "TESLA", "MODEL 3", 900_000.0),
+            ("joined", "TESLA", "MODEL3", 20_000.0),
+            ("picasso", "CITROEN", "C4 PICASSO", 300_000.0),
+            ("picasso-joined", "CITROEN", "C4PICASSO", 4_000.0),
+            ("c4", "CITROEN", "C4", 900_000.0),
+        ]
+    )
+
+    assert set(models["Tesla Model 3"]) == {"spaced", "joined"}
+    assert set(models["Citroen C4 Picasso"]) == {"picasso", "picasso-joined"}
+    assert models["Citroen C4"] == ("c4",)
+
+
+def test_an_html_escaped_ampersand_is_the_ampersand_it_stands_for() -> None:
+    assert fold_make("LYNK &amp; CO") == fold_make("Lynk & Co")
+
+
+def test_a_spaced_or_hyphenated_label_finds_its_one_word_model() -> None:
+    models = _models(
+        [
+            ("ev6", "KIA", "EV6", 80_000.0),
+            ("ev-6", "KIA", "EV 6", 900.0),
+            ("ev9", "KIA", "EV9", 20_000.0),
+            ("mx5", "MAZDA", "MX-5", 60_000.0),
+            ("mx5b", "MAZDA", "MX5", 3_000.0),
+            ("mx5c", "MAZDA", "MX 5", 2_000.0),
+            ("mx30", "MAZDA", "MX-30", 30_000.0),
+        ]
+    )
+
+    assert {frozenset(ids) for ids in models.values()} == {
+        frozenset({"ev6", "ev-6"}),
+        frozenset({"ev9"}),
+        frozenset({"mx5", "mx5b", "mx5c"}),
+        frozenset({"mx30"}),
+    }
+
+
+def test_lynk_and_co_spellings_are_one_make_and_its_numbers_are_models() -> None:
+    assert (
+        fold_make("LYNK &AMP; CO")
+        == fold_make("Lynk & Co")
+        == fold_make("LYNK AND CO")
+        == fold_make("LINK CO")
+        == fold_make("LYNKCO")
+    )
+    models = _models(
+        [
+            ("a", "LYNK & CO", "01", 40_000.0),
+            ("b", "LYNK &AMP; CO", "LYNKCO 01", 2_000.0),
+            ("c", "LYNK AND CO", "LYNK & CO 01", 1_000.0),
+        ]
+    )
+    assert len(models) == 1
+    assert set(next(iter(models.values()))) == {"a", "b", "c"}

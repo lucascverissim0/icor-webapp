@@ -46,7 +46,11 @@
     "citroen ds": "ds",
     "byd auto": "byd",
     "bmw i": "bmw",
-    "bmw m": "bmw"
+    "bmw m": "bmw",
+    "lynk and co": "lynk co",
+    "link co": "lynk co",
+    "lynkco": "lynk co",
+    "lynk": "lynk co"
   },
   "$aliases_comment": [
     "ALPINA and ALPINE are different manufacturers and must never be merged.",

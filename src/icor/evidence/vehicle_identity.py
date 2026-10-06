@@ -41,7 +41,10 @@ _PUNCTUATION = re.compile(r"[^0-9a-z!+\- ]+")
 _MODEL_SEPARATORS = re.compile(r"[/\\|]+")
 _MODEL_PUNCTUATION = re.compile(r"[^0-9a-z!+.\- ]+")
 _TRAILING_DOT = re.compile(r"\.+(?=\s|$)")
-_ENGINE_SIZE = re.compile(r"\A\d+(?:[.,]\d+)?\Z")
+# A decimal (`2.0`) or a three- or four-digit capacity or class (`1600`, `C 200`).
+# One or two digits are a model number: Tesla's Model 3, Kia's EV 6, Mazda's MX-5.
+_ESCAPED_AMPERSAND = re.compile(r"&amp;", re.IGNORECASE)
+_ENGINE_SIZE = re.compile(r"\A(?:\d+[.,]\d+|\d{3,4})\Z")
 _YEAR = re.compile(r"\b(19[8-9]\d|20[0-9]\d|2100)\b")
 _MULTI_MODEL = re.compile(r"[0-9a-z]\s*[,&]\s*[0-9a-z]")
 _EARLIEST_YEAR = 1980
@@ -80,10 +83,16 @@ def _without_diacritics(value: str) -> str:
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
+def _unescape(value: str) -> str:
+    """Publishers sometimes ship HTML-escaped labels: `LYNK &amp; CO`."""
+
+    return _ESCAPED_AMPERSAND.sub("&", value)
+
+
 def _compact(value: str) -> str:
     """Lower-case and remove presentation punctuation, keeping token identity."""
 
-    normalized = normalize_vehicle_label(value)
+    normalized = normalize_vehicle_label(_unescape(value))
     if normalized is None:
         return ""
     spaced = _SEPARATORS.sub(" ", _without_diacritics(normalized))
@@ -376,9 +385,14 @@ def _clean_model(make: str, raw: str) -> str | None:
 
     if type(raw) is not str:
         return None
-    normalized = normalize_vehicle_label(raw)
+    normalized = normalize_vehicle_label(_unescape(raw))
     if normalized is None:
         return None
+    make_tokens = make.split()
+    # `lynk & co 01`: an ampersand inside the make is not a list of two models.
+    unlisted = " ".join(re.sub(r"[&,]", " ", normalized).split()).split()
+    if len(unlisted) > len(make_tokens) and unlisted[: len(make_tokens)] == make_tokens:
+        normalized = " ".join(unlisted[len(make_tokens) :])
     if _MULTI_MODEL.search(normalized):
         # `a4 , s4` names two vehicles. Guessing which one owns the cohort would
         # attribute registrations to a car that never carried them.
@@ -386,9 +400,11 @@ def _clean_model(make: str, raw: str) -> str | None:
     head = _MODEL_SEPARATORS.split(_without_diacritics(normalized))[0]
     stripped = _TRAILING_DOT.sub("", _MODEL_PUNCTUATION.sub(" ", head))
     tokens = [token for token in stripped.split() if token != "-"]
-    make_tokens = make.split()
     if len(tokens) > len(make_tokens) and tokens[: len(make_tokens)] == make_tokens:
         tokens = tokens[len(make_tokens) :]
+    elif len(tokens) > 1 and tokens[0] == "".join(make_tokens):
+        # `lynkco 01` repeats the make `lynk co` without its space.
+        tokens = tokens[1:]
     # A bare number after the first token is an engine size, not part of the name:
     # `a4 2.0 tdi aut.` is an A4. The dot is kept inside a token so that VW's
     # ID.3 and ID.4 stay the different cars they are.
@@ -425,8 +441,24 @@ def _resolve(label: str, vocabulary: frozenset[str]) -> str:
     """Fold a label onto the longest real model name it starts with."""
 
     tokens = label.split()
+    # `model3`, `ev 6` and `mx-5` are `model 3`, `ev6` and `mx5` with the
+    # space or hyphen moved. A one-token label is always in the vocabulary, so a
+    # spaced multi-token name is preferred, then any vocabulary spelling.
+    def key(value: str) -> str:
+        return value.replace(" ", "").replace("-", "")
+
+    spaced_names = {key(entry): entry for entry in vocabulary if " " in entry}
+    any_names: dict[str, str] = {}
+    for entry in sorted(vocabulary):
+        any_names.setdefault(key(entry), entry)
     for size in range(min(len(tokens), _rules().trim_vocabulary_max_tokens), 0, -1):
         candidate = " ".join(tokens[:size])
+        spaced = spaced_names.get(key(candidate))
+        if spaced is not None:
+            return spaced
         if candidate in vocabulary:
             return candidate
+        alternative = any_names.get(key(candidate))
+        if alternative is not None:
+            return alternative
     return label
