@@ -16,6 +16,8 @@ from icor.evidence.identity import (
 )
 from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
+from icor.evidence.sources.rdw import PARSER_NAME as RDW_PARSER_NAME
+from icor.evidence.sources.rdw import RDWRegisteredCarsLoader
 from icor.evidence.sources.uk_dft import (
     UKActiveFleetLoader,
     UKFirstRegistrationLoader,
@@ -49,6 +51,7 @@ def official_loader_registry() -> Mapping[str, EvidenceLoader]:
         "uk_dft_veh0120_csv_v1": UKActiveFleetLoader(),
         "uk_dft_veh0160_csv_v1": UKFirstRegistrationLoader(),
         "uk_dft_veh0124_csv_v1": UKVehicleAgeLoader(),
+        RDW_PARSER_NAME: RDWRegisteredCarsLoader(),
     }
 
 

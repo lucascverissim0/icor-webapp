@@ -116,6 +116,9 @@ uv run python scripts/acquire_eea_history.py --root $evidenceRoot
 uv run python scripts/acquire_official_evidence.py --source kba-fz10-2024 --root $evidenceRoot
 uv run python scripts/acquire_official_evidence.py --source uk-veh0160-gb --root $evidenceRoot
 uv run python scripts/acquire_official_evidence.py --source uk-veh0120-gb --root $evidenceRoot
+uv run python scripts/acquire_rdw_fleet.py --destination $evidenceRoot/downloads/rdw-nl-fleet.csv
+uv run python scripts/acquire_official_evidence.py --source rdw-nl-fleet --root $evidenceRoot `
+  --artifact $evidenceRoot/downloads/rdw-nl-fleet.csv
 
 uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
   --release eea-co2cars-2024-final-v30-r1 `
@@ -127,7 +130,13 @@ uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
 
 EEA data is reused under CC BY 4.0 with EEA/DG CLIMA attribution; KBA data uses
 DL-DE/BY-2.0 with KBA attribution; UK data uses the Open Government Licence v3.0 with
-Crown copyright/DfT attribution. EEA and KBA are placed in the same dependency group so
+Crown copyright/DfT attribution. The Netherlands RDW register of registered vehicles
+(`opendata.rdw.nl`, dataset `m9d7-ebf2`, Gekentekende_voertuigen) is Public Domain / CC0;
+attribute it as "Source: RDW (Netherlands Vehicle Authority) open data". It is acquired
+as observed active passenger-car stock by first-admission cohort year and merk and
+handelsbenaming. The register changes daily, so `rdw-nl-fleet` is a dated 2026-10-06
+snapshot pinned by checksum; re-acquiring from the live API will not reproduce it and
+fails the pinned-checksum check. EEA and KBA are placed in the same dependency group so
 their overlap is not treated as independent confirmation.
 
 Dependency groups alone are not enough, and relying on them was a defect. Two
@@ -316,7 +325,7 @@ uv run python scripts/run_codespaces_preview.py --check
 uv run python scripts/run_codespaces_preview.py
 ```
 
-The idempotent prepare command acquires the exact 21 pinned official releases into
+The idempotent prepare command acquires the exact 22 pinned official releases into
 `/workspaces/.icor/evidence/releases`, builds with timestamp
 `2026-08-27T12:00:00+00:00` and seed `20260827`, runs completeness before atomic
 promotion, and compiles `web/dist`. A restart verifies and reuses valid releases and

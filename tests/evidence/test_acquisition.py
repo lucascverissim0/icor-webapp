@@ -15,6 +15,7 @@ def test_catalog_contains_only_reviewed_https_sources():
         "uk-veh0120-gb",
         "uk-veh0124-am",
         "uk-veh0124-nz",
+        "rdw-nl-fleet",
     }
     expected.update(f"eea-{year}-final" for year in range(2010, 2024))
     assert set(OFFICIAL_SOURCES) == expected
@@ -64,6 +65,21 @@ def test_eea_2025_uses_replay_verified_provisional_aggregate() -> None:
     assert source.raw_count == 10_833_597
     assert source.artifact_bytes == 1_237_363
     assert source.sha256 == "46f4cbb5408d48797269b783bbb560968b2bb98c54569240df1734b21fcf0eea"
+
+
+def test_rdw_fleet_is_a_dated_final_nl_active_fleet_snapshot() -> None:
+    source = OFFICIAL_SOURCES["rdw-nl-fleet"]
+
+    assert source.release_id == "rdw-nl-registered-cars-20261006"
+    assert source.source_id == "rdw-gekentekende-voertuigen"
+    assert source.geography == "NL"
+    assert source.measure.value == "active_fleet"
+    assert source.publication_status.value == "final"
+    assert source.direct_download is False
+    assert source.parser_name == "rdw_registered_cars_csv_v1"
+    assert source.dependency_group == "nl-rdw-vehicle-register"
+    assert source.raw_count == source.accepted_count + source.rejected_count
+    assert "CC0" in source.permitted_local_use
 
 
 def test_source_url_rejects_changed_host_or_path():

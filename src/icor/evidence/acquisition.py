@@ -231,6 +231,38 @@ OFFICIAL_SOURCES = {
         accepted_count=138_302,
         rejected_count=261_310,
     ),
+    "rdw-nl-fleet": OfficialSource(
+        key="rdw-nl-fleet",
+        # The RDW register changes daily, so this pin is a dated snapshot taken on
+        # 2026-10-06; re-acquisition will not reproduce these bytes or counts.
+        release_id="rdw-nl-registered-cars-20261006",
+        source_id="rdw-gekentekende-voertuigen",
+        publisher="RDW (Netherlands Vehicle Authority)",
+        url="https://opendata.rdw.nl/resource/m9d7-ebf2.csv",
+        published_at=datetime(2026, 10, 6, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 10, 6),
+        geography="NL",
+        geography_version="Netherlands RDW register of registered vehicles 2026-10-06",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="nl-rdw-vehicle-register",
+        terms_url="https://opendata.rdw.nl",
+        permitted_local_use=(
+            "Reuse permitted as Public Domain / CC0 open data; RDW attribution is given."
+        ),
+        parser_name="rdw_registered_cars_csv_v1",
+        expected_schema=(
+            "RDW Gekentekende_voertuigen Personenauto with tenaamstellen_mogelijk=Ja "
+            "aggregated by merk, handelsbenaming, and first-admission year"
+        ),
+        suffix=".csv",
+        artifact_bytes=5_535_649,
+        sha256="4b83b77fc9f20fed37289342e805e2d8a2111ef0ac23a2d6d083fa910d59c54e",
+        raw_count=195_582,
+        accepted_count=194_352,
+        rejected_count=1_230,
+        direct_download=False,
+    ),
 }
 
 _EEA_HISTORY_ARTIFACTS = {

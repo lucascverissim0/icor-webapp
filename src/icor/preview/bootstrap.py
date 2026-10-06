@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from icor.evidence.acquisition import OFFICIAL_SOURCES
+from icor.evidence.acquisition import OFFICIAL_SOURCES, OfficialSource
 from icor.infrastructure.release_store import ReleaseIntegrityError, ReleaseStore
 from icor.infrastructure.snapshot_store import SnapshotStore, SnapshotUnavailableError
 
@@ -28,6 +28,7 @@ SOURCE_KEYS = (
     "uk-veh0120-gb",
     "uk-veh0124-am",
     "uk-veh0124-nz",
+    "rdw-nl-fleet",
 )
 
 
@@ -77,6 +78,22 @@ class CommandRunner(Protocol):
 class BootstrapResult:
     snapshot_id: str
     reused_active: bool
+
+
+def _acquisition_adapter(
+    source_key: str, official: OfficialSource
+) -> tuple[str, tuple[str, ...], str]:
+    """Return the reviewed script, extra arguments and label for a non-direct source."""
+
+    if source_key == "eea-2025-provisional":
+        return "acquire_eea_2025_provisional.py", (), "official EEA history acquisition"
+    if source_key == "rdw-nl-fleet":
+        return "acquire_rdw_fleet.py", (), "official RDW fleet acquisition"
+    return (
+        "acquire_eea_history.py",
+        ("--year", str(official.coverage_start.year)),
+        "official EEA history acquisition",
+    )
 
 
 def default_plan() -> BootstrapPlan:
@@ -167,18 +184,11 @@ class BootstrapCoordinator:
                     downloads_root
                     / f"{source.source_key}{official.suffix}"
                 )
-                script = (
-                    "acquire_eea_2025_provisional.py"
-                    if source.source_key == "eea-2025-provisional"
-                    else "acquire_eea_history.py"
-                )
-                year_args = () if source.source_key == "eea-2025-provisional" else (
-                    "--year", str(official.coverage_start.year)
-                )
+                script, extra_args, label = _acquisition_adapter(source.source_key, official)
                 self._checked(
                     (*self.python_command, str(self.repository_root / "scripts" / script),
-                     "--destination", str(artifact), *year_args),
-                    label="official EEA history acquisition",
+                     "--destination", str(artifact), *extra_args),
+                    label=label,
                 )
             artifact_args = () if artifact is None else ("--artifact", str(artifact))
             self._checked(

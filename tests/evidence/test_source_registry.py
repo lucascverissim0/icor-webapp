@@ -1,6 +1,7 @@
 from icor.evidence.source_registry import OFFICIAL_SOURCE_VERSIONS, official_loader_registry
 from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
+from icor.evidence.sources.rdw import RDWRegisteredCarsLoader
 from icor.evidence.sources.uk_dft import (
     UKActiveFleetLoader,
     UKFirstRegistrationLoader,
@@ -18,6 +19,7 @@ def test_official_registry_contains_only_reviewed_parser_contracts() -> None:
         "uk_dft_veh0120_csv_v1",
         "uk_dft_veh0160_csv_v1",
         "uk_dft_veh0124_csv_v1",
+        "rdw_registered_cars_csv_v1",
     }
     assert isinstance(registry["eea_co2_cars_zip_v1"], EEAPassengerCarLoader)
     assert isinstance(
@@ -27,6 +29,7 @@ def test_official_registry_contains_only_reviewed_parser_contracts() -> None:
     assert isinstance(registry["uk_dft_veh0120_csv_v1"], UKActiveFleetLoader)
     assert isinstance(registry["uk_dft_veh0160_csv_v1"], UKFirstRegistrationLoader)
     assert isinstance(registry["uk_dft_veh0124_csv_v1"], UKVehicleAgeLoader)
+    assert isinstance(registry["rdw_registered_cars_csv_v1"], RDWRegisteredCarsLoader)
 
 
 def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() -> None:

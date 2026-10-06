@@ -26,15 +26,16 @@ EXPECTED_SOURCE_KEYS = (
     "uk-veh0120-gb",
     "uk-veh0124-am",
     "uk-veh0124-nz",
+    "rdw-nl-fleet",
 )
 
 
-def test_default_plan_has_exactly_the_approved_twenty_one_releases() -> None:
+def test_default_plan_has_exactly_the_approved_twenty_two_releases() -> None:
     plan = default_plan()
 
     assert tuple(source.source_key for source in plan.sources) == EXPECTED_SOURCE_KEYS
-    assert len(plan.release_ids) == 21
-    assert len(set(plan.release_ids)) == 21
+    assert len(plan.release_ids) == 22
+    assert len(set(plan.release_ids)) == 22
     assert plan.release_ids[0] == "eea-co2cars-2010-final-v2-r1"
     assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20261006"
     assert plan.build_as_of == BUILD_AS_OF == "2026-08-27T12:00:00+00:00"
@@ -173,7 +174,7 @@ def test_acquisition_reuses_verified_releases_and_downloads_only_absent(
     runner = RecordingRunner()
     plan = default_plan()
     historical = plan.sources[0]
-    direct = plan.sources[-1]
+    direct = next(source for source in plan.sources if source.source_key == "uk-veh0124-nz")
     absent = {historical.release_id, direct.release_id}
     verified: list[str] = []
     coordinator = BootstrapCoordinator(
@@ -301,6 +302,44 @@ def test_all_historical_sources_use_the_reviewed_adapter(tmp_path: Path) -> None
     assert all("--artifact" in command for command in runner.commands[1::2])
 
 
+def test_rdw_fleet_uses_its_own_acquisition_script(tmp_path: Path) -> None:
+    plan = default_plan()
+    release_id = "rdw-nl-registered-cars-20261006"
+    assert release_id in plan.release_ids
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=tmp_path,
+        evidence_root=tmp_path / "evidence",
+        runner=runner,
+        release_is_valid=lambda value: value != release_id,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+
+    coordinator.acquire(plan)
+
+    artifact = str(tmp_path / "evidence" / "downloads" / "rdw-nl-fleet.csv")
+    assert runner.commands == [
+        (
+            "python",
+            str(tmp_path / "scripts" / "acquire_rdw_fleet.py"),
+            "--destination",
+            artifact,
+        ),
+        (
+            "python",
+            str(tmp_path / "scripts" / "acquire_official_evidence.py"),
+            "--source",
+            "rdw-nl-fleet",
+            "--root",
+            str(tmp_path / "evidence"),
+            "--artifact",
+            artifact,
+        ),
+    ]
+
+
 def test_2025_provisional_uses_its_bounded_aggregate_adapter(tmp_path: Path) -> None:
     plan = default_plan()
     release_id = next(
@@ -349,7 +388,7 @@ def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) 
     promote_index = next(index for index, value in enumerate(joined) if " promote " in f" {value} ")
     assert build_index < report_index < promote_index
     build = runner.commands[build_index]
-    assert build.count("--release") == 21
+    assert build.count("--release") == 22
     assert build[build.index("--build-as-of") + 1] == BUILD_AS_OF
     assert build[build.index("--deterministic-seed") + 1] == str(DETERMINISTIC_SEED)
     assert runner.commands[-2:] == [("npm", "ci"), ("npm", "run", "build")]
@@ -442,7 +481,7 @@ def test_prepare_reuses_exact_active_snapshot_below_build_capacity(
 
     assert bootstrap_script.main() == 0
     assert json.loads(capsys.readouterr().out) == {
-            "release_count": 21,
+        "release_count": 22,
         "reused": True,
         "snapshot_id": "snapshot-active",
         "start_command": "python scripts/run_codespaces_preview.py",
