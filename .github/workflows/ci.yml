@@ -36,7 +36,7 @@ jobs:
       - run: uv sync --locked --all-groups
       - run: uv lock --check
       - run: >-
-          uv run ruff check src tests scripts/audit_baseline.py
+          uv run ruff check src tests scripts/audit_baseline.py scripts/measure_long_tail.py
           scripts/build_evidence_snapshot.py scripts/bootstrap_codespaces_preview.py
           scripts/audit_forecast_promotion.py
           scripts/e2e_fixture.py scripts/generate_preview_credentials.py
