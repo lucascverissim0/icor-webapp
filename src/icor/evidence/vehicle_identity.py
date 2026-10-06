@@ -43,7 +43,7 @@ _MODEL_PUNCTUATION = re.compile(r"[^0-9a-z!+.\- ]+")
 _TRAILING_DOT = re.compile(r"\.+(?=\s|$)")
 # A decimal (`2.0`) or a three- or four-digit capacity or class (`1600`, `C 200`).
 # One or two digits are a model number: Tesla's Model 3, Kia's EV 6, Mazda's MX-5.
-_ESCAPED_AMPERSAND = re.compile(r"&amp;", re.IGNORECASE)
+_ESCAPED_AMPERSAND = re.compile(r"&amp;?", re.IGNORECASE)
 _ENGINE_SIZE = re.compile(r"\A(?:\d+[.,]\d+|\d{3,4})\Z")
 _YEAR = re.compile(r"\b(19[8-9]\d|20[0-9]\d|2100)\b")
 _MULTI_MODEL = re.compile(r"[0-9a-z]\s*[,&]\s*[0-9a-z]")
@@ -258,7 +258,7 @@ class VehicleIdentityIndex:
         identities: dict[tuple[str, str], VehicleIdentity] = {}
         vehicle_ids: dict[tuple[str, str], list[str]] = {}
         for vehicle_id, make, label, amount in cleaned:
-            model = _resolve(label, vocabulary.get(make, frozenset()))
+            model = _resolve(label, vocabulary.get(make, {}))
             key = (make, model)
             vehicle_ids.setdefault(key, []).append(vehicle_id)
             existing = identities.get(key)
@@ -415,50 +415,50 @@ def _clean_model(make: str, raw: str) -> str | None:
     return " ".join(tokens) or None
 
 
+def _spelling_key(value: str) -> str:
+    """`mx-5`, `mx5` and `mx 5` are one name written three ways."""
+
+    return value.replace(" ", "").replace("-", "")
+
+
 def _vocabulary(
     label_volume: dict[tuple[str, str], float], make_volume: dict[str, float]
-) -> dict[str, frozenset[str]]:
+) -> dict[str, dict[str, str]]:
     """Learn each make's real model names from the labels publishers wrote alone.
 
     A one-token label cannot itself be a trim of something shorter, so it always
     counts. A two or three token label counts only when it carries a real share
     of the make, which keeps `golf sportsvan` and drops `polo s ac`.
+
+    Names that differ only by spaces or hyphens are one name, represented by
+    its highest-volume spelling, so the result maps a spelling key to it.
     """
 
     rules = _rules()
-    vocabulary: dict[str, set[str]] = {}
+    best: dict[str, dict[str, tuple[float, str]]] = {}
     for (make, label), volume in label_volume.items():
         tokens = label.split()
         if len(tokens) > rules.trim_vocabulary_max_tokens:
             continue
         floor = make_volume.get(make, 0.0) * rules.variant_volume_share
         if len(tokens) == 1 or volume >= floor:
-            vocabulary.setdefault(make, set()).add(label)
-    return {make: frozenset(labels) for make, labels in vocabulary.items()}
+            names = best.setdefault(make, {})
+            key = _spelling_key(label)
+            current = names.get(key)
+            if current is None or (volume, label) > current:
+                names[key] = (volume, label)
+    return {
+        make: {key: label for key, (_volume, label) in names.items()}
+        for make, names in best.items()
+    }
 
 
-def _resolve(label: str, vocabulary: frozenset[str]) -> str:
+def _resolve(label: str, vocabulary: dict[str, str]) -> str:
     """Fold a label onto the longest real model name it starts with."""
 
     tokens = label.split()
-    # `model3`, `ev 6` and `mx-5` are `model 3`, `ev6` and `mx5` with the
-    # space or hyphen moved. A one-token label is always in the vocabulary, so a
-    # spaced multi-token name is preferred, then any vocabulary spelling.
-    def key(value: str) -> str:
-        return value.replace(" ", "").replace("-", "")
-
-    spaced_names = {key(entry): entry for entry in vocabulary if " " in entry}
-    any_names: dict[str, str] = {}
-    for entry in sorted(vocabulary):
-        any_names.setdefault(key(entry), entry)
     for size in range(min(len(tokens), _rules().trim_vocabulary_max_tokens), 0, -1):
-        candidate = " ".join(tokens[:size])
-        spaced = spaced_names.get(key(candidate))
-        if spaced is not None:
-            return spaced
-        if candidate in vocabulary:
-            return candidate
-        alternative = any_names.get(key(candidate))
-        if alternative is not None:
-            return alternative
+        name = vocabulary.get(_spelling_key(" ".join(tokens[:size])))
+        if name is not None:
+            return name
     return label
