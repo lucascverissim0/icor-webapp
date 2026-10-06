@@ -41,7 +41,10 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
         OFFICIAL_SOURCE_VERSIONS.reconciliation_method
         == "single-coverage-corroboration-v2"
     )
-    assert OFFICIAL_SOURCE_VERSIONS.estimation_method == "linear-gap-interpolation-v1"
+    assert (
+        OFFICIAL_SOURCE_VERSIONS.estimation_method
+        == "observed-cohorts-open-estimated-windows-v2"
+    )
     assert OFFICIAL_SOURCE_VERSIONS.survival_method == "uk-dft-licensed-stock-band-v1"
     assert (
         OFFICIAL_SOURCE_VERSIONS.hazard_method

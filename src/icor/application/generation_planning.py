@@ -10,6 +10,7 @@ from typing import Protocol
 
 from icor.domain.cohorts import CohortEstimate, OpportunityEstimate
 from icor.domain.evidence import ConfidenceBand, Measure
+from icor.domain.generations import GenerationIdentityKind
 from icor.evidence.normalization import stable_evidence_id
 from icor.forecasting.reconciliation import (
     CoverageCandidate,
@@ -50,6 +51,9 @@ class GenerationPlanningResult:
     evidence_only_series_count: int
     corroborating_input_count: int = 0
     superseded_coverage_input_count: int = 0
+    #: Series with one or two annual values. They used to be dropped; their
+    #: observed cohorts are real vehicles, so they are now planned and labelled.
+    short_history_series_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,25 +230,35 @@ class GenerationPlanningService:
             cohort_buffer.clear()
             opportunity_buffer.clear()
 
-        evidence_only_series_count = 0
+        # The newest year any vehicle was observed in each market. A series that
+        # reaches it is still on sale there; one that stops short has ended.
+        latest_year: dict[str, int] = {}
+        for _generation, _vehicle, geography in series:
+            latest_year[geography] = max(
+                latest_year.get(geography, 0), max(series[_generation, _vehicle, geography])
+            )
+
+        evidence_only_series_count = short_history_series_count = 0
         for series_key in sorted(series):
             generation_id, vehicle_id, geography = series_key
             generation = generations.get(generation_id)
             if generation is None or generation.canonical_vehicle_id != vehicle_id:
                 raise ValueError("planning generation vehicle is unavailable")
-            if len(series[series_key]) < 3:
-                evidence_only_series_count += 1
-                continue
-            values = _fill_internal_gaps(series[series_key])
-            if generation.end_month is not None:
+            observed_years = series[series_key]
+            short_history = len(observed_years) < 3
+            end_year = _end_year(
+                generation, max(observed_years), latest_year[geography]
+            )
+            values = _fill_internal_gaps(observed_years)
+            if end_year is not None:
                 values = {
-                    year: annual
-                    for year, annual in values.items()
-                    if year <= generation.end_month.year
+                    year: annual for year, annual in values.items() if year <= end_year
                 }
-            if len(values) < 3:
+            if not values:
                 evidence_only_series_count += 1
                 continue
+            short_history_series_count += short_history
+            history_codes = ("short-registration-history",) if short_history else ()
             all_input_ids = tuple(
                 sorted(
                     {
@@ -255,11 +269,9 @@ class GenerationPlanningService:
                 )
             )
             forecast_method, forecasts = self._forecast(values, max(horizons))
-            if generation.end_month is not None:
+            if end_year is not None:
                 forecasts = {
-                    year: value
-                    for year, value in forecasts.items()
-                    if year <= generation.end_month.year
+                    year: value for year, value in forecasts.items() if year <= end_year
                 }
             for year, value in forecasts.items():
                 values[year] = _AnnualValue(value, all_input_ids, "forecast")
@@ -296,6 +308,7 @@ class GenerationPlanningService:
                             f"{annual.status}-registration-cohort",
                             self.survival.reason_code(geography),
                             *annual.extra_reason_codes,
+                            *history_codes,
                         ),
                     )
                     horizon_cohorts.append(cohort)
@@ -359,6 +372,7 @@ class GenerationPlanningService:
                             "assumption-led-opportunity-baseline",
                             "uncalibrated-fitment-and-hazard",
                             "no-exact-windshield-fitment-inference",
+                            *history_codes,
                         ),
                     )
                 )
@@ -377,6 +391,7 @@ class GenerationPlanningService:
             evidence_only_series_count,
             corroborating_count,
             superseded_coverage_count,
+            short_history_series_count,
         )
 
     def _forecast(
@@ -397,6 +412,22 @@ class GenerationPlanningService:
             evaluate_backtest=False,
         )
         return forecast.method, dict(forecast.values)
+
+
+def _end_year(generation, last_observed: int, market_latest: int) -> int | None:
+    """The last cohort year a series may hold, or None while it is on sale.
+
+    A reviewed generation's end is a documented manufacturer fact. An estimated
+    generation's end is only the last year any data mentions it, so it says
+    nothing about discontinuation by itself: the series has ended only if the
+    market reports later years without it.
+    """
+
+    if getattr(generation, "identity_kind", None) is GenerationIdentityKind.ESTIMATED:
+        return None if last_observed >= market_latest else last_observed
+    if generation.end_month is not None:
+        return generation.end_month.year
+    return None
 
 
 def _fill_internal_gaps(values: dict[int, _AnnualValue]) -> dict[int, _AnnualValue]:

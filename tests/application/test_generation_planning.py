@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from icor.application.generation_planning import GenerationPlanningService
 from icor.domain.evidence import ConfidenceBand, Measure
+from icor.domain.generations import GenerationIdentityKind
 
 
 class Repository:
@@ -52,7 +53,7 @@ class Repository:
         return self.releases
 
     def list_generations(self):
-        return (self.generation,)
+        return (self.generation, *getattr(self, "extra_generations", ()))
 
     def list_generation_assignments(self):
         return self.assignments
@@ -101,18 +102,140 @@ def test_internal_registration_gap_is_explicitly_estimated() -> None:
     assert "estimated-registration-cohort" in estimated.reason_codes
 
 
-def test_sparse_series_without_backtest_history_remains_evidence_only() -> None:
+def _add_vehicle(repository, name: str, years_values, *, kind=None, end_month=None):
+    """Add a second vehicle in DE so the market's latest data year is known."""
+
+    generation = SimpleNamespace(
+        generation_id=f"generation-{name}",
+        canonical_vehicle_id=f"vehicle-{name}",
+        end_month=end_month,
+        identity_kind=kind,
+    )
+    observations = tuple(
+        SimpleNamespace(
+            observation_id=f"observation-{name}-{year}",
+            release_id="release-eea-history",
+            canonical_vehicle_id=generation.canonical_vehicle_id,
+            geography="DE",
+            registration_cohort_year=year,
+            period_start=date(year, 1, 1),
+            period_end=date(year, 12, 31),
+            measure=Measure.NEW_REGISTRATIONS,
+            value=Decimal(value),
+        )
+        for year, value in years_values
+    )
+    repository.extra_generations = (*getattr(repository, "extra_generations", ()), generation)
+    repository.observations = (*repository.observations, *observations)
+    repository.assignments = (
+        *repository.assignments,
+        *(
+            SimpleNamespace(
+                observation_id=item.observation_id,
+                selected_generation_id=generation.generation_id,
+                confidence=ConfidenceBand.LOW,
+            )
+            for item in observations
+        ),
+    )
+    return generation
+
+
+def _cohort_years(repository, vehicle_id: str, horizon: int = 2028) -> set[int]:
+    return {
+        item.registration_cohort_year
+        for item in repository.cohorts
+        if item.canonical_vehicle_id == vehicle_id and item.as_of_year == horizon
+    }
+
+
+def test_a_short_history_still_counts_the_cars_already_on_the_road() -> None:
+    """Two registration years are real vehicles needing windshields.
+
+    The old rule dropped any series with fewer than three annual values, so a
+    model launched in 2021 or sold in small numbers produced no demand at all.
+    """
+
     repository = Repository()
-    repository.observations = repository.observations[:2]
-    repository.assignments = repository.assignments[:2]
+    repository.observations = repository.observations[1:]
+    repository.assignments = repository.assignments[1:]
 
     result = GenerationPlanningService().apply(
         repository, horizons=(2028,), seed=20260827
     )
 
-    assert result.cohort_count == 0
-    assert result.opportunity_count == 0
-    assert result.evidence_only_series_count == 1
+    assert result.evidence_only_series_count == 0
+    assert result.short_history_series_count == 1
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == set(range(2021, 2029))
+    opportunity = repository.opportunities[0]
+    assert opportunity.p50 > 0
+    assert "short-registration-history" in opportunity.reason_codes
+
+
+def test_a_single_registration_year_on_sale_now_is_carried_forward() -> None:
+    repository = Repository()
+    _add_vehicle(
+        repository,
+        "launch",
+        ((2022, "40"),),
+        kind=GenerationIdentityKind.ESTIMATED,
+        end_month=date(2022, 12, 1),
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-launch") == set(range(2022, 2029))
+    launch = next(
+        item for item in repository.opportunities if item.canonical_vehicle_id == "vehicle-launch"
+    )
+    assert launch.forecast_method == "single-observation-constant-v1"
+
+
+def test_a_short_history_that_stopped_selling_keeps_only_its_real_cohorts() -> None:
+    repository = Repository()
+    _add_vehicle(
+        repository,
+        "ended",
+        ((2020, "30"),),
+        kind=GenerationIdentityKind.ESTIMATED,
+        end_month=date(2020, 12, 1),
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-ended") == {2020}
+    ended = next(
+        item for item in repository.opportunities if item.canonical_vehicle_id == "vehicle-ended"
+    )
+    assert ended.p50 > 0
+
+
+def test_an_estimated_window_ending_at_the_latest_data_year_is_still_on_sale() -> None:
+    """An estimated generation's end is just the last year we have data for.
+
+    Reading it as a discontinuation made every model outside the reviewed
+    catalog stop selling in its last data year, so none of them gained a single
+    future registration.
+    """
+
+    repository = Repository()
+    repository.generation.end_month = date(2022, 12, 1)
+    repository.generation.identity_kind = GenerationIdentityKind.ESTIMATED
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == set(range(2020, 2029))
+
+
+def test_an_estimated_series_that_vanished_before_the_market_latest_year_has_ended() -> None:
+    repository = Repository()
+    repository.generation.end_month = date(2022, 12, 1)
+    repository.generation.identity_kind = GenerationIdentityKind.ESTIMATED
+    _add_vehicle(repository, "current", ((2022, "50"), (2023, "60"), (2024, "70")))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
 
 
 def test_discontinued_generation_stops_new_cohorts_but_keeps_replacement_demand() -> None:
