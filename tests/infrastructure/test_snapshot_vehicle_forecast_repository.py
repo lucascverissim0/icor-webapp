@@ -225,9 +225,18 @@ def test_reviewed_generation_forecast_combines_aliases_and_surviving_cohorts(
     assert europe.active_fleet.base_units == 324
     assert 0 < belgium.replacements.downside_units <= belgium.replacements.base_units
     assert belgium.replacements.base_units <= belgium.replacements.upside_units
-    assert all(
-        row.code in {"EU27", "BE", "FR", "ES", "NL", "GB", "DE", "PL"} for row in result.markets
-    )
+    codes = [row.code for row in result.markets]
+    # Every market the snapshot covers, not eight hand-picked ones: Europe first,
+    # then the countries with data by size, then the rest as unavailable.
+    assert codes[0] == "EU27"
+    assert len(codes) == len(set(codes)) == 31
+    assert {"IT", "SE", "AT", "NO", "IS", "GB"} <= set(codes)
+    available = [row for row in result.markets[1:] if row.availability != "unavailable"]
+    assert [row.code for row in result.markets[1 : 1 + len(available)]] == [
+        row.code for row in available
+    ]
+    units = [row.registration_cohort_units for row in available]
+    assert units == sorted(units, reverse=True)
     assert next(row for row in result.markets if row.code == "GB").availability == "unavailable"
 
 

@@ -62,15 +62,21 @@ _EU27 = frozenset(
         "SE",
     }
 )
+#: Every market the snapshot can hold, after the EU27 aggregate. A result lists
+#: the ones with data first, largest first, so the reader sees where the car
+#: actually is; markets without data still appear, as unavailable, so absence
+#: is visible rather than silent.
 _TARGETS = (
     ("EU27", "Europe (EU27)"),
-    ("BE", "Belgium"),
-    ("FR", "France"),
-    ("ES", "Spain"),
-    ("NL", "Netherlands"),
+    ("AT", "Austria"), ("BE", "Belgium"), ("BG", "Bulgaria"), ("HR", "Croatia"),
+    ("CY", "Cyprus"), ("CZ", "Czechia"), ("DK", "Denmark"), ("EE", "Estonia"),
+    ("FI", "Finland"), ("FR", "France"), ("DE", "Germany"), ("GR", "Greece"),
+    ("HU", "Hungary"), ("IE", "Ireland"), ("IT", "Italy"), ("LV", "Latvia"),
+    ("LT", "Lithuania"), ("LU", "Luxembourg"), ("MT", "Malta"), ("NL", "Netherlands"),
+    ("PL", "Poland"), ("PT", "Portugal"), ("RO", "Romania"), ("SK", "Slovakia"),
+    ("SI", "Slovenia"), ("ES", "Spain"), ("SE", "Sweden"),
     ("GB", "United Kingdom (GB; England is not separable)"),
-    ("DE", "Germany"),
-    ("PL", "Poland"),
+    ("NO", "Norway"), ("IS", "Iceland"),
 )
 
 
@@ -345,9 +351,20 @@ class SnapshotVehicleForecastRepository:
         )
         if not selected_rows:
             raise VehicleForecastSelectionError("no cohorts match the selected generation")
-        markets = tuple(
+        europe, *countries = (
             self._market_result(code, name, selected_rows, selection, horizon)
             for code, name in _TARGETS
+        )
+        markets = (
+            europe,
+            *sorted(
+                countries,
+                key=lambda market: (
+                    market.availability == "unavailable",
+                    -(market.registration_cohort_units or 0),
+                    market.name,
+                ),
+            ),
         )
         contributing = {row["geography"] for row in selected_rows} & _EU27
         coverage = EuropeanCoverage(
