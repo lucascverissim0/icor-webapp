@@ -105,7 +105,9 @@ def test_loader_aggregates_passenger_cars_by_make_name_and_first_use_year(
         _row("N1", "20200101", "Ford", "Transit", "Transit"),
         _row("L3e", "20200101", "Kymco", "Zing", "Zing"),
     ]
-    release, repository = _release(tmp_path, rows, raw=13, accepted=5, rejected=8)
+    # A blank commercial name is rejected, not filled from the type designation,
+    # which holds body-type strings such as "2DSEDAN 1300-11/2400".
+    release, repository = _release(tmp_path, rows, raw=13, accepted=4, rejected=9)
 
     TraficomVehicleLoader().load((release,), repository)
 
@@ -116,7 +118,6 @@ def test_loader_aggregates_passenger_cars_by_make_name_and_first_use_year(
     assert set(observations) == {
         ("Volkswagen", "Golf", 2015),
         ("Audi", "A3", 2020),
-        ("Audi", "8Y-LONG", 2020),
     }
     golf = observations[("Volkswagen", "Golf", 2015)]
     assert golf.value == Decimal("3")
@@ -133,7 +134,7 @@ def test_loader_aggregates_passenger_cars_by_make_name_and_first_use_year(
     assert golf.publication_status is PublicationStatus.FINAL
     assert golf.transformation_notes
     assert golf.evidence_confidence.reasons
-    assert len({row.observation_id for row in observations.values()}) == 3
+    assert len({row.observation_id for row in observations.values()}) == 2
 
 
 def test_loader_reads_the_semicolon_iso_8859_1_zip_member(tmp_path: Path) -> None:

@@ -177,7 +177,7 @@ class TraficomVehicleLoader:
                             "Aggregated Traficom passenger cars (classes M1 and M1G) in "
                             "traffic use to make, commercial name, and first-use year.",
                             "Cohort is the year of kayttoonottopvm, the first-use date; "
-                            "kaupallinenNimi falls back to mallimerkinta when blank.",
+                            "rows without kaupallinenNimi are rejected.",
                             "Stock is the register on the data date, not a year end.",
                         ),
                         validation_flags=(),
@@ -198,9 +198,11 @@ def _classify(
     if row[position["ajoneuvoluokka"]] not in PASSENGER_CAR_CLASSES:
         return None
     make = _collapse(row[position["merkkiSelvakielinen"]])
-    model = _collapse(row[position["kaupallinenNimi"]]) or _collapse(
-        row[position["mallimerkinta"]]
-    )
+    # Only the commercial name identifies a model. When it is blank the type
+    # designation (`mallimerkinta`) holds body-type strings such as
+    # "2DSEDAN 1300-11/2400", which would mint junk vehicles, so the row is
+    # rejected and counted rather than guessed.
+    model = _collapse(row[position["kaupallinenNimi"]])
     if normalize_vehicle_label(make) is None or normalize_vehicle_label(model) is None:
         return None
     first_use = _FIRST_USE.match(row[position["kayttoonottopvm"]].strip())

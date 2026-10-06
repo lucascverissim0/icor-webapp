@@ -293,8 +293,8 @@ OFFICIAL_SOURCES = {
         artifact_bytes=208_492_096,
         sha256="81fdd6968074ba4b852f5de55266124520c7ab58a0af287c20e505a7a1435da0",
         raw_count=5_296_749,
-        accepted_count=2_765_986,
-        rejected_count=2_530_763,
+        accepted_count=2_693_484,
+        rejected_count=2_603_265,
     ),
 }
 

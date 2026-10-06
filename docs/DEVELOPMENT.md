@@ -143,7 +143,7 @@ licensed CC BY 4.0; attribute it as "Source: Traficom". `traficom-fi-fleet` pins
 quarterly ZIP itself (30.6.2026 edition, size and sha256) as a direct download and the
 `traficom_vehicles_zip_v1` loader streams its ISO-8859-1 semicolon CSV, keeping passenger
 cars (`ajoneuvoluokka` M1 and M1G) as observed active fleet by make, commercial name
-(`kaupallinenNimi`, falling back to `mallimerkinta` when blank) and the year of the
+(`kaupallinenNimi`; rows without one are rejected) and the year of the
 first-use date `kayttoonottopvm`. The file has no status column; Traficom describes it as
 all vehicles in traffic use. Traficom replaces the ZIP in place each quarter, so a later
 edition fails the pinned-checksum check until the pin is reviewed. EEA and KBA are placed in the same dependency group so
