@@ -88,6 +88,29 @@ class GenerationMappingService:
             )
             if reviewed_generations:
                 generations.extend(reviewed_generations)
+                # A register reaches back decades before the reviewed windows.
+                # Each stretch of years no reviewed window covers gets its own
+                # estimated generation, so nothing overlaps a reviewed window
+                # and no observation is left unplaceable.
+                for run in _uncovered_runs(
+                    {item.cohort_year for item in history}, reviewed_generations
+                ):
+                    generations.extend(
+                        estimator.build(
+                            canonical_vehicle_id=vehicle_id,
+                            market=vehicle.market,
+                            observed_years=run,
+                            evidence_ids=tuple(
+                                sorted(
+                                    {
+                                        item.observation.release_id
+                                        for item in history
+                                        if item.cohort_year in run
+                                    }
+                                )
+                            ),
+                        )
+                    )
                 continue
             generations.extend(
                 estimator.build(
@@ -144,6 +167,29 @@ class GenerationMappingService:
             generation_count=len(generations),
             unassigned_ids=tuple(unassigned_ids),
         )
+
+
+def _uncovered_runs(
+    years: set[int], reviewed: tuple[GenerationEntry, ...]
+) -> tuple[tuple[int, ...], ...]:
+    """Observed years outside every reviewed window, split where a window intervenes."""
+
+    def covered(year: int) -> bool:
+        return any(
+            entry.start_month.year <= year
+            and (entry.end_month is None or entry.end_month.year >= year)
+            for entry in reviewed
+        )
+
+    runs: list[list[int]] = []
+    for year in sorted(years):
+        if covered(year):
+            continue
+        if runs and not any(covered(between) for between in range(runs[-1][-1] + 1, year)):
+            runs[-1].append(year)
+        else:
+            runs.append([year])
+    return tuple(tuple(run) for run in runs)
 
 
 def _cohort_year(observation: Observation) -> int | None:

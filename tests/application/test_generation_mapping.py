@@ -225,3 +225,80 @@ def test_generation_mapping_uses_reviewed_golf_generation_for_2024(tmp_path: Pat
     assert selected.display_name == "Golf Mk8"
     assert selected.identity_kind is GenerationIdentityKind.MANUFACTURER_CONFIRMED
     assert assignment.method is AssignmentMethod.UNIQUE_WINDOW
+
+
+def test_years_before_every_reviewed_window_get_their_own_estimated_generation(
+    tmp_path: Path,
+) -> None:
+    """A national register reaches back decades before the reviewed Golf windows.
+
+    The Netherlands and Finland report the 1998 Golf still on the road; no
+    reviewed generation covers 1998, and an observation the registry cannot
+    place used to abort the whole build.
+    """
+
+    repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
+    release = ReleaseManifest(
+        release_id="release-official-history",
+        source_id="official-history",
+        publisher="Official publisher",
+        source_url="https://example.test/history",
+        retrieved_at=datetime(2026, 8, 28, tzinfo=UTC),
+        published_at=datetime(2026, 8, 1, tzinfo=UTC),
+        coverage_start=date(1998, 1, 1),
+        coverage_end=date(2025, 12, 31),
+        geography="DE",
+        geography_version="de-v1",
+        measure=Measure.ACTIVE_FLEET,
+        unit="vehicles",
+        publication_status=PublicationStatus.FINAL,
+        dependency_group="official-register",
+        terms_url="https://example.test/terms",
+        permitted_local_use="Reuse permitted.",
+        artifact_path="artifact.csv",
+        artifact_bytes=1,
+        sha256="a" * 64,
+        parser_name="test-parser",
+        parser_version="v1",
+        expected_schema="test-v1",
+        raw_record_count=3,
+        accepted_record_count=3,
+        rejected_record_count=0,
+        quarantined_record_count=0,
+    )
+    vehicle = CanonicalVehicle(
+        "vehicle-volkswagen-golf-eu", "Volkswagen", "Golf", None, "Europe"
+    )
+    repository.add_release(release)
+    repository.add_vehicle(vehicle)
+    repository.add_observations(
+        tuple(
+            observation(
+                f"observation-golf-stock-{year}",
+                measure=Measure.ACTIVE_FLEET,
+                period_year=2025,
+                vehicle_id=vehicle.vehicle_id,
+                status=MappingStatus.NORMALIZED_LABEL,
+                registration_cohort_year=year,
+            )
+            for year in (1998, 1999, 2024)
+        )
+    )
+
+    result = GenerationMappingService().apply(
+        repository,
+        reviewed_at=datetime(2026, 8, 28, 8, 0, tzinfo=UTC),
+    )
+
+    assert result.unassigned_ids == ()
+    assert result.assigned_count == result.usable_count == 3
+    generations = {item.generation_id: item for item in repository.list_generations()}
+    selected = {
+        item.observation_id: generations[item.selected_generation_id]
+        for item in repository.list_generation_assignments()
+    }
+    older = selected["observation-golf-stock-1998"]
+    assert older.generation_id == selected["observation-golf-stock-1999"].generation_id
+    assert older.identity_kind is GenerationIdentityKind.ESTIMATED
+    assert (older.start_month.year, older.end_month.year) == (1998, 1999)
+    assert selected["observation-golf-stock-2024"].display_name == "Golf Mk8"
