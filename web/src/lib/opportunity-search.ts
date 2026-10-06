@@ -16,6 +16,8 @@ export interface OpportunitySearch {
   horizon?: number[]
   q?: string
   order?: OpportunitySort
+  /** Only vehicles ICOR has (yes) or has not (no) worked on; absent shows all. */
+  worked?: 'yes' | 'no'
   page: number
 }
 
@@ -83,6 +85,9 @@ export function parseOpportunitySearch(
     : 'score'
   if (raw.order !== undefined && order !== raw.order) invalid.add('order')
 
+  const worked = raw.worked === 'yes' || raw.worked === 'no' ? raw.worked : undefined
+  if (raw.worked !== undefined && worked === undefined) invalid.add('worked')
+
   const parsedPage = Number(raw.page ?? 1)
   const page = Number.isInteger(parsedPage) && parsedPage >= 1 ? parsedPage : 1
   if (raw.page !== undefined && page !== parsedPage) invalid.add('page')
@@ -95,6 +100,7 @@ export function parseOpportunitySearch(
       ...(horizons.length > 0 && { horizon: horizons }),
       ...(q !== undefined && { q }),
       ...(order !== 'score' && { order }),
+      ...(worked !== undefined && { worked }),
     },
     invalidKeys: [...invalid].sort(),
   }
@@ -110,5 +116,6 @@ export function serializeOpportunitySearch<T extends OpportunityRouteSearch>(
     ...(search.horizon && { horizon: search.horizon }),
     ...(search.q && { q: search.q }),
     ...(search.order && search.order !== 'score' && { order: search.order }),
+    ...(search.worked && { worked: search.worked }),
   }
 }

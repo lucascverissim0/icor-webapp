@@ -96,8 +96,6 @@ class OpportunityScore:
     demand_rank: int | None
     demand_population: int
     demand_basis: str
-    readiness_ratio: float
-    readiness_points: float
     total_points: float
     strategy_name: str
     strategy_version: str

@@ -50,6 +50,7 @@ export interface OpportunitiesQuery {
   horizons?: number[]
   text?: string
   sort?: OpportunitySort
+  icorWorked?: boolean
   page?: number
   pageSize?: number
 }
@@ -390,6 +391,7 @@ function opportunityParameters(query: OpportunitiesQuery): URLSearchParams {
   appendMany(parameters, 'horizon', query.horizons)
   if (query.text) parameters.set('q', query.text)
   if (query.sort && query.sort !== 'score') parameters.set('sort', query.sort)
+  if (query.icorWorked !== undefined) parameters.set('icor_worked', String(query.icorWorked))
   if (query.page !== undefined) parameters.set('page', String(query.page))
   if (query.pageSize !== undefined) parameters.set('page_size', String(query.pageSize))
   return parameters

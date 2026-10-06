@@ -125,6 +125,9 @@ class OpportunityQuery:
     sort: OpportunitySort = OpportunitySort.SCORE
     page: int = 1
     page_size: int = 25
+    #: None shows every vehicle; True or False keeps only the vehicles ICOR has,
+    #: or has not, worked on. It narrows the rows and never moves a score.
+    icor_worked: bool | None = None
 
     def __post_init__(self) -> None:
         if self.page < 1 or not 1 <= self.page_size <= 100:
@@ -178,6 +181,14 @@ class OpportunityRow:
     score: OpportunityScore
     evidence_status: EvidenceStatus
     data_version: str
+
+    @property
+    def icor_worked(self) -> bool:
+        return (
+            self.exact_covered_base_units > 0
+            or self.fallback_covered_base_units > 0
+            or self.icor_worked_base_units > 0
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +349,8 @@ class OpportunityService:
             for group_id, group_atoms in grouped.items()
         )
         rows = _matching_text(rows, query.text)
+        if query.icor_worked is not None:
+            rows = tuple(row for row in rows if row.icor_worked is query.icor_worked)
         rows = _sorted_rows(rows, query.sort)
         total = len(rows)
         markets, horizons = self._available_facets()

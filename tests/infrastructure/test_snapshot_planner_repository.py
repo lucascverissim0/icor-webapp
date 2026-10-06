@@ -16,7 +16,7 @@ from icor.application.opportunities import (
     OpportunityQuery,
     OpportunitySort,
 )
-from icor.application.ranking import DemandReadinessV1, demand_percentile_rank
+from icor.application.ranking import DemandScoreV2, demand_percentile_rank
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
@@ -348,7 +348,7 @@ def test_sqlite_opportunity_ranking_and_drill_down_are_bounded(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     query = OpportunityQuery(
         group_by=OpportunityGroupBy.MODEL, page=1, page_size=1
@@ -408,7 +408,7 @@ def test_model_year_opportunities_allocate_and_reconcile_every_input_cohort(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     query = OpportunityQuery(
         group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=10
@@ -462,7 +462,7 @@ def test_cached_ranking_row_makes_clicked_detail_lookup_constant_time(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     listed_query = OpportunityQuery(
         group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=100
@@ -483,7 +483,7 @@ def test_cached_ranking_row_makes_clicked_detail_lookup_constant_time(
     assert detail == selected
 
 
-def test_sqlite_opportunity_exposes_reviewed_generation_and_legacy_icor_readiness(
+def test_sqlite_opportunity_shows_icor_worked_without_scoring_it(
     sqlite_repository: SnapshotPlannerRepository,
     tmp_path: Path,
 ) -> None:
@@ -492,7 +492,7 @@ def test_sqlite_opportunity_exposes_reviewed_generation_and_legacy_icor_readines
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
         worked_models=IcorWorkedModelCatalog.from_path(worked),
     )
 
@@ -506,7 +506,37 @@ def test_sqlite_opportunity_exposes_reviewed_generation_and_legacy_icor_readines
     assert golf.generation_basis == "manufacturer_generation_window"
     assert golf.icor_worked_base_units == 13
     assert golf.fallback_covered_base_units == 13
-    assert golf.score.readiness_points == 10
+    assert golf.icor_worked is True
+
+    # The same vehicle, with no worked-model catalog, scores identically.
+    plain = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "plain-coverage.sqlite3"),
+        DemandScoreV2(),
+    ).search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=10)
+    )
+    plain_golf = next(
+        row for row in plain.items if row.group_id == golf.group_id
+    )
+    assert plain_golf.icor_worked is False
+    assert plain_golf.score == golf.score
+
+    # The worked filter narrows rows and never moves a score.
+    worked_only = repository.search(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100, icor_worked=True
+        )
+    )
+    not_worked = repository.search(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100, icor_worked=False
+        )
+    )
+    assert [row.group_id for row in worked_only.items] == [golf.group_id]
+    assert worked_only.items[0].score == golf.score
+    assert golf.group_id not in {row.group_id for row in not_worked.items}
+    assert worked_only.total + not_worked.total == page.total
 
 
 def test_verified_only_opportunities_exclude_unreviewed_models(
@@ -516,7 +546,7 @@ def test_verified_only_opportunities_exclude_unreviewed_models(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
         verified_only=True,
     )
 
@@ -538,7 +568,7 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     statements: list[str] = []
     connect = repository._connect
@@ -595,7 +625,7 @@ def test_sqlite_scores_are_identical_filtered_and_unfiltered(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     unfiltered = repository.search(
         OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100)
@@ -631,7 +661,7 @@ def test_sqlite_detail_scores_identically_while_the_listing_is_searched(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     listed = repository.search(
         OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100)
@@ -656,7 +686,7 @@ def test_sqlite_zero_demand_groups_are_unranked_and_leave_the_population(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     page = repository.search(
         OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=100)
@@ -751,7 +781,7 @@ def _opportunity_repository(
     return SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
 
 
@@ -881,7 +911,7 @@ def test_the_universe_is_the_same_whether_attribution_is_materialized(
     inline = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "inline-coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     assert inline._materialized_attribution is False
 
@@ -898,7 +928,7 @@ def test_the_universe_is_the_same_whether_attribution_is_materialized(
     baked = SnapshotOpportunityRepository(
         SnapshotPlannerRepository(SQLiteLedger(baked_path), _manifest()),
         SQLiteCoverageRepository(tmp_path / "baked-coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
     assert baked._materialized_attribution is True
 
@@ -921,7 +951,7 @@ def test_the_universe_percentile_matches_the_single_value_definition(
     repository = SnapshotOpportunityRepository(
         sqlite_repository,
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
 
     universe = repository._universe(OpportunityGroupBy.MODEL_YEAR, True)

@@ -123,10 +123,9 @@ export function OpportunityDetailView({
       <section aria-labelledby="score-title" className="detail-section detail-score-breakdown">
         <div className="detail-section__heading"><p className="eyebrow">Transparent calculation</p><h2 id="score-title">Why this opportunity ranks here</h2></div>
         <div className="score-bars">
-          <div><div><strong>Demand</strong><span>{row.score.demand_points.toFixed(1)} / 80</span></div><progress aria-label="Demand score" max="80" value={row.score.demand_points} /><p>{row.score.demand_rank === null || row.score.demand_population === 0
+          <div><div><strong>Demand</strong><span>{row.score.demand_points.toFixed(1)} / 100</span></div><progress aria-label="Demand score" max="100" value={row.score.demand_points} /><p>{row.score.demand_rank === null || row.score.demand_population === 0
             ? 'No forecast demand to rank against the market.'
             : `${Math.round(row.score.demand_percentile * 100)}th percentile of all ${format(row.score.demand_population)} ranked vehicles in the market — rank #${format(row.score.demand_rank)}.`}</p></div>
-          <div><div><strong>ICOR readiness</strong><span>{row.score.readiness_points.toFixed(1)} / 20</span></div><progress aria-label="Readiness score" max="20" value={row.score.readiness_points} /><p>Exact coverage receives full weight; vehicle-year or worked-model fallback receives half weight.</p></div>
         </div>
       </section>
 
@@ -135,7 +134,7 @@ export function OpportunityDetailView({
       {fleet.data && <FleetSummary estimates={fleet.data} />}
 
       <section aria-labelledby="coverage-title" className="detail-section">
-        <div className="detail-section__heading"><p className="eyebrow">Production position</p><h2 id="coverage-title">Coverage of base demand</h2></div>
+        <div className="detail-section__heading"><p className="eyebrow">Production position</p><h2 id="coverage-title">ICOR {row.icor_worked ? 'has worked on this vehicle' : 'has not worked on this vehicle'}</h2></div>
         <dl className="detail-metrics detail-metrics--three">
           <div><dt>Exact configuration</dt><dd>{format(row.exact_covered_base_units)}</dd></div>
           <div><dt>Vehicle-year fallback</dt><dd>{format(row.fallback_covered_base_units)}</dd></div>

@@ -262,8 +262,6 @@ class OpportunityScoreResponse(ApiModel):
     demand_rank: int | None
     demand_population: int
     demand_basis: str
-    readiness_ratio: float
-    readiness_points: float
     total_points: float
     strategy_name: str
     strategy_version: str
@@ -290,6 +288,10 @@ class OpportunityRowResponse(ApiModel):
     fallback_covered_base_units: int
     uncovered_base_units: int
     coverage_status: CoverageStatus
+    # True when ICOR has worked on any part of this vehicle: exact or fallback
+    # production coverage, or the legacy worked-model catalog. Displayed beside
+    # the score and never part of it.
+    icor_worked: bool
     score: OpportunityScoreResponse
     evidence_status: EvidenceStatus
     data_version: str

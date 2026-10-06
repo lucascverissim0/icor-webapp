@@ -58,6 +58,7 @@ def _query(
     page_size: int = 25,
     text: str = "",
     sort: OpportunitySort = OpportunitySort.SCORE,
+    icor_worked: bool | None = None,
 ) -> OpportunityQuery:
     # The detail routes resolve one group that the caller already holds, so they
     # leave text and sort at their defaults: narrowing or reordering a lookup of
@@ -70,6 +71,7 @@ def _query(
         sort=sort,
         page=page,
         page_size=page_size,
+        icor_worked=icor_worked,
     )
 
 
@@ -102,6 +104,7 @@ def opportunities(
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
     q: Annotated[str, Query(max_length=64)] = "",
     sort: OpportunitySort = OpportunitySort.SCORE,
+    icor_worked: bool | None = None,
 ) -> OpportunityPageResponse | JSONResponse:
     if (
         getattr(request.app.state, "client_release", False)
@@ -117,7 +120,7 @@ def opportunities(
     if service is None:
         return _snapshot_unavailable(request)
     result = service.list(
-        _query(group_by, market, horizon, page, page_size, q, sort)
+        _query(group_by, market, horizon, page, page_size, q, sort, icor_worked)
     )
     return OpportunityPageResponse.model_validate(result)
 

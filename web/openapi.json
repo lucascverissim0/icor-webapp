@@ -1254,6 +1254,10 @@
             "title": "Group Id",
             "type": "string"
           },
+          "icor_worked": {
+            "title": "Icor Worked",
+            "type": "boolean"
+          },
           "icor_worked_base_units": {
             "title": "Icor Worked Base Units",
             "type": "integer"
@@ -1304,6 +1308,7 @@
           "fallback_covered_base_units",
           "uncovered_base_units",
           "coverage_status",
+          "icor_worked",
           "score",
           "evidence_status",
           "data_version"
@@ -1345,14 +1350,6 @@
             "title": "Explanation",
             "type": "string"
           },
-          "readiness_points": {
-            "title": "Readiness Points",
-            "type": "number"
-          },
-          "readiness_ratio": {
-            "title": "Readiness Ratio",
-            "type": "number"
-          },
           "strategy_name": {
             "title": "Strategy Name",
             "type": "string"
@@ -1372,8 +1369,6 @@
           "demand_rank",
           "demand_population",
           "demand_basis",
-          "readiness_ratio",
-          "readiness_points",
           "total_points",
           "strategy_name",
           "strategy_version",
@@ -3202,6 +3197,22 @@
             "schema": {
               "$ref": "#/components/schemas/OpportunitySort",
               "default": "score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "icor_worked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Icor Worked"
             }
           }
         ],

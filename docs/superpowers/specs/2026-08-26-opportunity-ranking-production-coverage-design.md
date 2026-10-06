@@ -1,5 +1,12 @@
 # ICOR Opportunity Ranking and Production Coverage Design
 
+> **Superseded scoring (2026-10-06).** At ICOR's request the score no longer
+> includes production readiness. `DemandScoreV2` (`strategy_name="demand"`,
+> version `"2"`) scores whole-market demand percentile × 100. Coverage and the
+> legacy worked-model catalog are still recorded and shown (`icor_worked` on each
+> row, `icor_worked=true|false` filter) but never change a score. The 80/20
+> formula below is historical.
+
 Date: 2026-08-26
 Status: approved in conversation on 2026-08-26; awaiting written-spec review
 

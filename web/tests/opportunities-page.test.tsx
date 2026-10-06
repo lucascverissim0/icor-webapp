@@ -53,18 +53,17 @@ export const opportunities = {
     fallback_covered_base_units: 0,
     uncovered_base_units: 1900,
     coverage_status: 'mixed',
+    icor_worked: true,
     score: {
       demand_percentile: 1,
-      demand_points: 80,
+      demand_points: 100,
       demand_rank: 1,
       demand_population: 4872,
       demand_basis: 'whole_market_base_units_all_markets_all_horizons',
-      readiness_ratio: 0.1163,
-      readiness_points: 2.326,
-      total_points: 82.3,
-      strategy_name: 'demand_readiness',
-      strategy_version: '1',
-      explanation: '80 demand points and 2.326 production-readiness points.',
+      total_points: 100,
+      strategy_name: 'demand',
+      strategy_version: '2',
+      explanation: '100 of 100 points from whole-market replacement demand.',
     },
     evidence_status: 'demonstration',
     data_version: 'demo-planner-v1',
@@ -74,8 +73,8 @@ export const opportunities = {
     exact_covered_base_units: 250,
     high_demand_uncovered_base_units: 1900,
   },
-  strategy_name: 'demand_readiness',
-  strategy_version: '1',
+  strategy_name: 'demand',
+  strategy_version: '2',
   integrity_warnings: [],
   total: 2,
   page: 1,
@@ -203,16 +202,16 @@ describe('OpportunitiesWorkbench', () => {
     renderOpportunities(successFetcher())
 
     expect(await screen.findByText('2,150 replacements')).toHaveClass('opportunity-demand__base')
-    expect(screen.getByText('Score 82.3')).toHaveAccessibleDescription(
-      /80.0 demand \+ 2.3 readiness/i,
+    expect(screen.getByText('Score 100.0')).toHaveAccessibleDescription(
+      /100th demand percentile/i,
     )
     expect(screen.getByRole('heading', { name: /Aurora Mobility.*A1 Horizon.*2025/i })).toBeVisible()
     expect(screen.getByText('Generation A')).toBeVisible()
-    expect(screen.getByText(/ICOR has worked on this vehicle-year/i)).toBeVisible()
+    expect(screen.getByText('ICOR worked', { selector: '.icor-experience' })).toBeVisible()
     expect(screen.getByText(/100th demand percentile/i)).toBeVisible()
     expect(screen.getByRole('heading', { name: 'How the opportunity score is calculated' })).toBeVisible()
-    expect(screen.getByText(/Demand points = demand percentile × 80/i)).toBeVisible()
-    expect(screen.getByText(/Readiness points = \(exact units \+ 0.5 × fallback units\)/i)).toBeVisible()
+    expect(screen.getByText(/Score = demand percentile × 100/i)).toBeVisible()
+    expect(screen.queryByText(/readiness/i)).not.toBeInTheDocument()
     expect(screen.getByText(/Registration evidence through 2025.*provisional/i)).toBeVisible()
     expect(screen.getByText('Validated snapshot')).toBeVisible()
     const availableData = screen.getByLabelText('Available opportunity data')
@@ -301,13 +300,13 @@ describe('OpportunityDetailView', () => {
 
     expect(await screen.findByRole('heading', { name: /Aurora Mobility.*A1 Horizon.*2025/i })).toBeVisible()
     expect(screen.getByText('Generation A')).toBeVisible()
-    expect(screen.getByText('82.3')).toBeVisible()
+    expect(screen.getByText('100.0')).toBeVisible()
     expect(screen.getByText(/2,150/)).toBeVisible()
     expect(await screen.findByRole('heading', { name: 'Estimated active fleet' })).toBeVisible()
     expect(screen.getByText('62,000 vehicles')).toBeVisible()
     expect(screen.getByText('53,000 vehicles')).toBeVisible()
     expect(screen.getAllByText('North America')).toHaveLength(2)
-    expect(screen.getByRole('progressbar', { name: 'Demand score' })).toHaveAttribute('value', '80')
+    expect(screen.getByRole('progressbar', { name: 'Demand score' })).toHaveAttribute('value', '100')
     expect(await screen.findByRole('heading', { name: 'FR · 2030' })).toBeVisible()
     expect(screen.getByRole('link', { name: /Back to opportunity ranking/i })).toHaveAttribute(
       'href',

@@ -797,6 +797,8 @@ export interface components {
             group_by: string;
             /** Group Id */
             group_id: string;
+            /** Icor Worked */
+            icor_worked: boolean;
             /** Icor Worked Base Units */
             icor_worked_base_units: number;
             /** Model */
@@ -821,10 +823,6 @@ export interface components {
             demand_rank: number | null;
             /** Explanation */
             explanation: string;
-            /** Readiness Points */
-            readiness_points: number;
-            /** Readiness Ratio */
-            readiness_ratio: number;
             /** Strategy Name */
             strategy_name: string;
             /** Strategy Version */
@@ -1493,6 +1491,7 @@ export interface operations {
                 page_size?: number;
                 q?: string;
                 sort?: components["schemas"]["OpportunitySort"];
+                icor_worked?: boolean | null;
             };
             header?: never;
             path?: never;

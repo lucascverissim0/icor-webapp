@@ -61,7 +61,7 @@ function managerFetcher({ mutationStatus = 201, savedRows = [] as unknown[] } = 
       return Promise.resolve(json({ coverage_id: 'coverage-1', match_type: 'exact_configuration', configuration_id: configurationPage.items[0].configuration_id, brand: 'Aurora Mobility', model: 'A1 Horizon', model_year: 2025, sku: 'DEMO-AUR-A1-CAM', note: null, created_at: '2026-08-26T12:00:00Z', updated_at: '2026-08-26T12:00:00Z' }, 201))
     }
     if (url.endsWith('/production-coverage')) return Promise.resolve(json(savedRows))
-    if (url.includes('/opportunities')) return Promise.resolve(json({ items: [], summary: { base_units: 0, exact_covered_base_units: 0, high_demand_uncovered_base_units: 0 }, strategy_name: 'demand_readiness', strategy_version: '1', integrity_warnings: [] }))
+    if (url.includes('/opportunities')) return Promise.resolve(json({ items: [], summary: { base_units: 0, exact_covered_base_units: 0, high_demand_uncovered_base_units: 0 }, strategy_name: 'demand', strategy_version: '2', integrity_warnings: [] }))
     if (init?.method === 'DELETE') return Promise.resolve(json({ coverage_id: 'coverage-1', deleted: true }))
     throw new Error(`Unhandled URL: ${url}`)
   })

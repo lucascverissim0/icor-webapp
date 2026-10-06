@@ -41,11 +41,13 @@ def test_opportunities_reconcile_and_expose_score_components(client: TestClient)
     assert response.status_code == 200
     body = response.json()
     assert body["summary"]["base_units"] == 6_560
-    assert body["strategy_name"] == "demand_readiness"
-    assert body["strategy_version"] == "1"
+    assert body["strategy_name"] == "demand"
+    assert body["strategy_version"] == "2"
     score = body["items"][0]["score"]
-    assert score["demand_points"] <= 80
-    assert score["readiness_points"] <= 20
+    assert score["total_points"] == round(score["demand_points"], 1)
+    assert score["demand_points"] <= 100
+    assert "readiness_points" not in score
+    assert isinstance(body["items"][0]["icor_worked"], bool)
     assert score["demand_population"] == body["demand_population"]
     assert score["demand_basis"] == body["demand_basis"]
     assert 1 <= score["demand_rank"] <= score["demand_population"]
@@ -120,6 +122,32 @@ def test_create_exact_coverage_then_ranking_reflects_committed_state(
         if row["brand"] == "Aurora Mobility" and row["model_year"] == 2025
     )
     assert aurora_2025["exact_covered_base_units"] == 250
+
+
+def test_coverage_is_shown_and_filterable_but_never_moves_a_score(
+    client: TestClient,
+) -> None:
+    """ICOR asked for readiness to be displayed, not scored (2026-10-06)."""
+
+    url = "/api/v1/opportunities?group_by=model_year&page_size=100"
+    before = {row["group_id"]: row for row in client.get(url).json()["items"]}
+    assert client.post("/api/v1/production-coverage", json=exact_payload()).status_code == 201
+    after = {row["group_id"]: row for row in client.get(url).json()["items"]}
+
+    assert {key: row["score"] for key, row in after.items()} == {
+        key: row["score"] for key, row in before.items()
+    }
+    worked = [key for key, row in after.items() if row["icor_worked"]]
+    assert len(worked) == 1
+    assert after[worked[0]]["brand"] == "Aurora Mobility"
+    assert after[worked[0]]["model_year"] == 2025
+
+    only_worked = client.get(f"{url}&icor_worked=true").json()
+    not_worked = client.get(f"{url}&icor_worked=false").json()
+    assert [row["group_id"] for row in only_worked["items"]] == worked
+    assert only_worked["items"][0]["score"] == after[worked[0]]["score"]
+    assert worked[0] not in {row["group_id"] for row in not_worked["items"]}
+    assert only_worked["total"] + not_worked["total"] == len(after)
 
 
 def test_duplicate_coverage_returns_typed_conflict(client: TestClient) -> None:

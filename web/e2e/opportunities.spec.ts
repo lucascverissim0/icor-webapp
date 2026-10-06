@@ -137,7 +137,7 @@ test('fallback coverage requires confirmation and shows lower precision', async 
 
   const save = page.getByRole('button', { name: 'Save fallback coverage' })
   await expect(save).toBeDisabled()
-  await expect(page.getByText(/half readiness weight/i)).toBeVisible()
+  await expect(page.getByText(/marks every matching configuration/i)).toBeVisible()
   await page.getByLabel(/I understand this is lower precision/i).check()
   await save.click()
 

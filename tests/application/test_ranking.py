@@ -1,6 +1,6 @@
 from icor.application.ranking import (
     DemandPopulation,
-    DemandReadinessV1,
+    DemandScoreV2,
     demand_percentile_rank,
 )
 from icor.domain.opportunities import OpportunityCandidate
@@ -27,25 +27,32 @@ def candidate(
     )
 
 
-def test_single_non_zero_exact_candidate_receives_full_score() -> None:
-    score = DemandReadinessV1().score((candidate("a", 100, exact=100),))[0]
+def test_the_largest_demand_scores_one_hundred_on_demand_alone() -> None:
+    score = DemandScoreV2().score((candidate("a", 100),))[0]
 
     assert score.demand_percentile == 1
-    assert score.demand_points == 80
-    assert score.readiness_ratio == 1
-    assert score.readiness_points == 20
+    assert score.demand_points == 100
     assert score.total_points == 100
+    assert (score.strategy_name, score.strategy_version) == ("demand", "2")
 
 
-def test_fallback_units_receive_half_readiness_weight() -> None:
-    score = DemandReadinessV1().score((candidate("a", 100, fallback=100),))[0]
+def test_icor_coverage_never_changes_a_score() -> None:
+    """ICOR having worked on a car is shown beside the score, never inside it."""
 
-    assert score.readiness_ratio == 0.5
-    assert score.readiness_points == 10
+    market = (candidate("low", 100), candidate("high", 300))
+    uncovered = DemandScoreV2().score(market)
+    covered = DemandScoreV2().score(
+        (candidate("low", 100, exact=60, fallback=40), candidate("high", 300, fallback=300))
+    )
+
+    assert [score.total_points for score in covered] == [
+        score.total_points for score in uncovered
+    ]
+    assert [score.total_points for score in covered] == [0, 100]
 
 
 def test_equal_demand_uses_the_same_average_rank_percentile() -> None:
-    scores = DemandReadinessV1().score(
+    scores = DemandScoreV2().score(
         (candidate("low", 100), candidate("tie-b", 200), candidate("tie-a", 200))
     )
 
@@ -56,22 +63,12 @@ def test_equal_demand_uses_the_same_average_rank_percentile() -> None:
 
 
 def test_all_zero_candidates_receive_zero_points_without_division_error() -> None:
-    scores = DemandReadinessV1().score((candidate("b", 0), candidate("a", 0)))
+    scores = DemandScoreV2().score((candidate("b", 0), candidate("a", 0)))
 
     assert [(score.group_id, score.total_points) for score in scores] == [
         ("b", 0),
         ("a", 0),
     ]
-
-
-def test_mixed_coverage_does_not_double_count_readiness() -> None:
-    score = DemandReadinessV1().score(
-        (candidate("mixed", 100, exact=40, fallback=30),)
-    )[0]
-
-    assert score.readiness_ratio == 0.55
-    assert score.readiness_points == 11
-
 
 
 def test_population_argument_sets_the_percentile_denominator() -> None:
@@ -80,7 +77,7 @@ def test_population_argument_sets_the_percentile_denominator() -> None:
     market = tuple(candidate(f"m{index}", (index + 1) * 10) for index in range(10))
     shown = (market[0], market[9])
 
-    scores = DemandReadinessV1().score(shown, population=market)
+    scores = DemandScoreV2().score(shown, population=market)
 
     by_id = {score.group_id: score for score in scores}
     assert by_id["m0"].demand_percentile == 0
@@ -93,30 +90,29 @@ def test_population_argument_sets_the_percentile_denominator() -> None:
 def test_a_candidate_is_scored_from_its_population_entry() -> None:
     """The filtered units are not the units the score is computed from.
 
-    A market filter leaves a vehicle carrying a fraction of its demand and none
-    of its coverage. Scoring that fraction is what made a score mean something
-    different on every screen.
+    A market filter leaves a vehicle carrying a fraction of its demand.
+    Scoring that fraction is what made a score mean something different on
+    every screen.
     """
 
-    whole = candidate("golf", 1_000, exact=1_000)
+    whole = candidate("golf", 1_000)
     slice_of_it = candidate("golf", 10)
     others = tuple(candidate(f"other{index}", 100) for index in range(4))
 
-    filtered = DemandReadinessV1().score(
+    filtered = DemandScoreV2().score(
         (slice_of_it,), population=(whole, *others)
     )[0]
-    unfiltered = DemandReadinessV1().score((whole,), population=(whole, *others))[0]
+    unfiltered = DemandScoreV2().score((whole,), population=(whole, *others))[0]
 
     assert filtered == unfiltered
     assert filtered.demand_percentile == 1
-    assert filtered.readiness_ratio == 1
     assert filtered.total_points == 100
 
 
 def test_a_vehicle_absent_from_the_population_is_scored_from_its_own_units() -> None:
     """A group the population does not know must not vanish or throw."""
 
-    score = DemandReadinessV1().score(
+    score = DemandScoreV2().score(
         (candidate("unknown", 50),), population=(candidate("known", 100),)
     )[0]
 
@@ -131,7 +127,7 @@ def test_zero_demand_is_unranked_and_leaves_the_denominator_alone() -> None:
     two real vehicles would sit at the halfway mark rather than at the bottom.
     """
 
-    scores = DemandReadinessV1().score(
+    scores = DemandScoreV2().score(
         (
             candidate("empty-a", 0),
             candidate("empty-b", 0),

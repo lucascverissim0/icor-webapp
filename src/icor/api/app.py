@@ -27,7 +27,7 @@ from icor.application.evidence_review import EvidenceReviewService
 from icor.application.ml_export import MLExportService
 from icor.application.opportunities import OpportunityGroupBy, OpportunityService
 from icor.application.planner import PlannerRepository, PlannerService
-from icor.application.ranking import DemandReadinessV1
+from icor.application.ranking import DemandScoreV2
 from icor.application.registrations import RegistrationService
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
@@ -129,7 +129,7 @@ def create_app(
         opportunity_repository = SnapshotOpportunityRepository(
             selected_repository,
             selected_coverage_repository,
-            DemandReadinessV1(),
+            DemandScoreV2(),
             worked_models=IcorWorkedModelCatalog.from_path(
                 ROOT / "data" / "icor_supported_models.txt"
             ),
@@ -152,7 +152,7 @@ def create_app(
         app.state.opportunity_service = OpportunityService(
             selected_repository,
             selected_coverage_repository,
-            DemandReadinessV1(),
+            DemandScoreV2(),
         )
     else:
         app.state.opportunity_service = None

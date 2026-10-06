@@ -35,7 +35,6 @@ class UniverseGroup:
     base_units: int
     percentile: float
     rank: int | None
-    readiness_ratio: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,8 +64,7 @@ class OpportunityUniverse:
 
         rows = connection.execute(
             f"""{grouped_cte}
-            SELECT brand, model, model_year, base_units, exact_units,
-                fallback_units
+            SELECT brand, model, model_year, base_units
             FROM grouped"""
         ).fetchall()
         demand = DemandPopulation.of(int(row["base_units"]) for row in rows)
@@ -80,7 +78,6 @@ class OpportunityUniverse:
                 base_units=int(row["base_units"]),
                 percentile=demand.percentile(int(row["base_units"])),
                 rank=demand.rank(int(row["base_units"])),
-                readiness_ratio=_readiness_ratio(row),
             )
             for row in rows
         )
@@ -107,12 +104,11 @@ class OpportunityUniverse:
                 model_year INTEGER,
                 universe_base_units INTEGER NOT NULL,
                 universe_rank INTEGER,
-                universe_percentile REAL NOT NULL,
-                universe_readiness_ratio REAL NOT NULL
+                universe_percentile REAL NOT NULL
             )"""
         )
         connection.executemany(
-            f"INSERT INTO temp.{TABLE} VALUES (?, ?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO temp.{TABLE} VALUES (?, ?, ?, ?, ?, ?)",
             (
                 (
                     group.brand,
@@ -121,7 +117,6 @@ class OpportunityUniverse:
                     group.base_units,
                     group.rank,
                     group.percentile,
-                    group.readiness_ratio,
                 )
                 for group in self.groups
             ),
@@ -131,11 +126,3 @@ class OpportunityUniverse:
             f"ON {TABLE} (brand, model, model_year)"
         )
 
-
-def _readiness_ratio(row: sqlite3.Row) -> float:
-    base = int(row["base_units"])
-    if base == 0:
-        return 0.0
-    exact = int(row["exact_units"])
-    fallback = int(row["fallback_units"])
-    return (exact + fallback * 0.5) / base

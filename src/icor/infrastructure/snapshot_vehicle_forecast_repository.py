@@ -121,13 +121,10 @@ class MarketVehicleForecast:
 class DemandRank:
     """Where this selection sits among every forecastable vehicle at a horizon.
 
-    `DemandReadinessV1` scores demand as a percentile within a population, so a
+    `DemandScoreV2` scores demand as a percentile within a population, so a
     single vehicle has no score on its own. This ranks the selection against
     every vehicle with an opportunity at the same horizon, using the shared
-    percentile rule, and reports only the demand half of that score. The
-    20-point production-readiness half depends on the coverage database, which
-    this channel does not read, so it is deliberately absent rather than
-    reported as zero.
+    percentile rule and the same 0-100 scale.
     """
 
     percentile: float

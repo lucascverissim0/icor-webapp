@@ -32,6 +32,7 @@ function queryFromSearch(search: OpportunitySearch): OpportunitiesQuery {
     horizons: search.horizon,
     text: search.q,
     sort: search.order,
+    icorWorked: search.worked === undefined ? undefined : search.worked === 'yes',
     page: search.page,
     pageSize: 100,
   }
@@ -97,6 +98,7 @@ function RankingFilters({
     selectedMarkets.length > 0 ||
     (search.horizon?.length ?? 0) > 0 ||
     Boolean(search.q) ||
+    search.worked !== undefined ||
     (search.order ?? 'score') !== 'score'
 
   return (
@@ -133,6 +135,26 @@ function RankingFilters({
             {availableHorizons.map((horizon) => (
               <option key={horizon} value={horizon}>{horizon}</option>
             ))}
+          </select>
+        </label>
+
+        <label className="ranking-filters__field" htmlFor="opportunity-worked">
+          <span>ICOR worked</span>
+          <select
+            id="opportunity-worked"
+            onChange={(event) => {
+              const value = event.target.value
+              onSearchChange({
+                ...search,
+                worked: value === 'yes' || value === 'no' ? value : undefined,
+                page: 1,
+              })
+            }}
+            value={search.worked ?? ''}
+          >
+            <option value="">All vehicles</option>
+            <option value="yes">Worked on</option>
+            <option value="no">Not worked on</option>
           </select>
         </label>
 
@@ -253,7 +275,7 @@ export function OpportunitiesWorkbench({
           <h2>{clientRelease ? 'Prioritized vehicle-year opportunities' : 'Prioritized model and generation opportunities'}</h2>
           <p>{clientRelease
             ? 'This client release covers every forecastable official-source make/model label and registration cohort year. Ranked generation names use reviewed manufacturer production windows; forecasts remain planning estimates.'
-            : 'Start with the vehicle opportunities forecast for upcoming years. Demand drives up to 80 points; verified ICOR experience adds up to 20 readiness points.'}</p>
+            : 'Start with the vehicle opportunities forecast for upcoming years. The score is forecast demand alone; ICOR experience is shown beside it.'}</p>
         </div>
         <span className="status-pill">{clientRelease ? 'Official vehicle-year evidence' : 'Validated snapshot'}</span>
       </header>
@@ -273,9 +295,7 @@ export function OpportunitiesWorkbench({
       <section className="score-method" aria-labelledby="score-method-title">
         <div><p className="eyebrow">Transparent ranking</p><h2 id="score-method-title">How the opportunity score is calculated</h2></div>
         <div className="score-method__formula">
-          <p><strong>Demand points = demand percentile × 80</strong><span>The highest forecast demand approaches 80 points; this does not change the replacement forecast.</span></p>
-          <p><strong>Readiness points = (exact units + 0.5 × fallback units) ÷ total units × 20</strong><span>Exact ICOR configuration coverage gets full weight. Vehicle-year and legacy worked-model matches get half weight. Uncovered units get zero.</span></p>
-          <p><strong>Total score = demand points + readiness points</strong><span>Maximum 100 points: 80 for market demand and 20 for ICOR readiness.</span></p>
+          <p><strong>Score = demand percentile × 100</strong><span>The highest forecast replacement demand scores 100. Whether ICOR has worked on a vehicle is shown beside the score and never changes it.</span></p>
         </div>
         <p className="score-method__scope" role="note">
           Scores are whole-market. The demand percentile compares each vehicle
@@ -377,7 +397,7 @@ export function OpportunitiesWorkbench({
 
       {!clientRelease && <details className="coverage-disclosure">
         <summary>Manage ICOR worked-model coverage</summary>
-        <p>Use this only to maintain the experience records that affect the readiness portion of the score.</p>
+        <p>Records of vehicles ICOR has worked on. They are displayed and filterable; they do not change the score.</p>
         <CoverageManager apiClient={apiClient} opportunityQuery={opportunityQuery} />
       </details>}
 

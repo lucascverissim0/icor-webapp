@@ -47,6 +47,22 @@ describe('opportunity URL state', () => {
   })
 })
 
+describe('ICOR worked filter', () => {
+  it('keeps yes and no in route state and drops anything else', () => {
+    expect(parseOpportunitySearch({ groupBy: 'model_year', worked: 'yes' }).value.worked).toBe('yes')
+    expect(parseOpportunitySearch({ groupBy: 'model_year', worked: 'no' }).value.worked).toBe('no')
+    const invalid = parseOpportunitySearch({ groupBy: 'model_year', worked: 'maybe' })
+    expect(invalid.value.worked).toBeUndefined()
+    expect(invalid.invalidKeys).toEqual(['worked'])
+    expect(serializeOpportunitySearch({ groupBy: 'model_year', page: 1, worked: 'no' })).toEqual({
+      groupBy: 'model_year',
+      page: 1,
+      worked: 'no',
+    })
+  })
+})
+
+
 describe('opportunity search text and ordering', () => {
   it('keeps a search term and a non-default order in route state', () => {
     const parsed = parseOpportunitySearch({

@@ -8,7 +8,7 @@ from icor.application.opportunities import (
     OpportunityQuery,
     OpportunityService,
 )
-from icor.application.ranking import DemandReadinessV1
+from icor.application.ranking import DemandScoreV2
 from icor.domain.opportunities import CoverageMatchType, CoverageStatus, ProductionCoverage
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 
@@ -53,7 +53,7 @@ def service(rows: tuple[ProductionCoverage, ...] = ()) -> OpportunityService:
     return OpportunityService(
         DemoPlannerRepository.from_path(FIXTURE),
         StaticCoverageRepository(rows),
-        DemandReadinessV1(),
+        DemandScoreV2(),
     )
 
 

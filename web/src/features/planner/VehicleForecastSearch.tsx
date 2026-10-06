@@ -147,7 +147,7 @@ function ForecastResults({ result, clientRelease }: { result: VehicleForecast; c
         <span>Registration cohorts → surviving fleet at {result.horizon} → age/geography hazard → P10/P50/P90 replacement forecast.</span>
         <span>This remains assumption-led until proprietary fitment and replacement-history calibration are available.</span>
         <span>Methods used for these figures: survival <code>{result.survival_method}</code>, hazard <code>{result.hazard_method}</code>, uncertainty <code>{result.uncertainty_method}</code>.</span>
-        {result.demand_rank && <span>The demand rank is the {result.demand_rank.basis.replace(/_/g, ' ')}; it is the demand half of the opportunity score only, without the production-readiness component.</span>}
+        {result.demand_rank && <span>The demand rank is the {result.demand_rank.basis.replace(/_/g, ' ')}; it uses the same 0–100 demand scale as the opportunity score.</span>}
       </div>
     </section>
   )

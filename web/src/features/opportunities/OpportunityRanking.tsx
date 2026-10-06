@@ -22,7 +22,7 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
     <section aria-labelledby="ranking-title" className="opportunity-ranking">
       <div className="ranking-heading">
         <div><p className="eyebrow">Ranked decision set</p><h2 id="ranking-title">Replacement opportunities</h2></div>
-        <p>Score = up to 80 points for forecast demand + up to 20 points for ICOR readiness</p>
+        <p>Score = whole-market demand percentile × 100</p>
       </div>
       <ol className="opportunity-list">
         {rows.map((row, index) => {
@@ -48,13 +48,10 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
                   <span>Fallback {format(row.fallback_covered_base_units)}</span>
                   <span>Uncovered {format(row.uncovered_base_units)}</span>
                 </div>
-                {row.icor_worked_base_units > 0 && (
-                  <p className="icor-experience">ICOR has worked on this vehicle-year · {format(row.icor_worked_base_units)} forecast replacements receive partial readiness credit</p>
-                )}
+                {row.icor_worked && <p className="icor-experience">ICOR worked</p>}
                 <div className="opportunity-score">
                   <strong aria-describedby={descriptionId}>Score {row.score.total_points.toFixed(1)}</strong>
-                  <span id={descriptionId}>{row.score.demand_points.toFixed(1)} demand + {row.score.readiness_points.toFixed(1)} readiness</span>
-                  <span>
+                  <span id={descriptionId}>
                     {Math.round(row.score.demand_percentile * 100)}th demand percentile
                     {row.score.demand_rank !== null && row.score.demand_population > 0
                       ? ` · #${format(row.score.demand_rank)} of ${format(row.score.demand_population)} in the market`

@@ -26,8 +26,8 @@ from icor.application.opportunities import (
 )
 from icor.application.ranking import (
     DEMAND_POINTS_MAX,
-    READINESS_POINTS_MAX,
     RankingStrategy,
+    demand_explanation,
 )
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import CanonicalVehicle
@@ -558,9 +558,10 @@ class SnapshotOpportunityRepository:
     def _refresh_for_coverage(self) -> bool:
         """Report manual coverage, and drop what a change to it invalidates.
 
-        Readiness is part of the whole-market population now, so recording
-        coverage for one vehicle changes the score of vehicles nobody mentioned.
-        Both the population and the cached pages have to go.
+        Coverage is not part of the score, so the whole-market populations stay
+        valid; they are keyed on whether coverage exists at all, because that
+        decides where a group's units come from. Cached pages carry coverage
+        units and statuses, so they have to go.
 
         Read through its own connection rather than the snapshot's, so a cached
         page can be served without opening the snapshot at all.
@@ -579,7 +580,6 @@ class SnapshotOpportunityRepository:
             ).fetchone()
         fingerprint = (int(count), str(updated), str(newest), str(oldest))
         if fingerprint != self._coverage_fingerprint:
-            self._universes.clear()
             self._uncovered_cache.clear()
             self._coverage_fingerprint = fingerprint
         return int(count) > 0
@@ -827,7 +827,7 @@ class SnapshotOpportunityRepository:
     ) -> tuple[str, tuple[object, ...]]:
         """Score the filtered rows against the unfiltered market.
 
-        The percentile and the readiness ratio are read from
+        The percentile is read from
         ``temp.opportunity_universe`` rather than computed here, so a filter
         changes which rows appear and what units they carry but never what a
         score means. The join is NULL-safe with ``IS`` because ``model`` and
@@ -841,11 +841,17 @@ class SnapshotOpportunityRepository:
             predicates=self._filter(query),
             atoms_name="base_atoms",
         )
+        # A whole-group predicate, so it can only run after grouping: a vehicle
+        # ICOR worked on for one model year is still "worked" as a model.
+        worked = {
+            None: "1 = 1",
+            True: "exact_units + fallback_units + icor_worked_units > 0",
+            False: "exact_units + fallback_units + icor_worked_units = 0",
+        }[query.icor_worked]
         cte = f"""{grouped}, positioned AS (
             SELECT grouped.*,
                 COALESCE(universe.universe_percentile, 0.0) demand_percentile,
                 universe.universe_rank demand_rank,
-                COALESCE(universe.universe_readiness_ratio, 0.0) readiness_ratio,
                 universe.brand IS NULL universe_missing
             FROM grouped
             LEFT JOIN temp.{_UNIVERSE_TABLE} universe
@@ -854,10 +860,9 @@ class SnapshotOpportunityRepository:
                 AND universe.model_year IS grouped.model_year
         ), scored AS (
             SELECT *, demand_percentile * {DEMAND_POINTS_MAX} demand_points,
-                readiness_ratio * {READINESS_POINTS_MAX} readiness_points,
-                demand_percentile * {DEMAND_POINTS_MAX}
-                    + readiness_ratio * {READINESS_POINTS_MAX} total_points
+                demand_percentile * {DEMAND_POINTS_MAX} total_points
             FROM positioned
+            WHERE {worked}
         )"""
         return cte, parameters
 
@@ -991,7 +996,6 @@ class SnapshotOpportunityRepository:
         fallback = int(row["fallback_units"])
         uncovered = int(row["uncovered_units"])
         demand_points = float(row["demand_points"])
-        readiness_points = float(row["readiness_points"])
         rank = row["demand_rank"]
         score = OpportunityScore(
             group_id=group_id,
@@ -1000,15 +1004,10 @@ class SnapshotOpportunityRepository:
             demand_rank=None if rank is None else int(rank),
             demand_population=universe.population,
             demand_basis=universe.basis,
-            readiness_ratio=float(row["readiness_ratio"]),
-            readiness_points=readiness_points,
             total_points=float(row["total_points"]),
             strategy_name=self._strategy.name,
             strategy_version=self._strategy.version,
-            explanation=(
-                f"{demand_points:g} demand points and "
-                f"{readiness_points:g} production-readiness points."
-            ),
+            explanation=demand_explanation(demand_points),
         )
         generation = None
         if row["model"] is not None and row["model_year"] is not None:

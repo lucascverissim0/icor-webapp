@@ -293,9 +293,7 @@ def test_the_demand_rank_places_the_selection_in_its_population(
 ) -> None:
     """A percentile needs a population, so a single vehicle is ranked against one.
 
-    Only the demand half of `DemandReadinessV1` is reported: the readiness half
-    needs the coverage database this channel does not read, and reporting it as
-    zero would understate every vehicle.
+    It is on the same 0-100 scale as `DemandScoreV2`.
     """
 
     result = repository.forecast(
@@ -305,7 +303,7 @@ def test_the_demand_rank_places_the_selection_in_its_population(
     rank = result.demand_rank
     assert rank is not None
     assert 0.0 <= rank.percentile <= 1.0
-    assert rank.demand_points == pytest.approx(rank.percentile * 80.0)
+    assert rank.demand_points == pytest.approx(rank.percentile * 100.0)
     assert 1 <= rank.rank <= rank.population
     assert rank.basis == "european_opportunity_p50_at_horizon"
 

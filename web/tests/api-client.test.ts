@@ -152,21 +152,28 @@ describe('PlannerApiClient', () => {
   })
 
   it('serializes opportunity filters using the API contract names', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ items: [], summary: { base_units: 0, exact_covered_base_units: 0, high_demand_uncovered_base_units: 0 }, strategy_name: 'demand_readiness', strategy_version: '1', integrity_warnings: [] }), {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ items: [], summary: { base_units: 0, exact_covered_base_units: 0, high_demand_uncovered_base_units: 0 }, strategy_name: 'demand', strategy_version: '2', integrity_warnings: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
-    )
+    ))
 
     await new PlannerApiClient(fetcher).opportunities({
       groupBy: 'model_year',
       markets: ['FR'],
       horizons: [2030],
     })
+    await new PlannerApiClient(fetcher).opportunities({
+      groupBy: 'model_year',
+      icorWorked: false,
+    })
 
     expect(fetcher.mock.calls[0]?.[0]).toBe(
       '/api/v1/opportunities?group_by=model_year&market=FR&horizon=2030',
+    )
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      '/api/v1/opportunities?group_by=model_year&icor_worked=false',
     )
   })
 

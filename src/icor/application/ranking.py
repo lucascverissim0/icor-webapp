@@ -8,9 +8,10 @@ from typing import Protocol
 
 from icor.domain.opportunities import OpportunityCandidate, OpportunityScore
 
-#: Demand is worth 80 of the 100 points; production readiness carries the rest.
-DEMAND_POINTS_MAX = 80.0
-READINESS_POINTS_MAX = 20.0
+#: The score is demand alone, on a 0-100 scale. ICOR production readiness was
+#: removed from it on 2026-10-06 at ICOR's request: whether ICOR has already
+#: worked on a vehicle is reported beside the score, never inside it.
+DEMAND_POINTS_MAX = 100.0
 
 #: What a demand percentile is measured against, reported beside every score so
 #: a consumer can tell which population produced it. The vehicle forecast
@@ -43,7 +44,7 @@ class DemandPopulation:
     zero, but counting them would put the smallest vehicle anyone can actually
     see halfway up the scale: on the promoted snapshot 26,695 of 50,811 model
     years forecast nothing, so including them would give every visible vehicle
-    at least 42 of the 80 demand points and flatten the ranking.
+    at least half of the demand points and flatten the ranking.
     """
 
     size: int
@@ -86,9 +87,9 @@ class DemandPopulation:
         return self.ranks.get(value) if value > 0 else None
 
 
-class DemandReadinessV1:
-    name = "demand_readiness"
-    version = "1"
+class DemandScoreV2:
+    name = "demand"
+    version = "2"
 
     def score(
         self,
@@ -101,7 +102,8 @@ class DemandReadinessV1:
         The population is a separate argument so that narrowing a ranking
         cannot change what a score means. A vehicle is scored from its entry in
         the population rather than from the units that survived the filter, so
-        both halves of the score are properties of the vehicle.
+        the score is a property of the vehicle. Coverage is deliberately not
+        read: it is displayed, not scored.
         """
 
         members = population if population is not None else candidates
@@ -112,35 +114,28 @@ class DemandReadinessV1:
             member = by_group.get(candidate.group_id, candidate)
             units = member.demand.base_units
             percentile = demand.percentile(units)
-            if units == 0:
-                readiness_ratio = 0.0
-            else:
-                readiness_ratio = (
-                    member.exact_covered_base_units
-                    + member.fallback_covered_base_units * 0.5
-                ) / units
-            demand_points = percentile * DEMAND_POINTS_MAX
-            readiness_points = readiness_ratio * READINESS_POINTS_MAX
+            points = percentile * DEMAND_POINTS_MAX
             scores.append(
                 OpportunityScore(
                     group_id=candidate.group_id,
                     demand_percentile=percentile,
-                    demand_points=demand_points,
+                    demand_points=points,
                     demand_rank=demand.rank(units),
                     demand_population=demand.size,
                     demand_basis=WHOLE_MARKET_BASIS,
-                    readiness_ratio=readiness_ratio,
-                    readiness_points=readiness_points,
-                    total_points=demand_points + readiness_points,
+                    total_points=points,
                     strategy_name=self.name,
                     strategy_version=self.version,
-                    explanation=(
-                        f"{demand_points:g} demand points and "
-                        f"{readiness_points:g} production-readiness points."
-                    ),
+                    explanation=demand_explanation(points),
                 )
             )
         return tuple(scores)
+
+
+def demand_explanation(points: float) -> str:
+    """One wording for every channel that reports a score."""
+
+    return f"{points:g} of 100 points from whole-market replacement demand."
 
 
 def demand_percentile_rank(sorted_values: Sequence[float], value: float) -> float:
