@@ -1072,6 +1072,9 @@ def test_untrusted_store_still_hashes_the_database(
     write_verified_marker(evidence_root)
     database = next((evidence_root / "snapshots").glob("*/evidence.sqlite3"))
     database.chmod(stat.S_IWRITE | stat.S_IREAD)
+    # POSIX needs a writable directory for SQLite's rollback journal; Windows
+    # ignores the read-only attribute on directories.
+    database.parent.chmod(stat.S_IRWXU)
     with sqlite3.connect(database) as connection:
         connection.execute("CREATE TABLE tampered (value TEXT)")
 

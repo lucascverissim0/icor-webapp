@@ -6,6 +6,7 @@ import ctypes
 import os
 import shutil
 import stat
+import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -90,6 +91,31 @@ class _StableSnapshot:
         self.close()
 
 
+_VOLFS_ROOT = Path("/.vol")
+_F_GETPATH = 50  # macOS <sys/fcntl.h>
+_MAXPATHLEN = 1024
+
+
+def resolve_strict(path: Path) -> Path:
+    """``Path.resolve(strict=True)`` that also understands macOS volfs paths.
+
+    ``/.vol/<device>/<inode>`` cannot be walked component by component, which is
+    what ``realpath`` does, so it is resolved through the kernel's own name for
+    the opened object instead. Both forms follow symlinks and fail if the path
+    does not exist.
+    """
+    if sys.platform != "darwin" or _VOLFS_ROOT not in Path(path).parents:
+        return Path(path).resolve(strict=True)
+    import fcntl
+
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        buffer = fcntl.fcntl(descriptor, _F_GETPATH, bytes(_MAXPATHLEN))
+    finally:
+        os.close(descriptor)
+    return Path(os.fsdecode(buffer.split(b"\0", 1)[0]))
+
+
 class SnapshotPathError(RuntimeError):
     """A snapshot filesystem path is unsafe or escaped its declared root."""
 
@@ -150,8 +176,17 @@ class SnapshotFilesystem:
     ) -> Path:
         if os.name == "nt":
             return safe_root
-        for descriptor_root in (Path("/proc/self/fd"), Path("/dev/fd")):
-            candidate = descriptor_root / str(handle)
+        candidates = [
+            Path("/proc/self/fd") / str(handle),
+            Path("/dev/fd") / str(handle),
+        ]
+        if sys.platform == "darwin":
+            # macOS cannot walk beneath /dev/fd/N, but volfs addresses a
+            # directory by (device, inode), which follows it across renames
+            # exactly as /proc/self/fd/N does on Linux. The open handle keeps
+            # the inode from being reused while the root is pinned.
+            candidates.append(Path("/.vol") / str(identity[0]) / str(identity[1]))
+        for candidate in candidates:
             try:
                 metadata = candidate.stat()
             except OSError:
@@ -673,7 +708,7 @@ class SnapshotFilesystem:
     @staticmethod
     def _require_resolved_containment(path: Path, root: Path) -> None:
         try:
-            path.resolve(strict=True).relative_to(root.resolve(strict=True))
+            resolve_strict(path).relative_to(resolve_strict(root))
         except (OSError, ValueError) as error:
             raise SnapshotPathError("snapshot path escapes its storage root") from error
 

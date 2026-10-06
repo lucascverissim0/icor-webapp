@@ -27,11 +27,13 @@ from icor.infrastructure.snapshot_filesystem import (
     SnapshotFilesystem,
     SnapshotLockUnavailableError,
     SnapshotPathError,
+    resolve_strict,
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}\Z")
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
+_RENAME_EXCL = 0x00000004  # macOS <sys/stdio.h>
 
 
 # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
@@ -295,7 +297,7 @@ class ReleaseStore:
     @staticmethod
     def _require_contained(path: Path, root: Path, label: str) -> None:
         try:
-            path.resolve(strict=True).relative_to(root.resolve(strict=True))
+            resolve_strict(path).relative_to(resolve_strict(root))
         except (OSError, ValueError) as error:
             raise ReleaseIntegrityError(f"{label} escapes the release store root") from error
 
@@ -346,6 +348,20 @@ class ReleaseStore:
                 _AT_FDCWD,
                 os.fsencode(destination),
                 _RENAME_NOREPLACE,
+            ) == 0:
+                return
+            error = ctypes.get_errno()
+            if error in {errno.EEXIST, errno.ENOTEMPTY}:
+                raise FileExistsError(error, "release destination already exists", destination)
+            raise OSError(error, os.strerror(error), destination)
+
+        if sys.platform == "darwin":
+            libc = ctypes.CDLL(None, use_errno=True)
+            renamex_np = libc.renamex_np
+            renamex_np.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+            renamex_np.restype = ctypes.c_int
+            if renamex_np(
+                os.fsencode(staging), os.fsencode(destination), _RENAME_EXCL
             ) == 0:
                 return
             error = ctypes.get_errno()

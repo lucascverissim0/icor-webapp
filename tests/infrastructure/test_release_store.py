@@ -136,7 +136,8 @@ def test_alias_root_stage_get_and_verify_preserve_the_pinned_operation_path(
     filesystem = SnapshotFilesystem()
 
     def exercise(operation_root: Path) -> None:
-        assert operation_root.resolve(strict=True) != operation_root
+        # The operation path is a descriptor or volfs alias, never the lexical root.
+        assert operation_root not in {lexical_root, pinned_root}
         store = ReleaseStore(operation_root / "releases", filesystem=filesystem)
 
         staged = store.stage(artifact, release_manifest)
