@@ -27,15 +27,16 @@ EXPECTED_SOURCE_KEYS = (
     "uk-veh0124-am",
     "uk-veh0124-nz",
     "rdw-nl-fleet",
+    "traficom-fi-fleet",
 )
 
 
-def test_default_plan_has_exactly_the_approved_twenty_two_releases() -> None:
+def test_default_plan_has_exactly_the_approved_twenty_three_releases() -> None:
     plan = default_plan()
 
     assert tuple(source.source_key for source in plan.sources) == EXPECTED_SOURCE_KEYS
-    assert len(plan.release_ids) == 22
-    assert len(set(plan.release_ids)) == 22
+    assert len(plan.release_ids) == 23
+    assert len(set(plan.release_ids)) == 23
     assert plan.release_ids[0] == "eea-co2cars-2010-final-v2-r1"
     assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20261006"
     assert plan.build_as_of == BUILD_AS_OF == "2026-08-27T12:00:00+00:00"
@@ -340,6 +341,37 @@ def test_rdw_fleet_uses_its_own_acquisition_script(tmp_path: Path) -> None:
     ]
 
 
+def test_traficom_fleet_is_a_direct_download_without_an_adapter_script(
+    tmp_path: Path,
+) -> None:
+    plan = default_plan()
+    release_id = "traficom-fi-vehicles-20260630"
+    assert release_id in plan.release_ids
+    runner = RecordingRunner()
+    coordinator = BootstrapCoordinator(
+        repository_root=tmp_path,
+        evidence_root=tmp_path / "evidence",
+        runner=runner,
+        release_is_valid=lambda value: value != release_id,
+        active_matches=lambda _: False,
+        python_command=("python",),
+        npm_command=("npm",),
+    )
+
+    coordinator.acquire(plan)
+
+    assert runner.commands == [
+        (
+            "python",
+            str(tmp_path / "scripts" / "acquire_official_evidence.py"),
+            "--source",
+            "traficom-fi-fleet",
+            "--root",
+            str(tmp_path / "evidence"),
+        )
+    ]
+
+
 def test_2025_provisional_uses_its_bounded_aggregate_adapter(tmp_path: Path) -> None:
     plan = default_plan()
     release_id = next(
@@ -388,7 +420,7 @@ def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) 
     promote_index = next(index for index, value in enumerate(joined) if " promote " in f" {value} ")
     assert build_index < report_index < promote_index
     build = runner.commands[build_index]
-    assert build.count("--release") == 22
+    assert build.count("--release") == 23
     assert build[build.index("--build-as-of") + 1] == BUILD_AS_OF
     assert build[build.index("--deterministic-seed") + 1] == str(DETERMINISTIC_SEED)
     assert runner.commands[-2:] == [("npm", "ci"), ("npm", "run", "build")]
@@ -481,7 +513,7 @@ def test_prepare_reuses_exact_active_snapshot_below_build_capacity(
 
     assert bootstrap_script.main() == 0
     assert json.loads(capsys.readouterr().out) == {
-        "release_count": 22,
+        "release_count": 23,
         "reused": True,
         "snapshot_id": "snapshot-active",
         "start_command": "python scripts/run_codespaces_preview.py",

@@ -119,6 +119,7 @@ uv run python scripts/acquire_official_evidence.py --source uk-veh0120-gb --root
 uv run python scripts/acquire_rdw_fleet.py --destination $evidenceRoot/downloads/rdw-nl-fleet.csv
 uv run python scripts/acquire_official_evidence.py --source rdw-nl-fleet --root $evidenceRoot `
   --artifact $evidenceRoot/downloads/rdw-nl-fleet.csv
+uv run python scripts/acquire_official_evidence.py --source traficom-fi-fleet --root $evidenceRoot
 
 uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
   --release eea-co2cars-2024-final-v30-r1 `
@@ -136,7 +137,16 @@ attribute it as "Source: RDW (Netherlands Vehicle Authority) open data". It is a
 as observed active passenger-car stock by first-admission cohort year and merk and
 handelsbenaming. The register changes daily, so `rdw-nl-fleet` is a dated 2026-10-06
 snapshot pinned by checksum; re-acquiring from the live API will not reproduce it and
-fails the pinned-checksum check. EEA and KBA are placed in the same dependency group so
+fails the pinned-checksum check. The Finland Traficom open vehicle data
+(Ajoneuvojen avoin data, `opendata.traficom.fi/Content/Ajoneuvorekisteri.zip`) is
+licensed CC BY 4.0; attribute it as "Source: Traficom". `traficom-fi-fleet` pins the
+quarterly ZIP itself (30.6.2026 edition, size and sha256) as a direct download and the
+`traficom_vehicles_zip_v1` loader streams its ISO-8859-1 semicolon CSV, keeping passenger
+cars (`ajoneuvoluokka` M1 and M1G) as observed active fleet by make, commercial name
+(`kaupallinenNimi`, falling back to `mallimerkinta` when blank) and the year of the
+first-use date `kayttoonottopvm`. The file has no status column; Traficom describes it as
+all vehicles in traffic use. Traficom replaces the ZIP in place each quarter, so a later
+edition fails the pinned-checksum check until the pin is reviewed. EEA and KBA are placed in the same dependency group so
 their overlap is not treated as independent confirmation.
 
 Dependency groups alone are not enough, and relying on them was a defect. Two
@@ -325,7 +335,7 @@ uv run python scripts/run_codespaces_preview.py --check
 uv run python scripts/run_codespaces_preview.py
 ```
 
-The idempotent prepare command acquires the exact 22 pinned official releases into
+The idempotent prepare command acquires the exact 23 pinned official releases into
 `/workspaces/.icor/evidence/releases`, builds with timestamp
 `2026-08-27T12:00:00+00:00` and seed `20260827`, runs completeness before atomic
 promotion, and compiles `web/dist`. A restart verifies and reuses valid releases and

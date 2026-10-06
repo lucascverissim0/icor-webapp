@@ -29,6 +29,7 @@ SOURCE_KEYS = (
     "uk-veh0124-am",
     "uk-veh0124-nz",
     "rdw-nl-fleet",
+    "traficom-fi-fleet",
 )
 
 

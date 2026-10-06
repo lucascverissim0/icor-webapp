@@ -263,6 +263,39 @@ OFFICIAL_SOURCES = {
         rejected_count=1_230,
         direct_download=False,
     ),
+    "traficom-fi-fleet": OfficialSource(
+        key="traficom-fi-fleet",
+        # Traficom republishes this static quarterly ZIP in place at a fixed URL; the pin is
+        # the 30.6.2026 edition (HTTP Last-Modified 2026-07-30) and fails once it is replaced.
+        release_id="traficom-fi-vehicles-20260630",
+        source_id="traficom-open-vehicle-data",
+        publisher="Traficom (Finnish Transport and Communications Agency)",
+        url="https://opendata.traficom.fi/Content/Ajoneuvorekisteri.zip",
+        published_at=datetime(2026, 7, 30, 10, 49, 55, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 6, 30),
+        geography="FI",
+        geography_version="Finland Traficom vehicle register 2026-06-30",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="fi-traficom-vehicle-register",
+        terms_url="https://www.avoindata.fi/data/en_GB/dataset/c5146eb4-5dc7-4e82-95a1-8feb3b041cc1",
+        permitted_local_use=(
+            "Reuse permitted under Creative Commons Attribution 4.0 International "
+            "with attribution to Traficom."
+        ),
+        parser_name="traficom_vehicles_zip_v1",
+        expected_schema=(
+            "Traficom Ajoneuvojen avoin data ZIP of one semicolon-delimited ISO-8859-1 CSV "
+            "(TieliikenneAvoinData_30_06_2026.csv, 41 columns); classes M1 and M1G "
+            "aggregated by make, commercial name, and first-use year"
+        ),
+        suffix=".zip",
+        artifact_bytes=208_492_096,
+        sha256="81fdd6968074ba4b852f5de55266124520c7ab58a0af287c20e505a7a1435da0",
+        raw_count=5_296_749,
+        accepted_count=2_765_986,
+        rejected_count=2_530_763,
+    ),
 }
 
 _EEA_HISTORY_ARTIFACTS = {

@@ -16,6 +16,7 @@ def test_catalog_contains_only_reviewed_https_sources():
         "uk-veh0124-am",
         "uk-veh0124-nz",
         "rdw-nl-fleet",
+        "traficom-fi-fleet",
     }
     expected.update(f"eea-{year}-final" for year in range(2010, 2024))
     assert set(OFFICIAL_SOURCES) == expected
@@ -80,6 +81,29 @@ def test_rdw_fleet_is_a_dated_final_nl_active_fleet_snapshot() -> None:
     assert source.dependency_group == "nl-rdw-vehicle-register"
     assert source.raw_count == source.accepted_count + source.rejected_count
     assert "CC0" in source.permitted_local_use
+
+
+def test_traficom_fleet_is_a_pinned_direct_download_fi_active_fleet_zip() -> None:
+    source = OFFICIAL_SOURCES["traficom-fi-fleet"]
+
+    assert source.release_id == "traficom-fi-vehicles-20260630"
+    assert source.source_id == "traficom-open-vehicle-data"
+    assert source.publisher == "Traficom (Finnish Transport and Communications Agency)"
+    assert source.geography == "FI"
+    assert source.measure.value == "active_fleet"
+    assert source.publication_status.value == "final"
+    assert source.direct_download is True
+    assert source.suffix == ".zip"
+    assert source.coverage_end.isoformat() == "2026-06-30"
+    assert source.parser_name == "traficom_vehicles_zip_v1"
+    assert source.dependency_group == "fi-traficom-vehicle-register"
+    assert source.raw_count == source.accepted_count + source.rejected_count
+    assert "Attribution 4.0" in source.permitted_local_use
+    assert "Traficom" in source.permitted_local_use
+    assert len(source.sha256) == 64
+    validate_source_url(source, "https://opendata.traficom.fi/Content/Ajoneuvorekisteri.zip")
+    with pytest.raises(ValueError, match="allowlisted"):
+        validate_source_url(source, "https://example.com/Content/Ajoneuvorekisteri.zip")
 
 
 def test_source_url_rejects_changed_host_or_path():
