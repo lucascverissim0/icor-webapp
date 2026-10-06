@@ -52,7 +52,7 @@ def _series(
     grouped: dict[tuple[str, str, str], dict[int, Decimal]] = defaultdict(dict)
     with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True) as connection:
         if snapshot_id is None:
-            snapshot_id = connection.execute("SELECT snapshot_id FROM snapshot").fetchone()[0]
+            snapshot_id = _database_snapshot_id(connection, path)
         rows = connection.execute(
             """SELECT generation_id, canonical_vehicle_id, geography,
                 registration_cohort_year, registrations, reason_codes
@@ -71,6 +71,16 @@ def _series(
         if len(run) >= _MINIMUM_OBSERVED_YEARS
     )
     return snapshot_id, eligible
+
+
+def _database_snapshot_id(connection: sqlite3.Connection, path: Path) -> str | None:
+    """A candidate's id lives in snapshot.json beside it until promotion fills the table."""
+
+    row = connection.execute("SELECT snapshot_id FROM snapshot").fetchone()
+    if row is not None:
+        return str(row[0])
+    manifest = path.parent / "snapshot.json"
+    return json.loads(manifest.read_text())["snapshot_id"] if manifest.is_file() else None
 
 
 def _contiguous_runs(history: dict[int, Decimal]) -> tuple[dict[int, Decimal], ...]:

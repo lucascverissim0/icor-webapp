@@ -3,8 +3,8 @@
 
 Vehicles are the canonical make/model identities users search for (publisher
 spellings folded by ``VehicleIdentityIndex``). They are split into ten volume
-deciles of officially observed EEA new registrations, 2010-2024, and for each
-decile the report states:
+bands of officially observed EEA new registrations, 2010-2024, and for each
+band the report states:
 
 * ``identities`` -- how many vehicles fall in it;
 * ``forecast_identity_share`` -- share of them with any replacement forecast;
@@ -50,6 +50,10 @@ TAIL_PANEL: tuple[str, ...] = (
 
 _FIRST_YEAR, _LAST_YEAR = 2010, 2024
 _HORIZON = 2031
+#: EEA registrations 2010-2024 summed over all markets.
+_BANDS: tuple[tuple[float, float], ...] = (
+    (1, 100), (100, 1_000), (1_000, 10_000), (10_000, 100_000), (100_000, float("inf")),
+)
 
 
 def _observed_volume(connection: sqlite3.Connection) -> dict[str, float]:
@@ -105,22 +109,20 @@ def summarize(
             entry["forecast_volume"] += amount
             entry["demand"] += demand[vehicle_id]
 
-    observed = sorted(
-        (entry for entry in per_identity.values() if entry["volume"] > 0),
-        key=lambda entry: entry["volume"],
-    )
-    deciles = []
-    count = len(observed)
-    for decile in range(10):
-        members = observed[decile * count // 10 : (decile + 1) * count // 10]
+    observed = [entry for entry in per_identity.values() if entry["volume"] > 0]
+    # Fixed volume bands rather than deciles: most identities are publisher typos
+    # with a handful of registrations, so deciles would describe typos, not cars.
+    bands = []
+    for low, high in _BANDS:
+        members = [entry for entry in observed if low <= entry["volume"] < high]
         if not members:
             continue
         total = sum(entry["volume"] for entry in members)
-        deciles.append(
+        bands.append(
             {
-                "decile": decile + 1,
+                "registrations_from": low,
+                "registrations_below": high if high != float("inf") else None,
                 "identities": len(members),
-                "max_registrations": round(members[-1]["volume"]),
                 "forecast_identity_share": round(
                     sum(entry["forecast"] for entry in members) / len(members), 4
                 ),
@@ -134,6 +136,7 @@ def summarize(
                 ),
             }
         )
+    count = len(observed)
 
     forecast_index = VehicleIdentityIndex.from_rows(
         (vehicle_id, make, model, volume.get(vehicle_id, 0.0))
@@ -165,7 +168,7 @@ def summarize(
         )
         if total_volume
         else 0.0,
-        "deciles": deciles,
+        "bands": bands,
         "tail_panel_found": sum(item["observed"] for item in panel),
         "tail_panel_with_forecast": sum(item["searchable_with_forecast"] for item in panel),
         "tail_panel_size": len(panel),
@@ -188,11 +191,19 @@ def main(argv: list[str] | None = None) -> int:
                 "SELECT vehicle_id, make, model FROM canonical_vehicle"
             )
         ]
-        snapshot_id = connection.execute("SELECT snapshot_id FROM snapshot").fetchone()
+        row = connection.execute("SELECT snapshot_id FROM snapshot").fetchone()
         result = summarize(vehicles, _observed_volume(connection), _forecast_demand(connection))
     finally:
         connection.close()
-    result = {"snapshot_id": snapshot_id[0] if snapshot_id else None, **result}
+    manifest = args.database.parent / "snapshot.json"
+    snapshot_id = (
+        row[0]
+        if row
+        else json.loads(manifest.read_text())["snapshot_id"]
+        if manifest.is_file()
+        else None
+    )
+    result = {"snapshot_id": snapshot_id, **result}
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

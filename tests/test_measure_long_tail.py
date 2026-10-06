@@ -22,11 +22,13 @@ def test_spellings_fold_into_one_vehicle_and_lost_volume_is_reported() -> None:
     assert report["registrations_observed"] == 1050
     # 900 of the Golf's 1,000 and all 40 of the Tonale's are forecast.
     assert report["forecast_registration_share"] == round(940 / 1050, 4)
-    deciles = {item["max_registrations"]: item for item in report["deciles"]}
-    assert deciles[1000]["forecast_registration_share"] == 0.9
-    assert deciles[1000]["ranked_identity_share"] == 1.0
-    assert deciles[40]["ranked_identity_share"] == 0.0
-    assert deciles[10]["forecast_identity_share"] == 0.0
+    bands = {item["registrations_from"]: item for item in report["bands"]}
+    # Golf (1,000) is alone in its band; Tonale (40) and MiTo (10) share one.
+    assert bands[1000]["forecast_registration_share"] == 0.9
+    assert bands[1000]["ranked_identity_share"] == 1.0
+    assert bands[1]["identities"] == 2
+    assert bands[1]["forecast_identity_share"] == 0.5
+    assert bands[1]["ranked_identity_share"] == 0.0
     panel = {item["vehicle"]: item for item in report["tail_panel"]}
     assert panel["Alfa Romeo Tonale"]["observed"] is True
     assert panel["Alfa Romeo Tonale"]["searchable_with_forecast"] is True
