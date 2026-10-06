@@ -120,8 +120,8 @@ uv run python scripts/acquire_official_evidence.py --source uk-veh0120-gb --root
 uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
   --release eea-co2cars-2024-final-v30-r1 `
   --release kba-fz10-2024-12-final-v3 `
-  --release uk-dft-veh0160-gb-2025-final-20260713 `
-  --release uk-dft-veh0120-gb-2025-final-20260713 `
+  --release uk-dft-veh0160-gb-2025-final-20261006 `
+  --release uk-dft-veh0120-gb-2025-final-20261006 `
   --build-as-of 2026-08-27T12:00:00+00:00 --deterministic-seed 20260827
 ```
 

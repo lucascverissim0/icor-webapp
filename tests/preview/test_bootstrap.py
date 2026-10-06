@@ -36,7 +36,7 @@ def test_default_plan_has_exactly_the_approved_twenty_one_releases() -> None:
     assert len(plan.release_ids) == 21
     assert len(set(plan.release_ids)) == 21
     assert plan.release_ids[0] == "eea-co2cars-2010-final-v2-r1"
-    assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20260713"
+    assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20261006"
     assert plan.build_as_of == BUILD_AS_OF == "2026-08-27T12:00:00+00:00"
     assert plan.deterministic_seed == DETERMINISTIC_SEED == 20260827
 
