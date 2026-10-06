@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Protocol
 
@@ -21,7 +22,7 @@ from icor.forecasting.reconciliation import (
 )
 from icor.forecasting.registration_forecast import RegistrationForecaster
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
-from icor.forecasting.survival import CohortSurvivalModel
+from icor.forecasting.survival import CohortSurvivalModel, SurvivalInterval
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 
 _BATCH_SIZE = 20_000
@@ -54,6 +55,10 @@ class GenerationPlanningResult:
     #: Series with one or two annual values. They used to be dropped; their
     #: observed cohorts are real vehicles, so they are now planned and labelled.
     short_history_series_count: int = 0
+    #: Series whose complete cohorts come from a register's observed stock.
+    stock_anchored_series_count: int = 0
+    #: Observed stock cohorts too old for the survival curve to project.
+    beyond_support_cohort_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,13 +113,18 @@ class GenerationPlanningService:
         release_buckets: dict[
             tuple[str, str, str, int, str], tuple[Decimal, list[str]]
         ] = {}
+        # Observed active fleet by cohort, kept only at each market's newest
+        # stock date so memory holds one register snapshot per market.
+        stock_dates: dict[str, date] = {}
+        stock_series: dict[tuple[str, str, str], dict[int, _AnnualValue]] = {}
         for observation in repository.list_observations():
             assignment = assignments.get(observation.observation_id)
-            if (
-                assignment is None
-                or observation.measure is not Measure.NEW_REGISTRATIONS
-                or observation.canonical_vehicle_id is None
-            ):
+            if assignment is None or observation.canonical_vehicle_id is None:
+                continue
+            if observation.measure is Measure.ACTIVE_FLEET:
+                _collect_stock(observation, assignment, stock_dates, stock_series)
+                continue
+            if observation.measure is not Measure.NEW_REGISTRATIONS:
                 continue
             year = observation.registration_cohort_year
             if year is None and observation.period_start.year == observation.period_end.year:
@@ -238,52 +248,111 @@ class GenerationPlanningService:
                 latest_year.get(geography, 0), max(series[_generation, _vehicle, geography])
             )
 
+        # A register's count of the cars still on the road replaces modelled
+        # survival for the cohorts it covers completely, but only in a market
+        # whose registrations are planned too: a stock reported for a different
+        # territory (DfT's UK-wide VEH0124 beside GB registrations) would be
+        # added on top of a fleet already counted.
+        anchor_year = {
+            geography: _last_complete_cohort(stock_date)
+            for geography, stock_date in stock_dates.items()
+            if geography in latest_year
+        }
+        anchored_stock = {
+            key: {year: value for year, value in cohorts.items() if year <= anchor_year[key[2]]}
+            for key, cohorts in stock_series.items()
+            if key[2] in anchor_year
+        }
+        anchored_stock = {key: cohorts for key, cohorts in anchored_stock.items() if cohorts}
+
         evidence_only_series_count = short_history_series_count = 0
-        for series_key in sorted(series):
+        stock_anchored_series_count = beyond_support_cohort_count = 0
+        for series_key in sorted(set(series) | set(anchored_stock)):
             generation_id, vehicle_id, geography = series_key
             generation = generations.get(generation_id)
             if generation is None or generation.canonical_vehicle_id != vehicle_id:
                 raise ValueError("planning generation vehicle is unavailable")
-            observed_years = series[series_key]
-            short_history = len(observed_years) < 3
-            end_year = _end_year(
-                generation, max(observed_years), latest_year[geography]
-            )
-            values = _fill_internal_gaps(observed_years)
-            if end_year is not None:
+            values: dict[int, _AnnualValue] = {}
+            forecast_method = _STOCK_ONLY_METHOD
+            history_codes: tuple[str, ...] = ()
+            observed_years = series.get(series_key)
+            if observed_years:
+                short_history = len(observed_years) < 3
+                end_year = _end_year(
+                    generation, max(observed_years), latest_year[geography]
+                )
+                values = _fill_internal_gaps(observed_years)
+                if end_year is not None:
+                    values = {
+                        year: annual for year, annual in values.items() if year <= end_year
+                    }
+                if values:
+                    short_history_series_count += short_history
+                    history_codes = (
+                        ("short-registration-history",) if short_history else ()
+                    )
+                    all_input_ids = tuple(
+                        sorted(
+                            {
+                                identifier
+                                for annual in values.values()
+                                for identifier in annual.observation_ids
+                            }
+                        )
+                    )
+                    forecast_method, forecasts = self._forecast(values, max(horizons))
+                    if end_year is not None:
+                        forecasts = {
+                            year: value
+                            for year, value in forecasts.items()
+                            if year <= end_year
+                        }
+                    for year, value in forecasts.items():
+                        values[year] = _AnnualValue(value, all_input_ids, "forecast")
+            stock = anchored_stock.get(series_key, {})
+            if geography in anchor_year:
                 values = {
-                    year: annual for year, annual in values.items() if year <= end_year
+                    year: annual
+                    for year, annual in values.items()
+                    if year > anchor_year[geography]
                 }
-            if not values:
+            if not values and not stock:
                 evidence_only_series_count += 1
                 continue
-            short_history_series_count += short_history
-            history_codes = ("short-registration-history",) if short_history else ()
-            all_input_ids = tuple(
-                sorted(
-                    {
-                        identifier
-                        for annual in values.values()
-                        for identifier in annual.observation_ids
-                    }
-                )
-            )
-            forecast_method, forecasts = self._forecast(values, max(horizons))
-            if end_year is not None:
-                forecasts = {
-                    year: value for year, value in forecasts.items() if year <= end_year
-                }
-            for year, value in forecasts.items():
-                values[year] = _AnnualValue(value, all_input_ids, "forecast")
+            stock_anchored_series_count += bool(stock)
+            stock_codes = ("observed-stock-anchored",) if stock else ()
             for horizon in sorted(horizons):
                 horizon_cohorts: list[CohortEstimate] = []
                 opportunity_components = []
-                for cohort_year in sorted(year for year in values if year <= horizon):
-                    annual = values[cohort_year]
-                    fleet = self.survival.interval(
-                        annual.registrations,
-                        age_years=horizon - cohort_year,
-                    )
+                for cohort_year in sorted(
+                    year for year in {*values, *stock} if year <= horizon
+                ):
+                    age = horizon - cohort_year
+                    if cohort_year in stock:
+                        annual = stock[cohort_year]
+                        fleet = self._conditional_fleet(
+                            annual.registrations,
+                            age_years=age,
+                            stock_age_years=stock_dates[geography].year - cohort_year,
+                        )
+                        if fleet is None:
+                            beyond_support_cohort_count += 1
+                            continue
+                        cohort_codes = (
+                            "observed-stock-anchored-cohort",
+                            self.survival.reason_code(geography),
+                        )
+                    else:
+                        annual = values[cohort_year]
+                        fleet = self.survival.interval(
+                            annual.registrations, age_years=age
+                        )
+                        cohort_codes = (
+                            f"{annual.status}-registration-cohort",
+                            self.survival.reason_code(geography),
+                            *annual.extra_reason_codes,
+                            *history_codes,
+                        )
                     cohort = CohortEstimate(
                         cohort_id=stable_evidence_id(
                             "cohort",
@@ -304,19 +373,16 @@ class GenerationPlanningService:
                         input_observation_ids=annual.observation_ids,
                         survival_method=self.survival.method,
                         confidence=ConfidenceBand.LOW,
-                        reason_codes=(
-                            f"{annual.status}-registration-cohort",
-                            self.survival.reason_code(geography),
-                            *annual.extra_reason_codes,
-                            *history_codes,
-                        ),
+                        reason_codes=cohort_codes,
                     )
                     horizon_cohorts.append(cohort)
                     hazard = self.hazard.interval(
-                        age_years=horizon - cohort_year,
+                        age_years=age,
                         geography=geography,
                     )
                     opportunity_components.append((fleet, hazard))
+                if not horizon_cohorts:
+                    continue
                 cohort_buffer.extend(horizon_cohorts)
                 fleet_p10 = sum(
                     (item.active_fleet_p10 for item in horizon_cohorts), Decimal(0)
@@ -373,6 +439,7 @@ class GenerationPlanningService:
                             "uncalibrated-fitment-and-hazard",
                             "no-exact-windshield-fitment-inference",
                             *history_codes,
+                            *stock_codes,
                         ),
                     )
                 )
@@ -381,7 +448,6 @@ class GenerationPlanningService:
                 or len(opportunity_buffer) >= self.batch_size
             ):
                 flush_planning_records()
-
         flush_planning_records()
         return GenerationPlanningResult(
             cohort_count,
@@ -392,6 +458,37 @@ class GenerationPlanningService:
             corroborating_count,
             superseded_coverage_count,
             short_history_series_count,
+            stock_anchored_series_count,
+            beyond_support_cohort_count,
+        )
+
+    def _conditional_fleet(
+        self, stock: Decimal, *, age_years: int, stock_age_years: int
+    ) -> SurvivalInterval | None:
+        """Project cars observed on the road at one age to an older age.
+
+        Each quantile's curve is used for its own ratio, so the observed count
+        is the anchor and only the remaining ageing is modelled. A cohort the
+        curve cannot reach, or one it already counts as gone, returns None.
+        """
+
+        scale = Decimal(1_000_000)
+        try:
+            at_stock = self.survival.interval(scale, age_years=max(stock_age_years, 0))
+            at_horizon = self.survival.interval(scale, age_years=age_years)
+        except ValueError:
+            return None
+        if min(at_stock.p10, at_stock.p50, at_stock.p90) <= 0:
+            return None
+        return SurvivalInterval(
+            *(
+                (stock * horizon_share / stock_share).quantize(Decimal("0.0001"))
+                for horizon_share, stock_share in (
+                    (at_horizon.p10, at_stock.p10),
+                    (at_horizon.p50, at_stock.p50),
+                    (at_horizon.p90, at_stock.p90),
+                )
+            )
         )
 
     def _forecast(
@@ -412,6 +509,44 @@ class GenerationPlanningService:
             evaluate_backtest=False,
         )
         return forecast.method, dict(forecast.values)
+
+
+_STOCK_ONLY_METHOD = "observed-stock-only-v1"
+
+
+def _last_complete_cohort(stock_date: date) -> int:
+    """The newest cohort a register snapshot has seen in full."""
+
+    return stock_date.year if (stock_date.month, stock_date.day) == (12, 31) else (
+        stock_date.year - 1
+    )
+
+
+def _collect_stock(observation, assignment, stock_dates, stock_series) -> None:
+    year = observation.registration_cohort_year
+    if year is None:
+        return
+    geography = observation.geography
+    stock_date = observation.period_end
+    current = stock_dates.get(geography)
+    if current is not None and stock_date < current:
+        return
+    if current is None or stock_date > current:
+        stock_dates[geography] = stock_date
+        for key in [key for key in stock_series if key[2] == geography]:
+            del stock_series[key]
+    key = (assignment.selected_generation_id, observation.canonical_vehicle_id, geography)
+    cohorts = stock_series.setdefault(key, {})
+    existing = cohorts.get(year)
+    cohorts[year] = _AnnualValue(
+        (existing.registrations if existing else Decimal(0)) + observation.value,
+        tuple(
+            sorted(
+                {*(existing.observation_ids if existing else ()), observation.observation_id}
+            )
+        ),
+        "observed-stock",
+    )
 
 
 def _end_year(generation, last_observed: int, market_latest: int) -> int | None:

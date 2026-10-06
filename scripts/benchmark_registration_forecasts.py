@@ -22,15 +22,37 @@ def _parser() -> argparse.ArgumentParser:
         description="Run newest-period outer validation on the active ICOR snapshot."
     )
     parser.add_argument("--root", type=Path, default=Path(".local/evidence"))
+    parser.add_argument(
+        "--database",
+        type=Path,
+        help="Read one snapshot database directly instead of the active one",
+    )
+    parser.add_argument(
+        "--exclude-geography",
+        action="append",
+        default=[],
+        help=(
+            "Leave a market out, e.g. one whose cohorts are anchored on register "
+            "stock in only one of two snapshots being compared"
+        ),
+    )
     return parser
 
 
-def _series(root: Path) -> tuple[str, tuple[dict[int, Decimal], ...]]:
-    manifest, repository = SnapshotStore(root).open_active_snapshot()
+def _series(
+    root: Path,
+    database: Path | None = None,
+    excluded: frozenset[str] = frozenset(),
+) -> tuple[str, tuple[dict[int, Decimal], ...]]:
+    if database is None:
+        manifest, repository = SnapshotStore(root).open_active_snapshot()
+        snapshot_id, path = manifest.snapshot_id, repository.path
+    else:
+        snapshot_id, path = None, database
     grouped: dict[tuple[str, str, str], dict[int, Decimal]] = defaultdict(dict)
-    with sqlite3.connect(
-        f"{repository.path.resolve().as_uri()}?mode=ro", uri=True
-    ) as connection:
+    with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True) as connection:
+        if snapshot_id is None:
+            snapshot_id = connection.execute("SELECT snapshot_id FROM snapshot").fetchone()[0]
         rows = connection.execute(
             """SELECT generation_id, canonical_vehicle_id, geography,
                 registration_cohort_year, registrations, reason_codes
@@ -39,7 +61,7 @@ def _series(root: Path) -> tuple[str, tuple[dict[int, Decimal], ...]]:
             AND registration_cohort_year <= 2025"""
         )
         for generation_id, vehicle_id, geography, year, value, reasons in rows:
-            if "reconciled-registration-cohort" not in reasons:
+            if "reconciled-registration-cohort" not in reasons or geography in excluded:
                 continue
             grouped[generation_id, vehicle_id, geography][int(year)] = Decimal(value)
     eligible = tuple(
@@ -48,7 +70,7 @@ def _series(root: Path) -> tuple[str, tuple[dict[int, Decimal], ...]]:
         for run in _contiguous_runs(history)
         if len(run) >= _MINIMUM_OBSERVED_YEARS
     )
-    return manifest.snapshot_id, eligible
+    return snapshot_id, eligible
 
 
 def _contiguous_runs(history: dict[int, Decimal]) -> tuple[dict[int, Decimal], ...]:
@@ -116,7 +138,8 @@ def _linear(history: dict[int, Decimal], target_year: int) -> Decimal:
 
 def main() -> int:
     args = _parser().parse_args()
-    snapshot_id, histories = _series(args.root)
+    excluded = frozenset(args.exclude_geography)
+    snapshot_id, histories = _series(args.root, args.database, excluded)
     production = RegistrationForecaster()
     production_error = Decimal(0)
     baseline_error = Decimal(0)
@@ -151,6 +174,7 @@ def main() -> int:
                 "holdout_years": _HOLDOUT_YEARS,
                 "minimum_observed_years": _MINIMUM_OBSERVED_YEARS,
                 "series_evaluated": len(histories),
+                "excluded_geographies": sorted(excluded),
                 "production_wape": str(production_wape.quantize(Decimal("0.000001"))),
                 "replaced_baseline_wape": str(
                     baseline_wape.quantize(Decimal("0.000001"))

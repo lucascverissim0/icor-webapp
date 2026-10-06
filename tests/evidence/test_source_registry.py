@@ -43,7 +43,7 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
     )
     assert (
         OFFICIAL_SOURCE_VERSIONS.estimation_method
-        == "observed-cohorts-open-estimated-windows-v2"
+        == "observed-stock-anchored-cohorts-v2"
     )
     assert OFFICIAL_SOURCE_VERSIONS.survival_method == "uk-dft-licensed-stock-band-v1"
     assert (

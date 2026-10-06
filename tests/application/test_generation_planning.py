@@ -525,3 +525,113 @@ def test_the_only_publisher_present_decomposes_the_country_year() -> None:
 
     assert _observed(repository, "vehicle-register-only", 2020) is not None
     assert result.superseded_coverage_input_count == 0
+
+
+def _add_stock(repository, generation, geography: str, stock_date: date, cohorts):
+    """Observed active fleet by cohort, as the RDW register or DfT VEH0124 report it."""
+
+    observations = tuple(
+        SimpleNamespace(
+            observation_id=f"stock-{generation.generation_id}-{geography.lower()}-{year}",
+            release_id="release-stock",
+            canonical_vehicle_id=generation.canonical_vehicle_id,
+            geography=geography,
+            registration_cohort_year=year,
+            period_start=stock_date,
+            period_end=stock_date,
+            measure=Measure.ACTIVE_FLEET,
+            value=Decimal(value),
+        )
+        for year, value in cohorts
+    )
+    repository.releases = (
+        *repository.releases,
+        SimpleNamespace(
+            release_id="release-stock",
+            dependency_group="national-register",
+            source_id="national-register",
+            publication_status="final",
+        ),
+    )
+    repository.observations = (*repository.observations, *observations)
+    repository.assignments = (
+        *repository.assignments,
+        *(
+            SimpleNamespace(
+                observation_id=item.observation_id,
+                selected_generation_id=generation.generation_id,
+                confidence=ConfidenceBand.LOW,
+            )
+            for item in observations
+        ),
+    )
+
+
+def test_observed_stock_replaces_modelled_survival_for_complete_cohorts() -> None:
+    """A register's count of cars still on the road beats a modelled survival.
+
+    It also holds cohorts the registration source never saw: 2018-2019 here,
+    standing for pre-2010 cohorts and used imports.
+    """
+
+    repository = Repository()
+    survival = GenerationPlanningService().survival
+    _add_stock(
+        repository,
+        repository.generation,
+        "DE",
+        date(2023, 10, 6),
+        ((2018, "70"), (2019, "80"), (2020, "95"), (2021, "105"), (2022, "118"), (2023, "60")),
+    )
+
+    result = GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert result.stock_anchored_series_count == 1
+    cohorts = {
+        item.registration_cohort_year: item
+        for item in repository.cohorts
+        if item.as_of_year == 2028
+    }
+    # Complete cohorts come from the register, the partial 2023 cohort and later
+    # ones from the registration forecast, so no year is counted twice.
+    assert set(cohorts) == set(range(2018, 2029))
+    for year in range(2018, 2023):
+        assert "observed-stock-anchored-cohort" in cohorts[year].reason_codes
+    for year in range(2023, 2029):
+        assert "observed-stock-anchored-cohort" not in cohorts[year].reason_codes
+    expected = (
+        Decimal(95)
+        * survival.interval(Decimal(1_000_000), age_years=8).p50
+        / survival.interval(Decimal(1_000_000), age_years=3).p50
+    )
+    assert abs(cohorts[2020].active_fleet_p50 - expected) < Decimal("0.01")
+    assert cohorts[2020].registrations == Decimal(95)
+    assert len(repository.opportunities) == 1
+
+
+def test_stock_alone_still_produces_demand_in_a_registration_market() -> None:
+    repository = Repository()
+    imported = _add_vehicle(repository, "import-only", ())
+    _add_stock(repository, imported, "DE", date(2023, 10, 6), ((2015, "12"), (2016, "9")))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    imported_opportunity = next(
+        item
+        for item in repository.opportunities
+        if item.canonical_vehicle_id == "vehicle-import-only"
+    )
+    assert imported_opportunity.p50 > 0
+    assert _cohort_years(repository, "vehicle-import-only") == {2015, 2016}
+
+
+def test_stock_in_a_geography_without_registrations_is_never_added_on_top() -> None:
+    """DfT's VEH0124 is UK-wide while registrations are GB; adding it would double count."""
+
+    repository = Repository()
+    _add_stock(repository, repository.generation, "UK", date(2025, 12, 31), ((2020, "500"),))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert {item.geography for item in repository.cohorts} == {"DE"}
+    assert {item.geography for item in repository.opportunities} == {"DE"}

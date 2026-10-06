@@ -337,3 +337,18 @@ def test_survival_method_is_read_from_the_model_not_a_literal(
 
     assert result.survival_method == "fixture-survival-v1"
     assert result.survival_method != CohortSurvivalModel().method
+
+
+def test_a_register_anchored_cohort_is_observed_evidence() -> None:
+    """A vehicle known in one market only from a register must still be searchable."""
+
+    from icor.infrastructure.snapshot_vehicle_forecast_repository import (
+        _latest_evidence_year,
+    )
+
+    rows = [
+        {"registration_cohort_year": 2019, "reason_codes": '["observed-stock-anchored-cohort"]'},
+        {"registration_cohort_year": 2027, "reason_codes": '["forecast-registration-cohort"]'},
+    ]
+
+    assert _latest_evidence_year(rows) == 2019

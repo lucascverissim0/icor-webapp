@@ -852,6 +852,8 @@ def _latest_evidence_year(rows: list[sqlite3.Row]) -> int:
         if {
             "observed-registration-cohort",
             "reconciled-registration-cohort",
+            # Cars a national register counts on the road are observed too.
+            "observed-stock-anchored-cohort",
         }.intersection(json.loads(row["reason_codes"]))
     ]
     if not evidence_years:
