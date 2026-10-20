@@ -6614,3 +6614,113 @@ Still open for Lucas:
 - whether the client release may carry the private mapping.
 
 No local server is running.
+
+### Wave 3 adjudicated (7 of 8); a rule for successors the catalogue lacks (same day)
+
+**Decided** (private `review/decided/`): mercedes-compact 98.5%, kia 98.5%, suzuki 92%
+(the gap is S-Cross family keys; codes agree), volvo 99.9%, bmw-x 100%, nissan 99.7%, fiat
+99.6% unit agreement. mercedes-benz is waiting on reviewer A. All seven validate with no
+problems and no uncovered model-range labels. The `bmw|ix` flags were confirmed as false
+positives: in those markets the iX1 and iX2 sit under their own trim identities, and the bare
+"iX" spellings are all iX trims.
+
+**Decisions worth knowing:**
+- **EQA left `not_in_catalogue`.** Both reviewers lent it the GLA's code, on the claim that
+  the two share a windscreen. I found no public source confirming that. The EQA also has its
+  own chassis code, whereas the catalogue does list the EQB with the GLB. Open question for
+  ICOR (about 10k units in mercedes-compact, plus mercedes-benz).
+- **Late market launches.** A successor whose production began late in year Y and whose
+  sales began in Y+1 has its launch span extended to Y+1 (`first_year_latest`), because Y+1
+  still registers the predecessor's stock. The Sportage data shows exactly that. The brief
+  now says so; before, it forbade this.
+
+**New allocation rule (commit `6f96da2`): `uncoded_successor`.** A code fact may state the
+year a successor without a catalogue code is in volume. From that year the code explains
+nothing: the last stock and the new model share one label and cannot be told apart, so both
+stay `outside`. This replaces the run-out year that used to give the new model's first year
+to the old code (found on the iX3: the new iX3 went on sale in 2026). Validation requires it
+to come after `first_year` and no later than the run-out year. Tests: 68 pass.
+
+**Systemic finding (must be handled before coverage sign-off).** Registration years 2026–28
+are forecast and hold 20.4% of all demand. An open-ended last code absorbs them, which is
+wrong wherever a new generation the catalogue lacks has replaced the model, or the model has
+ended. Waves 1–2 were reviewed before this rule existed. `review/adjudication/
+forecast_check.py` lists every decided family with 2026–28 demand on open codes (258
+families so far) in `forecast_families.json`.
+
+Planned pass, once every batch is decided: web-verified checks of each family's current
+European generation as of the review date, with `uncoded_successor` or `last_year` set where
+needed. Policy: act on successors already on sale and on announced discontinuations.
+Successors announced for 2027 or later keep the current code, which is a documented forecast
+limitation.
+
+**Forecast-year check, first pass (2026-10-20, partial).** 11 Sonnet checkers with web search
+covered the 258 families from waves 1–3. Results are in private
+`review/adjudication/forecast/out-*.json`, with inputs in `in-*.json`; the inputs carry no
+codes, only public model names. The session's web-search budget (about 200 calls, refilling
+at about 100 per hour) ran out partway.
+
+Tally: 78 current, 13 successor, 19 ended, 148 unclear. Every non-current finding still needs
+my own verification against the decided family before anything changes. Notable unverified
+findings:
+- **Successors:** ID.4 → ID. Tiguan (2027); new Audi Q7 deliveries from 2026-09; new
+  electric GLB from spring 2026; new A6 allroad; electric Juke (spring 2027); Tucson
+  5th generation (2027).
+- **Endings:** Audi A1 and Q2 production (2026-04), Seat/Cupra Ateca (2026), Arkana
+  (2025-12), Peugeot 508 (2025-05), Kia Ceed (2025), V90 / V90 CC (2025-09).
+- **Name traps to check in the data:** Fiat Panda vs Grande Panda labels from 2025; the
+  Fiat 500 Hybrid (2025) on the 500e body.
+
+Policy (revised): an officially confirmed successor or ending sets `uncoded_successor` or
+`last_year`. A press-only report keeps the current code and goes on the known-forecast-risk
+list. Plan: when wave 6 is done, triage the unclear items from model knowledge, then run
+one targeted search per item that genuinely needs one.
+
+### Waves 4–6 adjudicated; all 42 batches decided (2026-10-20)
+
+- **Decided:** every batch now has a decided file in private `review/decided/` (42 of 42).
+  Waves 4–6 are bmw-1-2, mg, mini, bmw, smart, alfa_romeo, mercedes-vans, lexus, jaguar,
+  chevrolet, mitsubishi, mixed-39, mixed-41, porsche, honda, ssangyong+kgm, dr, plus
+  land_rover, mazda and mixed-40 from earlier.
+- **Validation:** each decided file passes `validate` with `problems: []`. Every unit outside
+  a code and every remaining lumped label is explained in its identity's `why`.
+- **Decide scripts:** archived in private `review/adjudication/` (`decide_*.py`).
+- **Agreement:** most batches agreed on codes and differed only in family-key spellings.
+  Real disputes were settled on catalogue rows plus demand evidence. Examples: Mini
+  convertibles hidden in bodiless labels; the IS 300h was never a convertible; the Viano
+  label is only the W639; Macan 4/4S are electric-only names; the catalogue lists the
+  991 Targa on the Cabriolet code; the 9th-generation Civic saloon is under a tenth of
+  'civic 4d'/'civic 5dr' labels.
+
+**Finding: some publishers drop the model name only in some registration years.**
+- **Mini:** the Countryman/Paceman share of Mini collapses to 0–10% in 2013–2016 in every
+  market (30–60% in 2011–12). The Countryman and Clubman labels vanish in 2019 (1–4% vs
+  15–50% either side). The bare trim names (Cooper, One, Cooper D/S/SD, One D, JCW) carry
+  them.
+- **Detector:** the per-geography `lumped_labels` cannot see this pattern. A per-year
+  detector (private `review/adjudication/year_lumping.py`) found 21 cases across all makes.
+  Only Mini changes codes. The others are same-family pairs (Clio/Captur E-Tech 2024,
+  Astra Sports Tourer 2019, Macan GTS 2019, …) or identities already pooled or ambiguous.
+- **Code change:** a variant may now carry `"years": [first, last]`. It is implemented in
+  `Variant.matches`, `_identity` parsing and validation, `validate`'s per-variant labels,
+  and `docs/EUROCODE_REVIEW.md`. Tests extend the pooled-family and variant-validation
+  tests.
+
+**Runtime gap to close in steps 4/7.** `EurocodeMap.allocate` (`src/icor/eurocodes/runtime.py`)
+does not pass `raw_model`, so the running app would ignore every variant: spelling routes,
+model-range pools and year limits. The runtime and the SQL bucket tables must carry the raw
+model label per registration cell.
+
+**Forecast items to verify (added by waves 4–6):**
+- **Endings:** Jaguar I-Pace (2024-12) and E-Pace/XE/XF/F-Type (2024); Porsche 718 (2025-10);
+  Subaru BRZ EU withdrawal (2024).
+- **Successors:** Subaru Forester 6th generation in Europe (2025, now `uncoded_successor`
+  2025); Mitsubishi Eclipse Cross successor (2026); Lexus ES 8th generation (successor
+  removed until confirmed); MG ZS EV replaced by the S5 EV (2025; Inovev, checked).
+- **Unclear:** smart #2 / fortwo end (2024); DR EVO 3/4/5 on the DR 3/4/5 codes.
+
+**Verification:**
+- `uv run pytest tests/eurocodes tests/test_repository_security.py -q`: 74 passed.
+- `uv run ruff check` and `ruff format --check` on the touched files: clean.
+  Repository-wide `ruff format --check` lists pre-existing unformatted files in
+  `src/icor/api` and `src/icor/application` that this work did not touch.

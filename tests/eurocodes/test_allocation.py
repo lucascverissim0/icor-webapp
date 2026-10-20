@@ -457,6 +457,22 @@ def test_a_label_naming_several_families_pools_their_codes() -> None:
         "zephyr/arrow",
     )
     assert decisions.allocate("zephyr|arrow", 2021, "NL", raw_model="arrow").codes == ("Q105",)
+    # Some publishers drop the model name only in some registration years.
+    yearly = _decisions(
+        {
+            "zephyr|arrow": {
+                "family": "zephyr/arrow",
+                "variants": [
+                    {"match": ".", "years": [2021, 2022], "family": ["zephyr/arrow", "zephyr/volt"]}
+                ],
+            }
+        },
+        **families,
+    )
+    assert yearly.allocate("zephyr|arrow", 2021, "NL", raw_model="arrow").codes == ("Q105", "Q601")
+    assert yearly.allocate("zephyr|arrow", 2022, "GB", raw_model="arrow").codes == ("Q105", "Q601")
+    assert yearly.allocate("zephyr|arrow", 2020, "NL", raw_model="arrow").codes == ("Q102", "Q105")
+    assert yearly.allocate("zephyr|arrow", 2023, "NL", raw_model="arrow").codes == ("Q105",)
     with pytest.raises(ValueError, match="listed twice"):
         _decisions({"zephyr|arrow": {"family": ["zephyr/arrow", "zephyr/arrow"]}}, **families)
 
@@ -491,6 +507,16 @@ def test_variants_must_name_known_families_and_readable_patterns() -> None:
                 }
             }
         )
+    for years in ([2021], [2022, 2021], "2021", [2021, "2022"]):
+        with pytest.raises(ValueError, match="variant years are a first and a last year"):
+            _decisions(
+                {
+                    "zephyr|arrow": {
+                        "family": "zephyr/arrow",
+                        "variants": [{"match": "x", "family": "zephyr/arrow", "years": years}],
+                    }
+                }
+            )
     with pytest.raises(ValueError, match="mapped variant names no family"):
         _decisions({"zephyr|arrow": {"family": "zephyr/arrow", "variants": [{"match": "x"}]}})
     with pytest.raises(ValueError, match="unreadable variant pattern"):

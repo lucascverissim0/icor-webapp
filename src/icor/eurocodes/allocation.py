@@ -109,8 +109,9 @@ class Variant:
     labels its pattern matches, so those registrations follow their own family
     instead of making the whole identity shared or ambiguous. A variant with a
     non-mapped status (and no family) leaves its labels unassigned. A variant
-    limited to some geographies applies only to their registrations: some
-    publishers label a whole model range with the bare model name.
+    limited to some geographies or registration years applies only to those
+    registrations: some publishers label a whole model range with the bare model
+    name, in every year or only in some.
     """
 
     pattern: re.Pattern[str]
@@ -119,13 +120,18 @@ class Variant:
     why: str
     status: str = "mapped"
     geographies: frozenset[str] = frozenset()
+    years: tuple[int, int] | None = None
 
     @property
     def family(self) -> str | None:
         return self.families[0] if self.families else None
 
-    def matches(self, raw_model: str, geography: str | None = None) -> bool:
+    def matches(
+        self, raw_model: str, geography: str | None = None, year: int | None = None
+    ) -> bool:
         if self.geographies and geography not in self.geographies:
+            return False
+        if self.years and (year is None or not self.years[0] <= year <= self.years[1]):
             return False
         return self.pattern.search(raw_model.casefold()) is not None
 
@@ -344,7 +350,8 @@ class EurocodeDecisions:
         body = decision.body
         if raw_model is not None:
             variant = next(
-                (item for item in decision.variants if item.matches(raw_model, geography)), None
+                (item for item in decision.variants if item.matches(raw_model, geography, year)),
+                None,
             )
             if variant is not None:
                 families, body = variant.families, variant.body
@@ -532,6 +539,14 @@ def _identity(identity: str, item: Mapping[str, Any]) -> IdentityDecision:
             isinstance(item, str) and len(item) == 2 and item.isupper() for item in geographies
         ):
             raise ValueError(f"identity {identity}: variant geographies are country codes")
+        years = raw.get("years")
+        if years is not None and not (
+            isinstance(years, list)
+            and len(years) == 2
+            and all(isinstance(item, int) for item in years)
+            and years[0] <= years[1]
+        ):
+            raise ValueError(f"identity {identity}: variant years are a first and a last year")
         variants.append(
             Variant(
                 pattern,
@@ -540,6 +555,7 @@ def _identity(identity: str, item: Mapping[str, Any]) -> IdentityDecision:
                 str(raw.get("why") or ""),
                 variant_status,
                 frozenset(geographies),
+                (years[0], years[1]) if years is not None else None,
             )
         )
     return IdentityDecision(

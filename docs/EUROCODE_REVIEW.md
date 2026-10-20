@@ -183,6 +183,11 @@ drive sides.
   `lumped_labels`, each flagged market whose units still miss a sibling's codes;
   fix each or explain it in `why` (a sibling under a tenth of the pair, like a
   minor body, may stay with the main codes).
+- **Model-range labels in some years only.** A publisher may drop the model
+  name in some registration years only. A sibling's share of the make then
+  collapses in those years while it sells on either side. Limit the pooling
+  variant to those years with `"years": [first, last]` (inclusive), alone or with
+  `geographies`.
 - `ambiguous_identity`: it could be several families (`amg`, the make alone,
   `grand`) and no variant can tell its spellings apart.
 - `not_in_catalogue`: a real vehicle the catalogue has no code for. Search

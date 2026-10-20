@@ -474,13 +474,17 @@ def validate(arguments: argparse.Namespace) -> int:
         if not decision.variants:
             continue
         counts: dict[str, int] = defaultdict(int)
-        for geography, _, model, units in _cells(demand[key]):
-            hit = next((item for item in decision.variants if item.matches(model, geography)), None)
+        for geography, year, model, units in _cells(demand[key]):
+            hit = next(
+                (item for item in decision.variants if item.matches(model, geography, year)), None
+            )
             label = "(no variant)"
             if hit is not None:
                 label = hit.pattern.pattern
                 if hit.geographies:
                     label += " @" + ",".join(sorted(hit.geographies))
+                if hit.years:
+                    label += f" in {hit.years[0]}-{hit.years[1]}"
             counts[label] += units
         variant_units[key] = dict(counts)
     lumped_report = _lumped_report(decisions, demand, expected & decided)
