@@ -187,6 +187,23 @@ class FamilyTimeline:
             windows[drive] = tuple(computed)
         return cls(family, windows)
 
+    def spans(self) -> dict[str, tuple[int, int | None]]:
+        """Each code's registration years in this family: first and last (None: still current)."""
+
+        spans: dict[str, tuple[int, int | None]] = {}
+        for windows in self._windows.values():
+            for window in windows:
+                ends = list(window.until.values())
+                end = None if None in ends else max(end for end in ends if end is not None)
+                code = window.fact.code
+                if code in spans:
+                    first, last = spans[code]
+                    end = None if last is None or end is None else max(last, end)
+                    spans[code] = (min(first, window.fact.first_year), end)
+                else:
+                    spans[code] = (window.fact.first_year, end)
+        return spans
+
     def codes(self, year: int, drive: str, body: str | None = None) -> tuple[str, ...]:
         """Every code a registration of this family can belong to.
 

@@ -40,6 +40,7 @@ from icor.eurocodes.allocation import (
     drive_side,
 )
 from icor.eurocodes.catalog import from_document
+from icor.eurocodes.runtime import RAW_IDENTITY_PREFIX, identity_key
 from icor.infrastructure.snapshot_identity import load_identity_index
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,7 +52,6 @@ COVERAGE_TARGET = 0.99
 MAX_BATCH_IDENTITIES = 70
 SMALL_MAKE_IDENTITIES = 12
 EXCLUDED_SCOPES = frozenset({"truck", "bus"})
-RAW_PREFIX = "raw"
 
 
 def _sha256(path: Path) -> str:
@@ -78,15 +78,6 @@ def _active_snapshot() -> tuple[str, Path]:
         snapshot_id,
         ROOT / ".local" / "evidence" / "snapshots" / snapshot_id / "evidence.sqlite3",
     )
-
-
-def identity_key(index: Any, vehicle_id: str, make: str, model: str) -> str:
-    """The key a vehicle's registrations are reviewed and allocated under."""
-
-    key = index.identity_for(vehicle_id)
-    if key is not None:
-        return f"{key[0]}|{key[1]}"
-    return f"{RAW_PREFIX}|{' '.join(make.split()).casefold()}|{' '.join(model.split()).casefold()}"
 
 
 def build_demand(database: Path) -> dict[str, Any]:
@@ -133,7 +124,7 @@ def build_demand(database: Path) -> dict[str, Any]:
 
 def _make_of(key: str) -> str:
     parts = key.split("|")
-    return parts[1] if parts[0] == RAW_PREFIX else parts[0]
+    return parts[1] if parts[0] == RAW_IDENTITY_PREFIX else parts[0]
 
 
 def _groups(path: Path) -> dict[str, str]:
