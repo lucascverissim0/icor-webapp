@@ -6329,8 +6329,10 @@ self-hosted because the CSP blocks font CDNs.
   before deleting anything and still matches `ab9b923e…079529`. Also kept: `releases/`, `downloads/` and
   `pinned-artifacts/`, which cannot be fetched again.
 - Rebuildable caches remain (~/.npm 5.2 GB, uv 768 MB, Playwright 554 MB).
-- `git push origin fix/client-release-production` was **rejected**: the `lucascverissim0` gh token
-  lacks the `workflow` scope (`.github/workflows/ci.yml` changed). Until Lucas runs
-  `gh auth refresh -h github.com -u lucascverissim0 -s workflow` and confirms that `lverissimo-01` is still
-  active, the branch's unpushed commits exist only on this Mac. After that, push the branch, never `main`.
+- First push was rejected: the token lacked the `workflow` scope. Fixed without ever switching the
+  active account (Lucas runs another session on `lverissimo-01` in parallel; a `gh auth switch`
+  attempt briefly broke it and was reverted): a separate gh config at `~/.config/gh-icor` holds a
+  `lucascverissim0` login with scopes repo, workflow, read:org, gist, and the repo-local credential helper now reads
+  `GH_CONFIG_DIR=$HOME/.config/gh-icor gh auth token`. For `gh` commands on this repo, use
+  `GH_CONFIG_DIR=~/.config/gh-icor gh ...`. Branch pushed (`80edb9b..2f8b9c9`) and is in sync with origin.
 - No local server running. Next step: Lucas supplies the new client feedback.

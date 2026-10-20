@@ -13,8 +13,9 @@ single durable handoff. Read it before working, as `AGENTS.md` requires.
   older handoff entries describe the retired Windows machine.
 - GitHub account for this repository: `lucascverissim0`. `gh` holds it alongside the
   unrelated work account `lverissimo-01`, which must stay the active `gh` account (another
-  session uses it). A repo-local credential helper in `.git/config` makes git here use
-  `lucascverissim0` regardless; for `gh` commands prefix
-  `GH_TOKEN=$(gh auth token --user lucascverissim0)`. Never switch the active account.
+  session uses it in parallel). A separate gh config `~/.config/gh-icor` holds the
+  `lucascverissim0` login (with `workflow` scope); the repo-local credential helper in
+  `.git/config` reads it, and `gh` commands here use `GH_CONFIG_DIR=~/.config/gh-icor gh ...`.
+  Never run `gh auth switch`/`refresh`/`login` against the default config.
 - Commits use the repository-local identity `Lucas Cravo Verissimo
   <lucas.c.verissimo@gmail.com>`.
