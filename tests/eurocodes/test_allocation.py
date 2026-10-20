@@ -325,6 +325,166 @@ def test_a_shared_windscreen_belongs_to_each_family_independently() -> None:
     assert decisions.allocate("zephyr|beta", 2015, "NL").codes == ("Q301",)
 
 
+def test_a_generation_covering_every_body_stays_shared_with_its_body_specific_successor() -> None:
+    decisions = _decisions(
+        {"zephyr|swift": {"family": "zephyr/swift"}},
+        **{
+            "zephyr/swift": {
+                "label": "Swift",
+                "make": "zephyr",
+                "codes": [
+                    {"code": "Q701", "first_year": 2007, "rows": [7]},
+                    {
+                        "code": "Q702",
+                        "first_year": 2014,
+                        "first_year_latest": 2015,
+                        "bodies": ["hatchback", "estate"],
+                        "replaces": ["Q701"],
+                        "rows": [8],
+                    },
+                    {
+                        "code": "Q703",
+                        "first_year": 2016,
+                        "bodies": ["convertible"],
+                        "role": "minor",
+                        "rows": [9],
+                    },
+                ],
+            }
+        },
+    )
+
+    # The estate's previous generation covered every body: the launch span is shared.
+    assert decisions.allocate("zephyr|swift", 2015, "NL", "estate").codes == ("Q701", "Q702")
+    assert decisions.allocate("zephyr|swift", 2016, "NL", "estate").codes == ("Q702",)
+    # A parallel body line does not borrow the all-body code.
+    assert decisions.allocate("zephyr|swift", 2016, "NL", "convertible").codes == ("Q703",)
+
+
+def test_variants_route_lumped_spellings_to_their_own_family() -> None:
+    families = {
+        "zephyr/arrow": ARROW,
+        "zephyr/volt": {
+            "label": "Zephyr Arrow Volt",
+            "make": "zephyr",
+            "codes": [{"code": "Q601", "first_year": 2020, "rows": [6]}],
+        },
+    }
+    identities = {
+        "zephyr|arrow": {
+            "family": "zephyr/arrow",
+            "variants": [
+                {"match": r"\bvolt\b", "family": "zephyr/volt"},
+                {"match": r"\bx import\b", "status": "not_in_catalogue"},
+                {"match": r"^arrow$", "geographies": ["GB"], "family": "zephyr/volt"},
+            ],
+        },
+        "zephyr|grand": {
+            "status": "ambiguous_identity",
+            "variants": [{"match": r"grand arrow", "family": "zephyr/arrow", "body": "estate"}],
+        },
+    }
+    decisions = _decisions(identities, **families)
+
+    assert decisions.allocate("zephyr|arrow", 2021, "NL", raw_model="ARROW VOLT 80kWh").codes == (
+        "Q601",
+    )
+    assert decisions.allocate("zephyr|arrow", 2021, "NL", raw_model="arrow 1.5").codes == ("Q105",)
+    # A variant rescues the spellings it names from an ambiguous identity; the rest stay out.
+    assert decisions.allocate("zephyr|grand", 2015, "NL", raw_model="Grand Arrow").codes == (
+        "Q103",
+    )
+    assert decisions.allocate("zephyr|grand", 2015, "NL", raw_model="grand").status == (
+        "unassignable"
+    )
+    # A variant can also leave the labels it names unassigned.
+    assert decisions.allocate("zephyr|arrow", 2015, "NL", raw_model="arrow x import").status == (
+        "unassignable"
+    )
+    # A variant limited to a geography applies only there.
+    assert decisions.allocate("zephyr|arrow", 2021, "GB", raw_model="arrow").codes == ("Q601",)
+    assert decisions.allocate("zephyr|arrow", 2021, "NL", raw_model="arrow").codes == ("Q105",)
+    # The raw label also supplies the body when none is given.
+    assert decisions.allocate("zephyr|arrow", 2015, "NL", raw_model="arrow variant").codes == (
+        "Q103",
+    )
+
+
+def test_a_label_naming_several_families_pools_their_codes() -> None:
+    families = {
+        "zephyr/arrow": ARROW,
+        "zephyr/volt": {
+            "label": "Zephyr Arrow Volt",
+            "make": "zephyr",
+            "codes": [{"code": "Q601", "first_year": 2020, "rows": [6]}],
+        },
+    }
+    decisions = _decisions(
+        {
+            "zephyr|arrow": {
+                "family": "zephyr/arrow",
+                "variants": [
+                    {"match": ".", "geographies": ["GB"], "family": ["zephyr/arrow", "zephyr/volt"]}
+                ],
+            }
+        },
+        **families,
+    )
+
+    pooled = decisions.allocate("zephyr|arrow", 2021, "GB", raw_model="arrow")
+    assert (pooled.codes, pooled.status, pooled.family) == (
+        ("Q105", "Q601"),
+        "shared",
+        "zephyr/arrow",
+    )
+    assert decisions.allocate("zephyr|arrow", 2021, "NL", raw_model="arrow").codes == ("Q105",)
+    with pytest.raises(ValueError, match="listed twice"):
+        _decisions({"zephyr|arrow": {"family": ["zephyr/arrow", "zephyr/arrow"]}}, **families)
+
+
+def test_variants_must_name_known_families_and_readable_patterns() -> None:
+    with pytest.raises(ValueError, match="unknown family"):
+        _decisions(
+            {
+                "zephyr|arrow": {
+                    "family": "zephyr/arrow",
+                    "variants": [{"match": "volt", "family": "zephyr/missing"}],
+                }
+            }
+        )
+    with pytest.raises(ValueError, match="unassigned variant names a family"):
+        _decisions(
+            {
+                "zephyr|arrow": {
+                    "family": "zephyr/arrow",
+                    "variants": [
+                        {"match": "x", "status": "not_in_catalogue", "family": "zephyr/arrow"}
+                    ],
+                }
+            }
+        )
+    with pytest.raises(ValueError, match="geographies are country codes"):
+        _decisions(
+            {
+                "zephyr|arrow": {
+                    "family": "zephyr/arrow",
+                    "variants": [{"match": "x", "family": "zephyr/arrow", "geographies": "GB"}],
+                }
+            }
+        )
+    with pytest.raises(ValueError, match="mapped variant names no family"):
+        _decisions({"zephyr|arrow": {"family": "zephyr/arrow", "variants": [{"match": "x"}]}})
+    with pytest.raises(ValueError, match="unreadable variant pattern"):
+        _decisions(
+            {
+                "zephyr|arrow": {
+                    "family": "zephyr/arrow",
+                    "variants": [{"match": "(", "family": "zephyr/arrow"}],
+                }
+            }
+        )
+
+
 def test_validation_refuses_invented_codes_and_foreign_citations() -> None:
     catalogue = {"Q101": [1], "Q102": [2], "Q103": [3], "Q104": [4], "Q105": [5]}
     document = _document(**{"zephyr/arrow": ARROW})

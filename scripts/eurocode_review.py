@@ -21,7 +21,6 @@ prints counts and identity names only, never a code.
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import hashlib
 import json
 import re
@@ -102,28 +101,108 @@ def build_demand(database: Path) -> dict[str, Any]:
         ).fetchall()
     finally:
         connection.close()
-    identities: dict[str, dict[str, Any]] = {}
+    collected: dict[str, dict[tuple[str, str], dict[tuple[str, int], int]]] = {}
     for vehicle_id, geography, year, units in rows:
         if not units:
             continue
         make, model = labels[vehicle_id]
         key = identity_key(index, vehicle_id, make, model)
-        entry = identities.setdefault(
-            key, {"units": 0, "cells": defaultdict(int), "spellings": defaultdict(int)}
-        )
-        entry["units"] += int(units)
-        hint = body_hint(model) or ""
-        entry["cells"][f"{geography}|{year}|{hint}"] += int(units)
-        entry["spellings"][f"{make} / {model}"] += int(units)
-    for entry in identities.values():
-        entry["cells"] = dict(entry["cells"])
-        entry["spellings"] = dict(entry["spellings"])
+        cells = collected.setdefault(key, {}).setdefault((make, model), defaultdict(int))
+        cells[(geography, int(year))] += int(units)
+    identities: dict[str, dict[str, Any]] = {}
+    for key, by_spelling in collected.items():
+        # Spellings are kept with their own cells: a reviewed variant claims the
+        # raw labels its pattern matches, so demand must stay attributable to them.
+        ranked = sorted(by_spelling.items(), key=lambda item: (-sum(item[1].values()), item[0]))
+        spellings = [[make, model, sum(cells.values())] for (make, model), cells in ranked]
+        identities[key] = {
+            "units": sum(spelling[2] for spelling in spellings),
+            "spellings": spellings,
+            "cells": {
+                f"{geography}|{year}|{position}": units
+                for position, (_, cells) in enumerate(ranked)
+                for (geography, year), units in sorted(cells.items())
+            },
+        }
     return identities
 
 
 def _make_of(key: str) -> str:
     parts = key.split("|")
     return parts[1] if parts[0] == RAW_IDENTITY_PREFIX else parts[0]
+
+
+def _extends(base: str, sibling: str) -> bool:
+    """Whether a model name is the base name plus a qualifier (``c4 picasso``, ``ioniq5``)."""
+
+    if not sibling.startswith(base) or len(sibling) <= len(base):
+        return False
+    following = sibling[len(base)]
+    return following in " -._/" or base[-1].isdigit() != following.isdigit()
+
+
+def lumped_labels(demand: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Per identity, markets whose labels for it probably include a sibling model.
+
+    Some publishers label a whole model range with the bare model name. Where a
+    qualified sibling (``yaris cross`` next to ``yaris``) holds a material share of
+    the pair's demand elsewhere but almost none in one market, that market's bare
+    labels very likely include the sibling.
+    """
+
+    by_make: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for key in demand:
+        prefix, _, model = key.rpartition("|")
+        by_make[prefix].append((model, key))
+    findings: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for models in by_make.values():
+        for base, base_key in models:
+            for sibling, sibling_key in models:
+                if not _extends(base, sibling) or demand[sibling_key]["units"] < 200:
+                    continue
+                sibling_units: dict[str, int] = defaultdict(int)
+                years: set[int] = set()
+                for geography, year, _, units in _cells(demand[sibling_key]):
+                    sibling_units[geography] += units
+                    years.add(year)
+                base_units: dict[str, int] = defaultdict(int)
+                for geography, year, _, units in _cells(demand[base_key]):
+                    if year in years:
+                        base_units[geography] += units
+                for geography, units in base_units.items():
+                    if units < 50:
+                        continue
+                    other_sibling = sum(v for g, v in sibling_units.items() if g != geography)
+                    other_base = sum(v for g, v in base_units.items() if g != geography)
+                    if not other_sibling + other_base:
+                        continue
+                    elsewhere = other_sibling / (other_sibling + other_base)
+                    here = sibling_units.get(geography, 0) / (
+                        sibling_units.get(geography, 0) + units
+                    )
+                    if elsewhere >= 0.10 and here < elsewhere / 5:
+                        findings[base_key].append(
+                            {
+                                "geography": geography,
+                                "units": units,
+                                "sibling": sibling_key,
+                                "here": round(here, 3),
+                                "elsewhere": round(elsewhere, 3),
+                            }
+                        )
+    for items in findings.values():
+        items.sort(key=lambda item: -item["units"] * item["elsewhere"])
+    return dict(findings)
+
+
+def _main_market(entry: Mapping[str, Any], position: int, units: int) -> str:
+    markets: dict[str, int] = defaultdict(int)
+    for cell, value in entry["cells"].items():
+        geography, _, index = cell.split("|")
+        if int(index) == position:
+            markets[geography] += value
+    geography, value = max(markets.items(), key=lambda item: item[1])
+    return f"; {geography} {value / units:.0%}" if value >= 0.5 * units else ""
 
 
 def _groups(path: Path) -> dict[str, str]:
@@ -149,9 +228,7 @@ def _splits(path: Path) -> dict[str, list[tuple[str, str]]]:
 def _catalogue_lines(catalogue: Any, makes: set[str]) -> list[str]:
     lines = []
     for code, rows in catalogue.codes().items():
-        relevant = [
-            row for row in rows if set(row.makes) & makes
-        ]
+        relevant = [row for row in rows if set(row.makes) & makes]
         if not relevant:
             continue
         starts = [row.start for row in relevant if row.start is not None]
@@ -168,15 +245,17 @@ def _catalogue_lines(catalogue: Any, makes: set[str]) -> list[str]:
     return lines
 
 
-def _identity_lines(key: str, entry: Mapping[str, Any], total: float) -> list[str]:
+def _identity_lines(
+    key: str, entry: Mapping[str, Any], total: float, lumped: Iterable[Mapping[str, Any]] = ()
+) -> list[str]:
     by_year: dict[int, int] = defaultdict(int)
     rhd = 0
     bodies: dict[str, int] = defaultdict(int)
-    for cell, units in entry["cells"].items():
-        geography, year, hint = cell.split("|")
-        by_year[int(year)] += units
+    for geography, year, model, units in _cells(entry):
+        by_year[year] += units
         if drive_side(geography) == "RHD":
             rhd += units
+        hint = body_hint(model)
         if hint:
             bodies[hint] += units
     units = entry["units"]
@@ -185,7 +264,13 @@ def _identity_lines(key: str, entry: Mapping[str, Any], total: float) -> list[st
         for year, value in sorted(by_year.items())
         if value >= max(1, 0.005 * units)
     )
-    spellings = sorted(entry["spellings"].items(), key=lambda item: -item[1])[:8]
+    # The top spellings, plus any other with a material share: a reviewer can only
+    # route a lumped model to its own family if its spellings are visible.
+    spellings = [
+        (f"{make} / {model}", f"{value}{_main_market(entry, position, value)}")
+        for position, (make, model, value) in enumerate(entry["spellings"])
+        if position < 8 or (value >= 0.02 * entry["units"] and position < 25)
+    ]
     lines = [
         f"### {key}",
         f"- demand {units} units ({units / total:.3%} of the market); RHD share {rhd / units:.0%}",
@@ -196,6 +281,12 @@ def _identity_lines(key: str, entry: Mapping[str, Any], total: float) -> list[st
         lines.append(
             "- units whose raw label names a body: "
             + ", ".join(f"{body} {value}" for body, value in sorted(bodies.items()))
+        )
+    for item in list(lumped)[:6]:
+        lines.append(
+            f"- labels in {item['geography']} ({item['units']} units in the sibling's years) "
+            f"probably include `{item['sibling']}`: {item['here']:.0%} of the pair there "
+            f"vs {item['elsewhere']:.0%} elsewhere"
         )
     return lines
 
@@ -255,6 +346,7 @@ def prepare(arguments: argparse.Namespace) -> int:
     batch_dir = REVIEW / "batches"
     _within_private(batch_dir).mkdir(parents=True, exist_ok=True)
     index = []
+    lumped = lumped_labels(demand)
     for batch_id, keys, makes in batches:
         lines = [
             f"# Eurocode review batch {batch_id}",
@@ -270,7 +362,7 @@ def prepare(arguments: argparse.Namespace) -> int:
             "",
         ]
         for key in keys:
-            lines.extend(_identity_lines(key, demand[key], total))
+            lines.extend(_identity_lines(key, demand[key], total, lumped.get(key, ())))
             lines.append("")
         (batch_dir / f"{batch_id}.md").write_text("\n".join(lines), encoding="utf-8")
         index.append(
@@ -359,7 +451,11 @@ def validate(arguments: argparse.Namespace) -> int:
         for fact in family.codes:
             if not makes_by_code[fact.code] & batch_makes:
                 problems.append(f"{key}: a code whose catalogue make is outside the batch")
-    used = {decision.family for decision in decisions.identities.values() if decision.family}
+    used = {
+        family
+        for decision in decisions.identities.values()
+        for family in (*decision.families, *(f for v in decision.variants for f in v.families))
+    }
     unused = sorted(set(decisions.families) - used)
     if unused:
         problems.append(f"families no identity uses: {unused}")
@@ -367,11 +463,27 @@ def validate(arguments: argparse.Namespace) -> int:
     outside: dict[str, dict[str, int]] = {}
     for key in sorted(expected & decided):
         years: dict[str, int] = defaultdict(int)
-        for geography, year, hint, units in _cells(demand[key]):
-            if decisions.allocate(key, year, geography, hint).status == "outside":
+        for geography, year, model, units in _cells(demand[key]):
+            if decisions.allocate(key, year, geography, raw_model=model).status == "outside":
                 years[f"{drive_side(geography)} {year}"] += units
         if years:
             outside[key] = dict(sorted(years.items()))
+    variant_units: dict[str, dict[str, int]] = {}
+    for key in sorted(expected & decided):
+        decision = decisions.identities[key]
+        if not decision.variants:
+            continue
+        counts: dict[str, int] = defaultdict(int)
+        for geography, _, model, units in _cells(demand[key]):
+            hit = next((item for item in decision.variants if item.matches(model, geography)), None)
+            label = "(no variant)"
+            if hit is not None:
+                label = hit.pattern.pattern
+                if hit.geographies:
+                    label += " @" + ",".join(sorted(hit.geographies))
+            counts[label] += units
+        variant_units[key] = dict(counts)
+    lumped_report = _lumped_report(decisions, demand, expected & decided)
     print(
         json.dumps(
             {
@@ -380,6 +492,8 @@ def validate(arguments: argparse.Namespace) -> int:
                 "identities": len(decided),
                 "problems": problems,
                 "demand_outside_every_code": outside,
+                "units_per_variant": variant_units,
+                "lumped_labels": lumped_report,
             },
             indent=1,
         )
@@ -387,15 +501,67 @@ def validate(arguments: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-def _cells(entry: Mapping[str, Any]) -> Iterable[tuple[str, int, str | None, int]]:
+def _lumped_report(
+    decisions: EurocodeDecisions, demand: Mapping[str, Any], keys: Iterable[str]
+) -> list[dict[str, Any]]:
+    """Markets whose bare labels probably include a sibling the decisions do not cover.
+
+    For each detected market, the units of the identity whose codes there miss a
+    code the sibling carries in the same year (a false certainty unless the label
+    is in fact specific). A sibling decided elsewhere cannot be checked here.
+    """
+
+    findings = lumped_labels(demand)
+    report = []
+    for key in sorted(keys):
+        for item in findings.get(key, ()):
+            sibling = item["sibling"]
+            row = {"identity": key, **item}
+            if sibling not in decisions.identities:
+                report.append({**row, "uncovered_units": None, "note": "sibling not in this file"})
+                continue
+            sibling_label = demand[sibling]["spellings"][0][1]
+            sibling_years = {year for _, year, _, _ in _cells(demand[sibling])}
+            uncovered = 0
+            for geography, year, model, units in _cells(demand[key]):
+                if geography != item["geography"] or year not in sibling_years:
+                    continue
+                own = decisions.allocate(key, year, geography, raw_model=model)
+                other = decisions.allocate(sibling, year, geography, raw_model=sibling_label)
+                if other.codes and not set(other.codes) <= set(own.codes):
+                    uncovered += units
+            if uncovered:
+                report.append({**row, "uncovered_units": uncovered})
+    return report
+
+
+def _cells(entry: Mapping[str, Any]) -> Iterable[tuple[str, int, str, int]]:
+    """Each demand cell as (geography, registration year, raw model label, units)."""
+
+    spellings = entry["spellings"]
     for cell, units in entry["cells"].items():
-        geography, year, hint = cell.split("|")
-        yield geography, int(year), hint or None, units
+        geography, year, position = cell.split("|")
+        yield geography, int(year), spellings[int(position)][1], units
 
 
 def _decision(decisions: EurocodeDecisions, key: str) -> dict[str, Any] | None:
     decision = decisions.identities.get(key)
-    return None if decision is None else dataclasses.asdict(decision)
+    if decision is None:
+        return None
+    return {
+        "status": decision.status,
+        "family": list(decision.families),
+        "body": decision.body,
+        "variants": [
+            {
+                "match": variant.pattern.pattern,
+                "status": variant.status,
+                "family": list(variant.families),
+                "body": variant.body,
+            }
+            for variant in decision.variants
+        ],
+    }
 
 
 def compare(arguments: argparse.Namespace) -> int:
@@ -412,15 +578,14 @@ def compare(arguments: argparse.Namespace) -> int:
         entry = demand[key]
         differences: dict[tuple[int, str, str], dict[str, Any]] = {}
         agreed = 0
-        for geography, year, hint, units in _cells(entry):
-            a = first.allocate(key, year, geography, hint)
-            b = second.allocate(key, year, geography, hint)
-            same = (a.codes, a.status) == (b.codes, b.status)
-            if same:
+        for geography, year, model, units in _cells(entry):
+            a = first.allocate(key, year, geography, raw_model=model)
+            b = second.allocate(key, year, geography, raw_model=model)
+            if (a.codes, a.status, a.family) == (b.codes, b.status, b.family):
                 agreed += units
                 continue
             slot = differences.setdefault(
-                (year, drive_side(geography), hint or ""),
+                (year, drive_side(geography), body_hint(model) or "", a, b),
                 {"a": [a.status, list(a.codes)], "b": [b.status, list(b.codes)], "units": 0},
             )
             slot["units"] += units
@@ -436,7 +601,9 @@ def compare(arguments: argparse.Namespace) -> int:
                     "b": _decision(second, key),
                     "differences": [
                         {"year": year, "drive": drive, "body": body, **value}
-                        for (year, drive, body), value in sorted(differences.items())
+                        for (year, drive, body, _, _), value in sorted(
+                            differences.items(), key=lambda item: item[0][:3]
+                        )
                     ],
                 }
             )
@@ -547,8 +714,8 @@ def coverage(arguments: argparse.Namespace) -> int:
     demand = json.loads((REVIEW / "demand.json").read_text(encoding="utf-8"))
     statuses: dict[str, int] = defaultdict(int)
     for key, entry in demand["identities"].items():
-        for geography, year, hint, units in _cells(entry):
-            statuses[decisions.allocate(key, year, geography, hint).status] += units
+        for geography, year, model, units in _cells(entry):
+            statuses[decisions.allocate(key, year, geography, raw_model=model).status] += units
     total = demand["total"]
     report = {status: round(units / total, 5) for status, units in sorted(statuses.items())}
     reviewed = 1 - statuses.get("unreviewed", 0) / total

@@ -98,12 +98,53 @@ class Family:
 
 
 @dataclass(frozen=True, slots=True)
-class IdentityDecision:
-    identity: str
-    status: str
-    family: str | None
+class Variant:
+    """Raw labels of an identity that name another family, a body, or no vehicle.
+
+    The app's identity layer folds some distinct models together (an electric
+    derivative spelled under its base model's name). A variant claims the raw
+    labels its pattern matches, so those registrations follow their own family
+    instead of making the whole identity shared or ambiguous. A variant with a
+    non-mapped status (and no family) leaves its labels unassigned. A variant
+    limited to some geographies applies only to their registrations: some
+    publishers label a whole model range with the bare model name.
+    """
+
+    pattern: re.Pattern[str]
+    families: tuple[str, ...]
     body: str | None
     why: str
+    status: str = "mapped"
+    geographies: frozenset[str] = frozenset()
+
+    @property
+    def family(self) -> str | None:
+        return self.families[0] if self.families else None
+
+    def matches(self, raw_model: str, geography: str | None = None) -> bool:
+        if self.geographies and geography not in self.geographies:
+            return False
+        return self.pattern.search(raw_model.casefold()) is not None
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityDecision:
+    """How one identity's registrations map to families.
+
+    Several families mean the label may be any of those models (a market that
+    labels a whole model range with the bare name): their codes are pooled.
+    """
+
+    identity: str
+    status: str
+    families: tuple[str, ...]
+    body: str | None
+    why: str
+    variants: tuple[Variant, ...] = ()
+
+    @property
+    def family(self) -> str | None:
+        return self.families[0] if self.families else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,13 +264,27 @@ class FamilyTimeline:
         none in that year has no known code: lending it another body's code
         would be a false certainty. A body the family never distinguishes falls
         back to the main codes.
+
+        A code covering every body that one of the body's own codes replaces (or
+        that replaces one of them) is the same body's other generation, not a
+        parallel line, so it still applies while active.
         """
 
         windows = self._windows[drive]
         if body is not None:
             explicit = [w.fact for w in windows if body in w.fact.bodies and w.active(year, body)]
             if explicit:
-                return tuple(sorted(fact.code for fact in explicit))
+                own = [fact for fact in self.family.codes if body in fact.bodies]
+                own_codes = {fact.code for fact in own}
+                replaced = {code for fact in own for code in fact.replaces}
+                lineage = [
+                    w.fact
+                    for w in windows
+                    if ALL_BODIES in w.fact.bodies
+                    and w.active(year, ALL_BODIES)
+                    and (w.fact.code in replaced or own_codes & set(w.fact.replaces))
+                ]
+                return tuple(sorted({fact.code for fact in (*explicit, *lineage)}))
             generic = [
                 w.fact
                 for w in windows
@@ -264,17 +319,43 @@ class EurocodeDecisions:
         year: int,
         geography: str,
         raw_body: str | None = None,
+        *,
+        raw_model: str | None = None,
     ) -> Allocation:
+        """The codes a registration may carry.
+
+        ``raw_model`` is the publisher's model label: it selects a variant and,
+        when ``raw_body`` is not given, supplies the body the label names.
+        """
+
         decision = self.identities.get(identity)
         if decision is None:
             return UNREVIEWED
-        if decision.status != "mapped" or decision.family is None:
+        families = decision.families if decision.status == "mapped" else ()
+        body = decision.body
+        if raw_model is not None:
+            variant = next(
+                (item for item in decision.variants if item.matches(raw_model, geography)), None
+            )
+            if variant is not None:
+                families, body = variant.families, variant.body
+            if raw_body is None:
+                raw_body = body_hint(raw_model)
+        if not families:
             return Allocation((), "unassignable")
-        body = decision.body or raw_body
-        codes = self._timelines[decision.family].codes(year, drive_side(geography), body)
+        drive = drive_side(geography)
+        codes = tuple(
+            sorted(
+                {
+                    code
+                    for family in families
+                    for code in self._timelines[family].codes(year, drive, body or raw_body)
+                }
+            )
+        )
         if not codes:
-            return Allocation((), "outside", decision.family)
-        return Allocation(codes, "single" if len(codes) == 1 else "shared", decision.family)
+            return Allocation((), "outside", families[0])
+        return Allocation(codes, "single" if len(codes) == 1 else "shared", families[0])
 
     def timeline(self, family: str) -> FamilyTimeline:
         return self._timelines[family]
@@ -309,7 +390,8 @@ class EurocodeDecisions:
         identities: dict[str, IdentityDecision] = {}
         for identity, item in document.get("identities", {}).items():
             decision = _identity(identity, item)
-            if decision.family is not None and decision.family not in families:
+            named = [*decision.families, *(f for v in decision.variants for f in v.families)]
+            if any(family not in families for family in named):
                 raise ValueError(f"identity {identity} names an unknown family")
             identities[identity] = decision
         return cls(families, identities, document.get("metadata", {}))
@@ -387,11 +469,24 @@ def _check_fact(
             raise ValueError(f"{where}: cites rows of another code {sorted(foreign)}")
 
 
+def _family_keys(identity: str, value: Any) -> tuple[str, ...]:
+    """A family key, or a list of them for a label that may be any of several models."""
+
+    if value is None or value == "":
+        return ()
+    keys = [value] if isinstance(value, str) else value
+    if not isinstance(keys, list) or not all(isinstance(key, str) and key for key in keys):
+        raise ValueError(f"identity {identity}: a family is a key or a list of keys")
+    if len(set(keys)) != len(keys):
+        raise ValueError(f"identity {identity}: a family is listed twice")
+    return tuple(keys)
+
+
 def _identity(identity: str, item: Mapping[str, Any]) -> IdentityDecision:
     status = str(item.get("status") or "mapped")
     if status not in IDENTITY_STATUSES:
         raise ValueError(f"identity {identity}: unknown status {status}")
-    family = item.get("family")
+    family = _family_keys(identity, item.get("family"))
     if status == "mapped" and not family:
         raise ValueError(f"identity {identity}: mapped without a family")
     if status != "mapped" and family:
@@ -399,4 +494,38 @@ def _identity(identity: str, item: Mapping[str, Any]) -> IdentityDecision:
     body = item.get("body")
     if body is not None and body not in BODIES:
         raise ValueError(f"identity {identity}: unknown body {body}")
-    return IdentityDecision(identity, status, family, body, str(item.get("why") or ""))
+    variants: list[Variant] = []
+    for raw in item.get("variants") or ():
+        try:
+            pattern = re.compile(str(raw["match"]))
+        except (KeyError, re.error) as error:
+            raise ValueError(f"identity {identity}: unreadable variant pattern") from error
+        variant_status = str(raw.get("status") or "mapped")
+        if variant_status not in IDENTITY_STATUSES:
+            raise ValueError(f"identity {identity}: unknown variant status {variant_status}")
+        variant_family = _family_keys(identity, raw.get("family"))
+        if variant_status == "mapped" and not variant_family:
+            raise ValueError(f"identity {identity}: a mapped variant names no family")
+        if variant_status != "mapped" and variant_family:
+            raise ValueError(f"identity {identity}: an unassigned variant names a family")
+        variant_body = raw.get("body")
+        if variant_body is not None and variant_body not in BODIES:
+            raise ValueError(f"identity {identity}: unknown body {variant_body}")
+        geographies = raw.get("geographies") or ()
+        if isinstance(geographies, str) or not all(
+            isinstance(item, str) and len(item) == 2 and item.isupper() for item in geographies
+        ):
+            raise ValueError(f"identity {identity}: variant geographies are country codes")
+        variants.append(
+            Variant(
+                pattern,
+                variant_family,
+                variant_body,
+                str(raw.get("why") or ""),
+                variant_status,
+                frozenset(geographies),
+            )
+        )
+    return IdentityDecision(
+        identity, status, family, body, str(item.get("why") or ""), tuple(variants)
+    )
