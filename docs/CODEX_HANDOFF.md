@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-10-06
+Last updated: 2026-10-20
 
 ## Project objective
 
@@ -6318,3 +6318,19 @@ self-hosted because the CSP blocks font CDNs.
   the baseline first — no rebuild is needed to quantify it.
 - Further free sources worth checking next: Finland Traficom open vehicle data
   (per vehicle, CC BY 4.0), KBA FZ10 pre-2010 (terms unverified).
+
+## 2026-10-20 — disk cleanup; push blocked on token scope
+
+- Lucas wants the Mac to keep as little as possible. With his approval, these were deleted:
+  `.local/superseded-candidate-b502632{,-v2}`, `.local/evidence/candidates/snapshot-fccad643f981f5b6468e`,
+  the duplicate candidate `snapshot-b05d20c2d34a9b0a340d`, and the `~/ICOR-baseline` and
+  `~/ICOR-candidate` worktrees. `.local` went from 58 GB to 13 GB, and the disk now has 107 GiB used.
+- Kept: the active `.local/evidence/snapshots/snapshot-b05d20c2d34a9b0a340d`. Its sha256 was checked
+  before deleting anything and still matches `ab9b923e…079529`. Also kept: `releases/`, `downloads/` and
+  `pinned-artifacts/`, which cannot be fetched again.
+- Rebuildable caches remain (~/.npm 5.2 GB, uv 768 MB, Playwright 554 MB).
+- `git push origin fix/client-release-production` was **rejected**: the `lucascverissim0` gh token
+  lacks the `workflow` scope (`.github/workflows/ci.yml` changed). Until Lucas runs
+  `gh auth refresh -h github.com -u lucascverissim0 -s workflow` and confirms that `lverissimo-01` is still
+  active, the branch's unpushed commits exist only on this Mac. After that, push the branch, never `main`.
+- No local server running. Next step: Lucas supplies the new client feedback.
