@@ -64,6 +64,8 @@ def test_brand_qualifiers_become_scope_and_rebadges_yield_both_makes() -> None:
     assert parse_brand("ZEPHYR USA", ALIASES) == (("zephyr",), "non_european")
     assert parse_brand("NEW ZEPHYR", ALIASES) == (("zephyr",), None)
     assert parse_brand("ZEPHYR/BOREAS", ALIASES) == (("zephyr", "boreas"), None)
+    # An alias applies to the folded spelling too, so punctuation cannot defeat it.
+    assert parse_brand("NEW-ZEPHYR", ALIASES) == (("zephyr",), None)
     # The shared make rules still apply: VW folds to Volkswagen.
     assert parse_brand("VW", {}) == (("volkswagen",), None)
 

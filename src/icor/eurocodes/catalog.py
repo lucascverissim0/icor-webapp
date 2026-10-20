@@ -242,7 +242,8 @@ def parse_brand(raw: str, make_aliases: Mapping[str, str]) -> tuple[tuple[str, .
         name = " ".join(words)
         if not name:
             continue
-        make = make_aliases.get(name) or fold_make(name)
+        folded = fold_make(name)
+        make = make_aliases.get(name) or make_aliases.get(folded or "") or folded
         if make and make not in makes:
             makes.append(make)
     return tuple(makes), scope

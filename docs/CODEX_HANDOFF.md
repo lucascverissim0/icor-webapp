@@ -6430,3 +6430,88 @@ Next, per the plan:
 
 No push, deploy or client-snapshot change without Lucas's approval. No local server is
 running.
+
+### Progress on steps 1–3 (same day)
+
+**Step 1 is done** (commit `6d29778`). `src/icor/eurocodes/catalog.py` parses the workbook;
+`scripts/ingest_eurocode_catalog.py` writes the private `catalog.json` and `anomalies.csv`,
+refuses any output path outside `.local/private/eurocode`, and prints counts only.
+
+- Result: 11,733 rows parsed and 18 rejected (1 blank, 17 without model text), which accounts
+  for all 11,751.
+- Codes: 4,590 on parsed rows. Five more appear only on rejected rows; the earlier count of
+  4,596 also counted the blank cell.
+- Scopes: passenger 10,816, truck 426, non-European 356, conversion 121, bus 14.
+- The output is byte-identical across reruns.
+- Fix this session: a private brand alias now also applies to the folded spelling, so a
+  hyphenated catalogue brand can no longer escape its alias. Three small brands had lost all
+  their rows to this. A test covers it (`NEW-ZEPHYR`).
+
+**Method change from the plan (Claude's decision; Lucas can reverse it).** There is no
+automatic matcher whose proposals reviewers correct. The catalogue's free text is too
+irregular for that:
+- some rows give only chassis codes;
+- some dates contradict the chassis;
+- some models have duplicate alternative codes.
+
+A matcher's proposal would also anchor the reviewers. Instead:
+- Reviewers read every catalogue row of a make and state **facts** per code: first year,
+  latest first year when rows disagree, last year only when stated, bodies, main/minor role,
+  drive side, the codes it replaces, and the cited rows.
+- `src/icor/eurocodes/allocation.py` (`EurocodeDecisions.allocate`) computes every year's
+  code set from those facts, so two blind reviewers are compared mechanically, weighted by
+  demand.
+
+Allocation rules (decided by Claude, tested with fictional codes in
+`tests/eurocodes/test_allocation.py`):
+- **Launch span.** A successor's launch span [first_year, first_year_latest] is shared with
+  the code it replaces. Registration year is not production year.
+- **Run-out.** A stated last year adds one run-out year. When that last year equals the
+  successor's certain start, the shared launch year already covers the run-out, so the
+  result does not depend on whether the catalogue states the end. This replaces the earlier,
+  inconsistent "end + 1 always".
+- **Succession is per body.** A code replaced only for some bodies must end for the others,
+  either through a successor or a stated last year. Validation refuses it otherwise.
+- **Body not named.** Without a body in the label, every active main code applies, so a
+  hatch/estate code difference is shared and never split. Niche bodies (convertible, van,
+  pickup, a coupé of a hatch family) are `minor` and get demand only from labels naming
+  them.
+- **Body named.** Codes that state the body win; otherwise codes for all bodies apply;
+  otherwise the main codes.
+- **Drive side.** It comes from geography: GB, IE, CY and MT are RHD.
+- **Statuses:** `single`, `shared`, `outside` (a reviewed family in a year no code covers),
+  `unassignable` (ambiguous, not in the catalogue, or junk) and `unreviewed`.
+- **Validation.** Every code must exist and every cited row must belong to its code.
+
+**Step 3 tooling.** `scripts/eurocode_review.py` has six commands:
+- `prepare`: builds horizon-2028 demand per identity × geography × cohort × raw body word,
+  read-only from the active snapshot. It selects the top identities up to 99% of demand
+  (1,590 identities, 99.0%) and writes 42 batch files, one per make or per family group for
+  BMW and Mercedes, each holding the make's catalogue rows.
+- `validate`: also lists demand that falls outside every code.
+- `preview`: prints each family's timeline.
+- `compare`: unit-weighted, per identity × year × drive × body.
+- `merge`.
+- `coverage`.
+
+Make grouping and batch splits live in the private `review/make_groups.json`; for example,
+Citroën is reviewed together with DS, and Seat with Cupra. The reviewer brief, with fictional
+examples only, is `docs/EUROCODE_REVIEW.md`.
+
+Private files under `.local/private/eurocode/`:
+- `review/`: `batches/*.md`, `demand.json`, `index.json`, `out/<batch>.<a|b>.json`,
+  `compare/`;
+- `decisions.json`, written by `merge`.
+
+Verification: `uv run pytest tests/eurocodes -q` gives 52 passed. `uv run ruff check
+src/icor/eurocodes tests/eurocodes scripts/eurocode_review.py` is clean.
+
+**In progress.** A pilot of two blind reviewers each on `cupra+seat` and `bmw-3-4` tests the
+brief before the remaining 40 batches run. After the pilot:
+1. compare and adjudicate the pilot batches;
+2. refine the brief;
+3. run every batch with reviewers A and B, then compare, adjudicate and merge;
+4. run coverage (target at least 99% reviewed);
+5. re-check 100% of the top 200 families and 10% of the rest;
+6. write the private golden test;
+7. continue with steps 4–8.

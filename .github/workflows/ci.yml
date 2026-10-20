@@ -44,6 +44,7 @@ jobs:
           scripts/run_planner_dev.py scripts/run_quarterly_source_research.py
           scripts/replay_registration_reconciliation.py
           scripts/rebuild_active_snapshot.py scripts/run_container_preview.py
+          scripts/ingest_eurocode_catalog.py scripts/eurocode_review.py
           scripts/build_client_snapshot.py
           scripts/preflight_client_evidence.py
           scripts/verify_client_release.py
