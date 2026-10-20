@@ -74,7 +74,9 @@ class CodeFact:
     appear in; ``first_year_latest`` the year from which it certainly has, when
     the catalogue's start years disagree. ``last_year`` is the last production
     year when known; otherwise the code runs until a code that ``replaces`` it
-    is certainly in volume.
+    is certainly in volume. ``uncoded_successor`` is the year a successor the
+    catalogue has no code for is in volume: from then on the code's last stock
+    and the successor cannot be told apart, so the code explains neither.
     """
 
     code: str
@@ -87,6 +89,7 @@ class CodeFact:
     drive: str
     replaces: tuple[str, ...]
     rows: tuple[int, ...]
+    uncoded_successor: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +236,12 @@ class FamilyTimeline:
                     )
                     for body in fact.bodies
                 }
+                if fact.uncoded_successor is not None:
+                    end = fact.uncoded_successor - 1
+                    until = {
+                        body: end if last is None else min(last, end)
+                        for body, last in until.items()
+                    }
                 computed.append(_Window(fact, until))
             windows[drive] = tuple(computed)
         return cls(family, windows)
@@ -406,6 +415,7 @@ def _family(
         first = int(raw["first_year"])
         latest = int(raw.get("first_year_latest") or first)
         last = raw.get("last_year")
+        uncoded = raw.get("uncoded_successor")
         bodies = frozenset(raw.get("bodies") or [ALL_BODIES])
         fact = CodeFact(
             code=code,
@@ -418,6 +428,7 @@ def _family(
             drive=str(raw.get("drive") or "both"),
             replaces=tuple(str(value) for value in raw.get("replaces") or ()),
             rows=tuple(int(value) for value in raw.get("rows") or ()),
+            uncoded_successor=None if uncoded is None else int(uncoded),
         )
         _check_fact(key, fact, rows_by_code)
         facts.append(fact)
@@ -451,6 +462,11 @@ def _check_fact(
         raise ValueError(f"{where}: first_year_latest precedes first_year")
     if fact.last_year is not None and fact.last_year < fact.first_year:
         raise ValueError(f"{where}: last_year precedes first_year")
+    if fact.uncoded_successor is not None:
+        if fact.uncoded_successor <= fact.first_year:
+            raise ValueError(f"{where}: uncoded_successor must follow first_year")
+        if fact.last_year is not None and fact.uncoded_successor > fact.last_year + 1:
+            raise ValueError(f"{where}: uncoded_successor after the run-out year")
     if not fact.bodies <= BODIES | {ALL_BODIES}:
         raise ValueError(f"{where}: unknown body {sorted(fact.bodies - BODIES)}")
     if fact.role not in ROLES:

@@ -277,6 +277,25 @@ def test_a_code_replaced_for_some_bodies_must_end_for_the_others() -> None:
         )
 
 
+@pytest.mark.parametrize("last_year", [None, 2025])
+def test_a_successor_the_catalogue_lacks_ends_the_code_without_a_run_out(last_year) -> None:
+    # The successor reached volume in 2026 but has no code: its registrations and the
+    # last stock of Q501 cannot be told apart, so neither is given Q501.
+    decisions = _bolt(
+        {
+            "code": "Q501",
+            "first_year": 2005,
+            "last_year": last_year,
+            "uncoded_successor": 2026,
+            "rows": [1],
+        },
+    )
+
+    assert _bolt_codes(decisions, 2025) == ("Q501",)
+    assert decisions.allocate("zephyr|bolt", 2026, "NL") == Allocation((), "outside", "zephyr/bolt")
+    assert decisions.timeline("zephyr/bolt").spans()["Q501"] == (2005, 2025)
+
+
 def test_years_before_the_first_code_are_outside_not_guessed() -> None:
     decisions = _decisions()
 
@@ -511,6 +530,8 @@ def test_validation_refuses_invented_codes_and_foreign_citations() -> None:
         ({"role": "spare"}, "unknown role"),
         ({"drive": "left"}, "unknown drive"),
         ({"replaces": ["Q999"]}, "outside the family"),
+        ({"uncoded_successor": 2005}, "uncoded_successor must follow first_year"),
+        ({"last_year": 2010, "uncoded_successor": 2012}, "uncoded_successor after the run-out"),
     ],
 )
 def test_validation_refuses_inconsistent_facts(change: dict, message: str) -> None:

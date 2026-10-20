@@ -82,13 +82,14 @@ Write one JSON file, `.local/private/eurocode/review/out/<batch>.<reviewer>.json
 | `code` | A code that appears in the batch's catalogue rows. Never invent or alter one. |
 | `rows` | The `r<row>` numbers (as integers) that support this code — only rows of this code. |
 | `first_year` | The earliest year the vehicle can be registered: the earliest start the cited rows give (the `sop` column or a start year in the text). |
-| `first_year_latest` | Only when the family's mainstream bodies reached volume in different years (an estate launched a year after the saloon) or the rows disagree on the launch: the year from which the code is certainly in volume. Later re-listings of the same bodies, equipment variants (a panoramic roof, a sensor bracket) and facelift rows of the same code are not later launches. Omit otherwise; never add it only to keep run-out stock shared, because the launch span already covers that. |
+| `first_year_latest` | Only when the family's mainstream bodies reached volume in different years (an estate launched a year after the saloon) or the rows disagree on the launch: the year from which the code is certainly in volume. Later re-listings of the same bodies, equipment variants (a panoramic roof, a sensor bracket) and facelift rows of the same code are not later launches. It is also the first market year when the market launch came in the year after the rows' start (production began late in the year and sales the next): that year still registers the predecessor's stock. Omit otherwise; never add it only to keep run-out stock shared when the launch year already covers that. |
 | `last_year` | The last production year, when a cited row states it or it is beyond doubt — always for a model discontinued with no successor in this family. Otherwise omit it and let `replaces` end the code. Never leave a code open, or extend it, to absorb a few stray registrations after production ended: leave those outside and say so in `why`. |
 | `bodies` | `["all"]` when the code serves every body of the family, or the bodies it serves: `hatchback`, `saloon`, `estate`, `coupe`, `convertible`, `suv`, `mpv`, `van`, `pickup`. |
 | `role` | `main` (default) for mainstream bodies; `minor` for a niche body with its own code (convertible, van, pickup, a coupé of a hatch/saloon family). A minor code receives demand only from registrations whose label names that body, so every unlabelled registration of a minor body is silently given to the main codes. Use `minor` only for a small share of the family — about a tenth or less (most convertibles, vans, pickups). A body above that stays `main`, so its years are shared instead of falsely certain (a saloon that is 15% of a hatchback family, a coupé that is a fifth of a range). |
 | `drive` | `both` (default), or `LHD`/`RHD` when the code exists for one drive side only. When a generation has an RHD-specific code, its unmarked counterpart is `LHD`. |
 | `replaces` | Codes of the same family that this code succeeds, for the bodies it covers. |
 | `label` | A short human label for the code, such as model and generation. |
+| `uncoded_successor` | The year a successor the catalogue has no code for is in volume (a new generation launched after the catalogue was compiled). From that year the code explains no registrations, since its last stock and the new model cannot be told apart; they stay outside. Use it instead of a `last_year` run-out that would hand the new model's first year to the old code. |
 | `note` | Optional: any doubt, contradiction or external fact you relied on. |
 
 How the software turns facts into registration years (per drive side):
@@ -101,6 +102,7 @@ How the software turns facts into registration years (per drive side):
   after production ends. When `last_year` equals the successor's certain start,
   the shared launch year already covers that stock.
 - The last code of a family stays active for future years; never invent a future code.
+  When a successor without a code is already on sale, set `uncoded_successor`.
 - A code replaced for some of its bodies must also end for its other bodies,
   either by a successor for them or by a stated `last_year`. Validation refuses it
   otherwise.
