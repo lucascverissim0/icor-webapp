@@ -51,7 +51,6 @@ HORIZON = 2028
 COVERAGE_TARGET = 0.99
 MAX_BATCH_IDENTITIES = 70
 SMALL_MAKE_IDENTITIES = 12
-EXCLUDED_SCOPES = frozenset({"truck", "bus"})
 
 
 def _sha256(path: Path) -> str:
@@ -151,7 +150,7 @@ def _catalogue_lines(catalogue: Any, makes: set[str]) -> list[str]:
     lines = []
     for code, rows in catalogue.codes().items():
         relevant = [
-            row for row in rows if set(row.makes) & makes and row.scope not in EXCLUDED_SCOPES
+            row for row in rows if set(row.makes) & makes
         ]
         if not relevant:
             continue

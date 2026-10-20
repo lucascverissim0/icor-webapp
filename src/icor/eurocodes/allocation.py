@@ -128,19 +128,26 @@ def _covers(fact: CodeFact, body: str) -> bool:
     return body == ALL_BODIES or ALL_BODIES in fact.bodies or body in fact.bodies
 
 
-def _until(fact: CodeFact, successors: Iterable[CodeFact]) -> int | None:
+def _until(
+    fact: CodeFact, successors: Iterable[CodeFact], replacing: Iterable[CodeFact] = ()
+) -> int | None:
     """The last registration year a code can explain, for one of its bodies.
 
-    Stock built in a code's last production year is registered the next year,
-    so a stated last year extends one year. A successor's launch span is shared
-    with the code it replaces; when the stated last year falls inside that span
-    the run-out is already covered there, so the result does not depend on
-    whether the catalogue happens to state the end.
+    ``successors`` replace the code for this body; ``replacing`` replace it for
+    any body. Stock built in a code's last production year is registered the
+    next year, so a stated last year extends one year. A successor's launch span
+    is shared with the code it replaces; when the stated last year is the year a
+    successor certainly took over, the run-out is already covered there, so the
+    result does not depend on whether the catalogue happens to state the end —
+    nor on whether this body got a successor of its own or was dropped when the
+    rest of the line was replaced.
     """
 
     takeover = min((successor.first_year_latest for successor in successors), default=None)
     if fact.last_year is None:
         return takeover
+    if takeover is None:
+        takeover = min((other.first_year_latest for other in replacing), default=None)
     if takeover is not None and fact.last_year == takeover:
         return takeover
     return fact.last_year + 1
@@ -180,7 +187,9 @@ class FamilyTimeline:
             for fact in facts:
                 replacing = [other for other in facts if fact.code in other.replaces]
                 until = {
-                    body: _until(fact, [other for other in replacing if _covers(other, body)])
+                    body: _until(
+                        fact, [other for other in replacing if _covers(other, body)], replacing
+                    )
                     for body in fact.bodies
                 }
                 computed.append(_Window(fact, until))

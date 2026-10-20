@@ -215,6 +215,54 @@ def test_each_body_ends_when_its_own_successor_takes_over() -> None:
     assert _bolt_codes(decisions, 2016) == ("Q502", "Q503")
 
 
+def test_a_body_dropped_when_the_line_was_replaced_has_no_extra_run_out_year() -> None:
+    decisions = _bolt(
+        {
+            "code": "Q501",
+            "first_year": 2012,
+            "last_year": 2019,
+            "bodies": ["hatchback", "estate"],
+            "rows": [1],
+        },
+        {
+            "code": "Q502",
+            "first_year": 2019,
+            "bodies": ["hatchback"],
+            "replaces": ["Q501"],
+            "rows": [2],
+        },
+    )
+
+    # The estate ended with the line; its stock is no likelier than the hatch's.
+    assert _bolt_codes(decisions, 2019) == ("Q501", "Q502")
+    assert _bolt_codes(decisions, 2020) == ("Q502",)
+    assert _bolt_codes(decisions, 2019, "estate") == ("Q501",)
+
+
+def test_a_body_built_on_after_its_line_was_replaced_keeps_its_run_out() -> None:
+    decisions = _bolt(
+        {
+            "code": "Q501",
+            "first_year": 2012,
+            "last_year": 2021,
+            "bodies": ["hatchback", "estate"],
+            "rows": [1],
+        },
+        {
+            "code": "Q502",
+            "first_year": 2019,
+            "bodies": ["hatchback"],
+            "replaces": ["Q501"],
+            "rows": [2],
+        },
+    )
+
+    assert _bolt_codes(decisions, 2022) == ("Q501", "Q502")
+    # The last year is the code's, not one body's: a hatch may have been built on too.
+    assert _bolt_codes(decisions, 2022, "hatchback") == ("Q501", "Q502")
+    assert _bolt_codes(decisions, 2023) == ("Q502",)
+
+
 def test_a_code_replaced_for_some_bodies_must_end_for_the_others() -> None:
     with pytest.raises(ValueError, match=r"replaced but not for \['estate'\]"):
         _bolt(

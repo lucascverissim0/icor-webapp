@@ -21,8 +21,20 @@ A batch file `.local/private/eurocode/review/batches/<batch>.md` with:
   estate, `CPE` coupé, `CAB` convertible), drive side (`LHD`/`RHD`), years, Dutch notes
   (`VAN` before a year means "from", `TOT` means "until", `MET` "with", `ZONDER`
   "without", `REEKS` series). `sop`/`eop` are the catalogue's start/end columns;
-  `eop` is usually empty and never trusted alone. Truck and bus rows are already
-  removed; `conversion` (hearse, camper) and `non_european` rows must never be used.
+  `eop` is usually empty and never trusted alone. The `scope` column says what a
+  row covers:
+  - `truck` / `bus`: a make's commercial line (a brand qualified as trucks or
+    `VRACHTWAGEN`). It lists the make's vans and minibuses as well as trucks. The
+    registration data holds passenger cars only, so a passenger version of a van
+    (a people carrier built on a van, a minibus) takes its code from these rows.
+  - `non_european` from the **brand** (a brand line such as `<MAKE> USA`): vehicles
+    built for that market. When the vehicle sold in Europe is that same model and
+    no European row covers it (RHD rows are a strong sign it was sold in Europe),
+    its code applies; say so in `note`.
+  - `non_european` from the **description** (a US, North American, Japanese,
+    Australian or Russian market version, an import, JDM): a different vehicle
+    from the European one. Never use it.
+  - `conversion` (hearse, camper, ambulance): never use it.
 - **Identities to decide**: each with its forecast demand, demand by registration
   year, right-hand-drive share, top raw spellings and, where raw labels name a body,
   the units per body. An identity is the app's folded make|model; `raw|make|model`
