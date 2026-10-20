@@ -23,6 +23,11 @@ env/
 .local/evidence/
 .superpowers/
 
+# Customer workbooks dropped at the repository root (the repository is public).
+# Root-scoped so the committed data/passenger_car_data.xlsx is unaffected.
+/*.xlsx
+/*.xls
+
 # Planner web workspace artifacts
 web/node_modules/
 web/dist/

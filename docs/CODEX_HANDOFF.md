@@ -6336,3 +6336,97 @@ self-hosted because the CSP blocks font CDNs.
   `GH_CONFIG_DIR=$HOME/.config/gh-icor gh auth token`. For `gh` commands on this repo, use
   `GH_CONFIG_DIR=~/.config/gh-icor gh ...`. Branch pushed (`80edb9b..2f8b9c9`) and is in sync with origin.
 - No local server running. Next step: Lucas supplies the new client feedback.
+
+## 2026-10-20 — Eurocode mission started (Claude Code, Mac)
+
+Lucas supplied ICOR's vehicle catalogue. ICOR speaks in **Eurocodes**, not model names. A
+Eurocode 4 is a 4-character vehicle code identifying one windscreen family. Mission 1 is to
+translate the whole app into Eurocodes while keeping the model name beside each code, so a
+non-ICOR reader still understands. Mission 2, later, is a much better vehicle database, with
+the Eurocode catalogue as its backbone. The approved plan lives outside the repository at
+`~/.claude/plans/ok-i-have-added-golden-pond.md`.
+
+**Confidentiality rule (permanent).** The catalogue is ICOR proprietary data and the GitHub
+repository is public. The workbook, anything derived from it, aliases, mappings and review
+decisions live only in `.local/private/eurocode/`, which is git-ignored. Tracked files —
+including this handoff, commit messages, test names and fixtures — never quote a real code or
+catalogue string. Tests use fictional codes. Checks against the real catalogue run only as a
+private test that skips when the catalogue is absent.
+
+Decisions Lucas took (2026-10-20):
+
+1. The main ranking has **one row per Eurocode**, with brand, model and years beneath. The
+   car-model view stays available.
+2. A car-year that could be two Eurocodes (a launch/run-out year, or hatch vs estate under one
+   model name) is shown as a **range**: units certainly the code's own, plus units shared with
+   the other code. Shared demand is never split by guesswork, and the summary counts it once.
+3. **Claude reviews every match at maximum rigour**; ICOR is not asked to confirm. The label
+   must say so honestly: the codes are ICOR's, the name-to-code links are AI-reviewed, and
+   each link cites the catalogue rows it rests on.
+
+Catalogue facts, measured (counts only):
+
+- The workbook has 11,751 data rows, 4,596 distinct codes, and columns code / brand / model
+  text / end-of-production / start-of-production.
+- End of production is empty or zero in about 73% of rows and never later than 2022, so it is
+  unusable without inference.
+- 273 rows have start year 0 (mostly trucks). One row is entirely blank, and 18 have no model
+  text.
+- Brands carry trailing spaces and Dutch qualifiers. The catalogue also covers vans, trucks,
+  buses and non-European versions.
+- Model text mixes the family name, a generation or chassis marker, body type, drive side,
+  years and Dutch notes.
+- One code can cover several app models (a shared windscreen). 30 codes span rebadged brands,
+  and some codes exist only for right-hand drive.
+- Stored as `.local/private/eurocode/models-20261020.xlsx` (moved, not copied, from the repo
+  root). The sha256 and provenance are in the private `manifest.json` beside it.
+
+Feasibility, measured read-only against `snapshot-b05d20c2d34a9b0a340d`:
+
+- A crude make plus model-prefix match finds candidate codes for **78.6%** of registration
+  volume. The top 50 identities (40% of volume) match 49 out of 50; the top 1,000 (97% of
+  volume) match 80.3% of their volume.
+- The failures show what the real matcher must handle:
+  - prefix collisions between numeric model names;
+  - naming differences between catalogue and app (class/series wording, Dutch terms, Tesla
+    model names);
+  - junk identities left by query-time folding (a combined Opel/Vauxhall make, a repeated
+    VW make, BMW engine-trim models);
+  - body-variant identities.
+- `generation_entry.body_style` is NULL everywhere, so body ambiguity must stay visible. Drive
+  side can be derived from geography: GB, IE, CY and MT are right-hand drive.
+
+Step 0 done this session:
+
+- `.gitignore` gains root-scoped `/*.xlsx` and `/*.xls`. A test in
+  `tests/test_repository_security.py` (`test_customer_catalog_exports_cannot_be_committed`)
+  proves a root workbook and `.local/private/eurocode/*` are ignored, that
+  `data/passenger_car_data.xlsx` is not, and that no workbook is tracked at the root. The test
+  was observed red before the rule and green after.
+
+Mac resource check (read-only, nothing stopped):
+
+- CPU about 92% idle, 14 of 48 GB of RAM free, no swap, no thermal warning, 797 GB of disk
+  free, on battery.
+- The heaviest users were all PEBLE work: a detached Next dev server for worktree `t153`
+  (3.8 GB), four long-running PEBLE Claude sessions (about 1 GB each), VS Code (3.9 GB; one
+  renderer is the main live CPU and battery drain), Chrome (3 GB), and two PEBLE Postgres
+  clusters.
+- The PEBLE merge desk session asked that its worktrees and databases (including `t153`) not
+  be touched. This session never touches anything outside `~/ICOR`.
+
+Next, per the plan:
+
+1. Catalogue parser and private JSON artifact (`src/icor/eurocodes/catalog.py`,
+   `scripts/ingest_eurocode_catalog.py`).
+2. Pure matcher keyed on folded identity × year × drive side.
+3. Proposal, two-reviewer maximum-rigour review, and coverage report (target: at least 99% of
+   forecast volume reviewed).
+4. Runtime loading and display.
+5. UI.
+6. Search by code.
+7. `group_by=eurocode` as the default view.
+8. Close-out.
+
+No push, deploy or client-snapshot change without Lucas's approval. No local server is
+running.

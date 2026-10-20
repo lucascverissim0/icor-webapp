@@ -75,6 +75,24 @@ def test_runtime_evidence_and_candidate_snapshots_are_ignored() -> None:
     )
 
 
+def test_customer_catalog_exports_cannot_be_committed() -> None:
+    # The repository is public. A customer workbook dropped at the root, and
+    # everything derived from it under .local/private, must stay out of Git.
+    assert git_check_ignore(ROOT, "models.xlsx")
+    assert git_check_ignore(ROOT, ".local/private/eurocode/catalog.json")
+    # The ignore rule is root-scoped: the committed legacy workbook is unaffected.
+    assert not git_check_ignore(ROOT, "data/passenger_car_data.xlsx")
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.xlsx", "*.xls"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    ).stdout.split(b"\0")
+    root_workbooks = [path for path in tracked if path and b"/" not in path]
+    assert root_workbooks == []
+
+
 def test_fictional_source_fixture_is_clear_to_repository_credential_scanner() -> None:
     findings = credential_shape_violations(
         ROOT, ("tests/fixtures/sources/sample-registration.csv",)
