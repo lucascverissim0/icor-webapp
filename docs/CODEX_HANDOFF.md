@@ -6534,3 +6534,83 @@ waves by demand. After the pilot:
 5. re-check 100% of the top 200 families and 10% of the rest;
 6. write the private golden test;
 7. continue with steps 4–8.
+
+### Waves 1–2 adjudicated; model-range labels found and handled (2026-10-20, later)
+
+**13 batches decided** (private `review/decided/<batch>.json`, each with an `adjudication`
+list giving every choice and why). Unit agreement between the blind reviewers, measured at
+spelling level: cupra+seat 99.98%, bmw-3-4 94.2%, peugeot 99.98%, renault 98%, toyota 99.9%,
+audi 84%, volkswagen 90%, skoda 99.9%, hyundai 97%, ford 96%, opel 95%, mixed-38 97%,
+ds+citroen 97%. Most of the gap in audi, volkswagen and ford was family-key spelling or
+derivative-family choices, not codes. Ford was re-reviewed after the batch files gained the
+commercial-line rows. Excluding those rows had been my error: they carry the passenger
+versions of vans.
+
+**Main finding: model-range labels.** Some publishers label a whole model range with the
+bare model name. Distinct models with different windscreens then hide under one label, and
+a single code there would be a false certainty. Confirmed examples (model names only):
+- GB: Yaris also counts the Yaris Cross, Ioniq after 2022 counts the Ioniq 5/6/9, Mustang
+  counts the Mach-E, Seal counts the Seal U, Dolphin counts the Dolphin Surf, Q3 counts the
+  Q3 Sportback, Q8 counts the Q8 e-tron, Mégane counts the Mégane E-Tech, Xsara counts the
+  Xsara Picasso, and C5 continues as the C5 Aircross/C5 X.
+- ES: C3 and C4 count the whole Picasso/Aircross/Cactus range; Verso counts the Verso-S.
+- PT/RO: Mégane counts the Scénic.
+- Several markets: Golf counts the Golf Sportsvan.
+
+Correction to an earlier finding: part of the "Mégane forecast after production ended" was
+in fact the Mégane E-Tech under GB/PL/BG/HR/SI range labels. That demand is now covered. The
+Focus forecast for 2027–28 (4,570 units, production ended November 2025) still stays outside.
+
+**Allocation and tooling changes (commit `ffbf0f2`, local only):**
+- An identity decision may carry `variants`: a regex on the raw label that routes those
+  spellings to another family and body, or leaves them unassigned with a non-mapped status.
+  A variant may be limited to `geographies`. Any `family` may be a list: the label may be
+  any of those models, and their codes are pooled, so the years stay shared.
+- `allocate(..., raw_model=...)` selects the variant and takes the body from the raw label.
+- Generation lineage across bodies: a code that covers every body stays shared with a
+  body-specific successor during the launch span. Before, the named body silently dropped it
+  (a false certainty found in the Škoda review).
+- Review demand is now kept per raw spelling (`demand.json` ≈ 9.5 MB). `prepare` still
+  selects the same 1,590 identities, and the batch index is byte-identical.
+- Batch files show each spelling's dominant market and flag "labels in <market> probably
+  include <sibling>". The detector is `lumped_labels`: a qualified sibling that holds ≥ 10%
+  of the pair elsewhere but under a fifth of that share in one market.
+- `validate` now reports `lumped_labels`: flagged markets whose units still miss a sibling's
+  codes in the sibling's years. It also reports `units_per_variant`.
+- The brief's minor-body threshold is now about a tenth, down from a fifth. The brief also
+  documents variants, pooled families and model-range labels.
+
+**Re-check of every decided batch with the detector.** Pooled market variants were added
+where a market's label hides a sibling. The residuals still reported are accepted:
+- audi A3 cabriolet in GB: a minor body by rule;
+- a handful of transition-year differences between body-specific and unnamed allocations,
+  each under 250 units;
+- a3/rs/s6 cases where the label is already unassigned or provably specific.
+
+Adjudication scripts are in the private `review/adjudication/`. To regenerate a batch, run
+`decide_<batch>.py` and then `apply_lumped.py <batch>`. The decide script rewrites the file,
+so the lumped-label variants must be reapplied after it.
+
+**Verification:** `uv run pytest tests/eurocodes -q` gives 64 passed. Ruff check and format
+are clean on the eurocode sources, tests and scripts. The leak check found no real code or
+catalogue description in the tracked diff; the only code-shaped tokens are years. All 13
+decided files validate with no problems.
+
+**In progress:** wave 3, two blind reviewers each, on kia, fiat, nissan, mercedes-benz,
+volvo, bmw-x, mercedes-compact and suzuki. 21 batches remain after it: mixed-40, mini, mazda,
+bmw-1-2, mixed-42, mg, land_rover, bmw, honda, mitsubishi, porsche, mixed-41, alfa_romeo,
+mercedes-vans, lexus, smart, jaguar, chevrolet, mixed-39, ssangyong+kgm, dr.
+
+**Next:**
+1. Adjudicate wave 3 with `compare`, `validate` and `lumped_labels`.
+2. Run waves 4–6.
+3. `merge` and `coverage` (≥ 99%).
+4. Re-check 100% of the top 200 families and 10% of the rest.
+5. Write the private golden test.
+6. Plan steps 4–8.
+
+Still open for Lucas:
+- a private backup location for `.local/private/eurocode/`, which exists only on this Mac;
+- whether the client release may carry the private mapping.
+
+No local server is running.
