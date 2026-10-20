@@ -70,10 +70,10 @@ Write one JSON file, `.local/private/eurocode/review/out/<batch>.<reviewer>.json
 | `code` | A code that appears in the batch's catalogue rows. Never invent or alter one. |
 | `rows` | The `r<row>` numbers (as integers) that support this code — only rows of this code. |
 | `first_year` | The earliest year the vehicle can be registered: the earliest start the cited rows give (the `sop` column or a start year in the text). |
-| `first_year_latest` | Only when the cited rows disagree on the start: the latest such start, the year from which the code is certainly in volume. Omit otherwise. |
-| `last_year` | The last production year, only when a cited row states it or it is beyond doubt (the model was discontinued with no successor in this family). Otherwise omit it and let `replaces` end the code. |
+| `first_year_latest` | Only when the family's mainstream bodies reached volume in different years (an estate launched a year after the saloon) or the rows disagree on the launch: the year from which the code is certainly in volume. Later re-listings of the same bodies, equipment variants (a panoramic roof, a sensor bracket) and facelift rows of the same code are not later launches. Omit otherwise; never add it only to keep run-out stock shared, because the launch span already covers that. |
+| `last_year` | The last production year, when a cited row states it or it is beyond doubt — always for a model discontinued with no successor in this family. Otherwise omit it and let `replaces` end the code. Never leave a code open, or extend it, to absorb a few stray registrations after production ended: leave those outside and say so in `why`. |
 | `bodies` | `["all"]` when the code serves every body of the family, or the bodies it serves: `hatchback`, `saloon`, `estate`, `coupe`, `convertible`, `suv`, `mpv`, `van`, `pickup`. |
-| `role` | `main` (default) for mainstream bodies; `minor` for a niche body with its own code (convertible, van, pickup, a coupé of a hatch/saloon family). A minor code receives demand only from registrations whose label names that body. |
+| `role` | `main` (default) for mainstream bodies; `minor` for a niche body with its own code (convertible, van, pickup, a coupé of a hatch/saloon family). A minor code receives demand only from registrations whose label names that body, so keep a body `main` when it is a substantial share of the family (about a fifth or more), as convertibles are for some performance models. |
 | `drive` | `both` (default), or `LHD`/`RHD` when the code exists for one drive side only. When a generation has an RHD-specific code, its unmarked counterpart is `LHD`. |
 | `replaces` | Codes of the same family that this code succeeds, for the bodies it covers. |
 | `label` | A short human label for the code, such as model and generation. |
@@ -94,8 +94,11 @@ How the software turns facts into registration years (per drive side):
   otherwise.
 - **Without a body in the label:** every active `main` code applies, so two
   mainstream bodies with different codes are shared, never split.
-- **With a body:** codes that state the body win; otherwise `all`-body codes apply;
-  otherwise the main codes apply.
+- **With a body:** codes that state the body win; otherwise `all`-body codes apply.
+  If the body has its own codes in this family but none that year (a later
+  cabriolet the catalogue has no code for), it gets no code rather than another
+  body's. A body the family never distinguishes falls back to the main codes. So
+  list each code's bodies exactly; never stretch a code to a body it does not fit.
 
 A year that two codes can explain is shown as a range: certain units for a code,
 plus "up to X shared". That is honest and acceptable. A single code where two were
@@ -114,7 +117,14 @@ drive sides.
 - **Prefix traps:** a model named `208` is not `2008`; a model named `C3` is not
   `C3 PICASSO` or `C3 AIRCROSS`. Match whole names.
 - A code shared by two models (for example one windscreen for a hatchback and a
-  related SUV) belongs to both families.
+  related SUV) belongs to both families. A row naming two models under a shared
+  code does not extend a model past its own production: when one of them had
+  ended, use its real years in its family.
+- A performance or derivative model (an M, RS or AMG model, a GT body) maps to
+  the base family when it carries the same codes over the same years and bodies.
+  When its bodies or years differ (a model sold only as a coupé, launched years
+  after the base), give it its own family with its own production years: its
+  `first_year` and `last_year` are the derivative's, not the catalogue code's.
 - A renamed model that continued the same line (an identity spelled as both
   names) may be one family with the codes of both names in succession.
 - Rebadged twins: the catalogue may list one code under several brands. Use the

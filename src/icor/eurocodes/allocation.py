@@ -192,8 +192,11 @@ class FamilyTimeline:
 
         Without a body, only the family's main codes apply: a niche body (a
         cabriolet with its own code) gets demand only from registrations that
-        name it. With a body, codes stating that body win; codes covering every
-        body come next; otherwise the family's main codes apply.
+        name it. With a body, codes stating that body win and codes covering
+        every body come next. A body that has its own codes in this family but
+        none in that year has no known code: lending it another body's code
+        would be a false certainty. A body the family never distinguishes falls
+        back to the main codes.
         """
 
         windows = self._windows[drive]
@@ -208,6 +211,8 @@ class FamilyTimeline:
             ]
             if generic:
                 return tuple(sorted(fact.code for fact in generic))
+            if any(body in w.fact.bodies for w in windows):
+                return ()
         return tuple(
             sorted(w.fact.code for w in windows if w.fact.role == "main" and w.active(year, None))
         )

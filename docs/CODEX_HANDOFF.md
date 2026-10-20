@@ -6506,8 +6506,27 @@ Private files under `.local/private/eurocode/`:
 Verification: `uv run pytest tests/eurocodes -q` gives 52 passed. `uv run ruff check
 src/icor/eurocodes tests/eurocodes scripts/eurocode_review.py` is clean.
 
-**In progress.** A pilot of two blind reviewers each on `cupra+seat` and `bmw-3-4` tests the
-brief before the remaining 40 batches run. After the pilot:
+**Pilot result (adjudicated, private `review/decided/`).**
+- `cupra+seat`: 99.98% unit agreement.
+- `bmw-3-4`: 94.2% unit agreement. The differences were changeover years and whether M3/M4
+  are their own families.
+
+Both reviewers kept a discontinued model's code open to absorb stray registrations; I
+corrected that. Lessons now in the brief:
+- re-listing rows are not later launches;
+- derivative families (M, RS, AMG) with different bodies or years get their own production
+  years;
+- discontinued models state their last year;
+- a body that is a substantial share of its family stays `main`.
+
+Allocation fix from the pilot: a named body that has its own line in a family but no code
+that year (a later cabriolet the catalogue lacks) now gets no code. Before, it was lent the
+coupé's main code, a false certainty. Test:
+`test_a_body_whose_own_line_has_no_code_that_year_gets_none`. 53 eurocode tests pass.
+
+**In progress.** Wave 1, two blind reviewers each, is running on `volkswagen`, `renault`,
+`peugeot`, `toyota`, `ford` and `audi` (about 39% of demand). The remaining batches follow in
+waves by demand. After the pilot:
 1. compare and adjudicate the pilot batches;
 2. refine the brief;
 3. run every batch with reviewers A and B, then compare, adjudicate and merge;

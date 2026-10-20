@@ -122,6 +122,34 @@ def test_a_niche_body_gets_demand_only_from_registrations_that_name_it() -> None
     assert _codes(decisions, 2021, body="convertible") == ("Q105",)
 
 
+def test_a_body_whose_own_line_has_no_code_that_year_gets_none() -> None:
+    decisions = _bolt(
+        {"code": "Q501", "first_year": 2010, "bodies": ["coupe"], "rows": [1]},
+        {
+            "code": "Q502",
+            "first_year": 2010,
+            "last_year": 2015,
+            "bodies": ["convertible"],
+            "role": "minor",
+            "rows": [2],
+        },
+        {
+            "code": "Q503",
+            "first_year": 2020,
+            "bodies": ["coupe"],
+            "replaces": ["Q501"],
+            "rows": [3],
+        },
+    )
+
+    # The next cabriolet has no catalogue code: never lend it the coupe's.
+    assert _bolt_codes(decisions, 2014, "convertible") == ("Q502",)
+    assert _bolt_codes(decisions, 2022, "convertible") == ()
+    assert decisions.allocate("zephyr|bolt", 2022, "NL", "convertible").status == "outside"
+    # A body this family never distinguishes still reads as the main codes.
+    assert _bolt_codes(decisions, 2022, "estate") == ("Q503",)
+
+
 def test_a_code_for_every_body_takes_over_and_runs_open_ended() -> None:
     decisions = _decisions()
 
