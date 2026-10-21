@@ -6927,11 +6927,79 @@ skipping.
 2. Whether the client release may carry the private mapping.
 3. The EQA, which no catalogue row names (it stays not-in-catalogue).
 
-**Next:** plan step 4.
-1. Annotate opportunity rows with Eurocodes in `SnapshotOpportunityRepository._row` and
-   `OpportunityService._row`, passing `canonical_vehicle.model` as `raw_model`.
-2. Add the API fields and page meta, then regenerate the OpenAPI types.
-3. Add the score-invariance test.
-4. Then steps 5–8: UI, search, `group_by=eurocode`, close-out.
+**Next:** plan step 4 (done the same day; see the next section).
+
+### Step 4 complete: the API serves Eurocodes (2026-10-21, commits `b6b4559`, `6a3f214`)
+
+**What rows carry.**
+- **Allocation:** model and model-year opportunity rows carry `eurocodes`. Every registration
+  cell (vehicle spelling × market × registration year, from cohort attribution) is allocated on
+  its own, through the same identity keys and raw model label the review used.
+- **Per code:** `certain_units`, `shared_units` (never split), `shared_with`,
+  `shared_with_uncoded`, and the code's family-local label and registration years.
+- **Per row:** units by outcome (single, shared, outside, unassignable, unreviewed). These
+  always sum to the row's base units; cohort attribution reconciles each estimate to its rounded
+  total.
+- **Not annotated:**
+  - brand rows, which span too many codes;
+  - the reviewed-only ranking, which nothing in the app uses.
+- **Caching:** breakdowns are cached per grouping, market and horizon. Search text names whole
+  groups, so it is not part of the key.
+- **Page flag:** pages report `eurocodes_loaded`.
+
+**Vehicle forecasts.** Each market (EU27 included) lists its registrations of the selection by
+Eurocode. Estimated registrations are fractional (8.5% of cohorts), so breakdowns accumulate
+exactly and round once by largest remainder, and always equal the market's rounded
+registrations.
+
+**Status.** `GET /api/v1/eurocodes/status` reports:
+- whether codes are loaded;
+- the catalogue sha256 and the decisions' snapshot;
+- warnings when the snapshot or identity rules differ from the reviewed ones (new
+  `identity_rules_sha256()` in `vehicle_identity.py`);
+- the orphaned-identity count;
+- coverage per horizon, measured over every forecast cell by a background thread at boot.
+
+**Loading policy (`create_app`).**
+- `ICOR_EUROCODE_DIR` names a folder holding `catalog.json` and `decisions.json`; a folder named
+  this way that fails to load stops startup.
+- Without it, only a local service on the active snapshot (no injected repository, no
+  `snapshot_root`) falls back to `.local/private/eurocode/`. A broken fallback is reported in
+  the status, not served.
+- **Deviation from the plan:** the client release never falls back, and does not yet *require*
+  the map. Whether it may carry the private mapping is still Lucas's decision.
+- **Tests:** `icor.eurocodes.demo` is a fictional map (Q codes, the demo data's invented
+  brands); `write_demo_eurocodes()` writes it for `ICOR_EUROCODE_DIR`.
+
+**Verified on the real snapshot** (`create_app()` with the private folder; output checked
+without printing codes):
+- **Reconciliation:** every row's breakdown equals its base units on model pages, model-year
+  pages, a GB filter and a text search. Every vehicle-forecast market equals its registrations
+  (Golf 2021, Sandero 2017, Yaris 2015).
+- **Status:** 0 orphaned identities and no warnings.
+- **Coverage at horizon 2028** equals the review exactly: single 80.50%, shared 17.01%, outside
+  0.71%, unassignable 0.78%, unreviewed 1.00%.
+- **Coverage at horizon 2031:** outside 2.3%, from registration years beyond the reviewed
+  successors.
+- **Golf rows** match the reviewed facts: the 2021 launch year shared, the GB Sportsvan pool,
+  2027 single.
+- **Cost:**
+  - Eurocodes add 0.4–2.3 s to an uncached ranking page, against 6–9 s for the ranking itself
+    warm (cold first page 14–20 s, which existed before).
+  - Vehicle forecasts are unaffected.
+
+**Gates:**
+- `uv run pytest -q`: 1067 passed, 7 skipped, 4 xfailed;
+- CI ruff list: clean;
+- `npm run openapi:generate`, then `typecheck`, `lint` and `npm test -- --run`: 94 passed.
+
+**Next:** plan step 5 (UI).
+1. Ranking rows show the Eurocode chip(s) first: "certain X · up to +Y shared with …",
+   unassigned units marked.
+2. A detail-page breakdown, a vehicle-forecast market breakdown, and a status KPI or "Eurocodes
+   not loaded" state.
+3. Extend `scripts/e2e_app.py` (in-memory demo repository) with
+   `eurocodes=demo_eurocodes()` and `E2EVehicleForecasts` with fictional breakdowns.
+4. Vitest and Playwright coverage.
 
 No server or long-running process is active.
