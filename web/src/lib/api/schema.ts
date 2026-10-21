@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/eurocodes/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eurocode Status */
+        get: operations["eurocode_status_api_v1_eurocodes_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evidence/observations": {
         parameters: {
             query?: never;
@@ -440,6 +457,87 @@ export interface components {
             /** Rain Light Sensor */
             rain_light_sensor: boolean | null;
         };
+        /**
+         * EurocodeBreakdownResponse
+         * @description A row's base units by Eurocode outcome; each unit is counted once.
+         */
+        EurocodeBreakdownResponse: {
+            /** Codes */
+            codes: components["schemas"]["EurocodeShareResponse"][];
+            /** Outside Units */
+            outside_units: number;
+            /** Shared Units */
+            shared_units: number;
+            /** Single Units */
+            single_units: number;
+            /** Unassignable Units */
+            unassignable_units: number;
+            /** Unreviewed Units */
+            unreviewed_units: number;
+        };
+        /** EurocodeCoverageResponse */
+        EurocodeCoverageResponse: {
+            /** Horizon */
+            horizon: number;
+            /** Outside Units */
+            outside_units: number;
+            /** Shared Units */
+            shared_units: number;
+            /** Shared With Uncoded Units */
+            shared_with_uncoded_units: number;
+            /** Single Units */
+            single_units: number;
+            /** Total Units */
+            total_units: number;
+            /** Unassignable Units */
+            unassignable_units: number;
+            /** Unreviewed Units */
+            unreviewed_units: number;
+        };
+        /**
+         * EurocodeShareResponse
+         * @description One Eurocode's part of a row: units certainly its own, and units it may share.
+         */
+        EurocodeShareResponse: {
+            /** Certain Units */
+            certain_units: number;
+            /** Code */
+            code: string;
+            /** Drive */
+            drive: string;
+            /** First Year */
+            first_year: number;
+            /** Label */
+            label: string;
+            /** Last Year */
+            last_year: number | null;
+            /** Shared Units */
+            shared_units: number;
+            /** Shared With */
+            shared_with: string[];
+            /** Shared With Uncoded */
+            shared_with_uncoded: boolean;
+        };
+        /**
+         * EurocodeStatusResponse
+         * @description Whether Eurocodes are served, against which catalogue, and how much they cover.
+         */
+        EurocodeStatusResponse: {
+            /** Catalogue Sha256 */
+            catalogue_sha256: string | null;
+            /** Coverage */
+            coverage: components["schemas"]["EurocodeCoverageResponse"][];
+            /** Decisions Snapshot Id */
+            decisions_snapshot_id: string | null;
+            /** Loaded */
+            loaded: boolean;
+            /** Orphaned Identities */
+            orphaned_identities: number;
+            /** Reviewed Identities */
+            reviewed_identities: number;
+            /** Warnings */
+            warnings: string[];
+        };
         /** EuropeanCoverageResponse */
         EuropeanCoverageResponse: {
             /** Contributing Markets */
@@ -751,6 +849,11 @@ export interface components {
              * @default 0
              */
             demand_population: number;
+            /**
+             * Eurocodes Loaded
+             * @default false
+             */
+            eurocodes_loaded: boolean;
             /** Integrity Warnings */
             integrity_warnings: string[];
             /** Items */
@@ -782,6 +885,7 @@ export interface components {
             /** Data Version */
             data_version: string;
             demand: components["schemas"]["DemandRangeResponse"];
+            eurocodes?: components["schemas"]["EurocodeBreakdownResponse"] | null;
             evidence_status: components["schemas"]["EvidenceStatus"];
             /** Exact Covered Base Units */
             exact_covered_base_units: number;
@@ -1395,6 +1499,35 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    eurocode_status_api_v1_eurocodes_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EurocodeStatusResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -88,7 +88,14 @@ class EurocodeMap:
         self.decisions = decisions
         self.catalogue_sha256 = catalogue_sha256
         self._catalogue_codes = frozenset(catalogue_codes)
+        self._family_summaries: dict[tuple[str, str], CodeSummary] = {}
         self._summaries = self._summarise()
+
+    @classmethod
+    def from_directory(cls, directory: Path) -> EurocodeMap:
+        """Load the private folder's ``catalog.json`` and ``decisions.json``."""
+
+        return cls.from_paths(directory / "catalog.json", directory / "decisions.json")
 
     @classmethod
     def from_paths(cls, catalogue_path: Path, decisions_path: Path) -> EurocodeMap:
@@ -119,6 +126,17 @@ class EurocodeMap:
                     labels[fact.code].append(label)
                 families.setdefault(fact.code, []).append(key)
                 first, last = family_spans[fact.code]
+                # A family may state one code twice (once per drive side).
+                known = self._family_summaries.get((key, fact.code))
+                self._family_summaries[(key, fact.code)] = CodeSummary(
+                    code=fact.code,
+                    label=known.label if known else label,
+                    families=(key,),
+                    first_year=first,
+                    last_year=last,
+                    bodies=tuple(sorted({*fact.bodies, *(known.bodies if known else ())})),
+                    drive=fact.drive if known is None or known.drive == fact.drive else "both",
+                )
                 if fact.code in spans:
                     known_first, known_last = spans[fact.code]
                     first = min(first, known_first)
@@ -147,6 +165,20 @@ class EurocodeMap:
 
     def summaries(self) -> Mapping[str, CodeSummary]:
         return self._summaries
+
+    def describe(self, code: str, families: Iterable[str]) -> CodeSummary | None:
+        """A code as one of these families knows it, else across every family.
+
+        A shared windscreen is one code under several families (a hatchback
+        and the SUV built on it); a registration routed to one of them reads
+        best with that family's label and registration years.
+        """
+
+        for family in families:
+            summary = self._family_summaries.get((family, code))
+            if summary is not None:
+                return summary
+        return self._summaries.get(code)
 
     def allocate(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import shutil
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -22,6 +23,10 @@ from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
 from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
+from icor.eurocodes.catalog import parse_rows
+from icor.eurocodes.runtime import EurocodeMap
+from icor.evidence.vehicle_identity import identity_rules_sha256
+from icor.infrastructure.snapshot_eurocodes import measure
 from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
 from icor.infrastructure.snapshot_planner_repository import (
     SnapshotPlannerRepository,
@@ -968,3 +973,195 @@ def test_the_universe_percentile_matches_the_single_value_definition(
             continue
         assert group.percentile == demand_percentile_rank(ranked, group.base_units)
         assert group.rank == sum(1 for item in ranked if item > group.base_units) + 1
+
+
+def _fictional_eurocodes(*identities: str) -> EurocodeMap:
+    """Fictional codes (`Q` prefix, unused by the real catalogue) for the fixture's Golf.
+
+    The second generation launches in 2021, so that year is shared by both.
+    """
+
+    catalogue = parse_rows(
+        (
+            ("Q601", "VOLKSWAGEN", "GOLF 5D HBK 2010-", None, 2010),
+            ("Q602", "VOLKSWAGEN", "GOLF 5D HBK 2021-", None, 2021),
+        ),
+        make_aliases={},
+        source_sha256="c" * 64,
+    )
+    document = {
+        "format": "icor-eurocode-decisions",
+        "version": 1,
+        "metadata": {
+            "catalogue_sha256": "c" * 64,
+            "snapshot_id": "snapshot-test",
+            "identity_rules_sha256": identity_rules_sha256(),
+        },
+        "families": {
+            "volkswagen/golf": {
+                "label": "Volkswagen Golf",
+                "make": "volkswagen",
+                "codes": [
+                    {"code": "Q601", "label": "Golf A", "first_year": 2010, "rows": [2]},
+                    {
+                        "code": "Q602",
+                        "label": "Golf B",
+                        "first_year": 2021,
+                        "replaces": ["Q601"],
+                        "rows": [3],
+                    },
+                ],
+            }
+        },
+        "identities": {
+            identity: {"family": "volkswagen/golf"}
+            for identity in (identities or ("volkswagen|golf",))
+        },
+    }
+    return EurocodeMap.from_documents(catalogue, document)
+
+
+def _with_golf_2021_cohort(sqlite_repository: SnapshotPlannerRepository) -> None:
+    """Golf: 10 units registered in 2020 and 3 in 2021; Polo: 8 in 2020."""
+
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "INSERT INTO cohort_estimate VALUES "
+            "('cohort-golf-2021', 2021, '20', '30', '40', 'survival-v1')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_input VALUES ('opportunity-golf', 'cohort-golf-2021', 1)"
+        )
+        connection.execute(
+            "CREATE TABLE opportunity_cohort_attribution AS "
+            f"WITH {_cohort_attribution_ctes('1 = 1')} "
+            "SELECT opportunity_id, cohort_id, registration_cohort_year, "
+            "downside_units, base_units, upside_units FROM cohort_attribution"
+        )
+
+
+def test_rows_carry_the_eurocodes_their_registrations_may_have(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    _with_golf_2021_cohort(sqlite_repository)
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+
+    by_year = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=10)
+    )
+    rows = {(row.model, row.model_year): row for row in by_year.items}
+    golf_2020 = rows[("Golf", 2020)].eurocodes
+    golf_2021 = rows[("Golf", 2021)].eurocodes
+    polo_2020 = rows[("Polo", 2020)].eurocodes
+    assert by_year.eurocodes_loaded
+    assert golf_2020 is not None and golf_2021 is not None and polo_2020 is not None
+    assert [(s.code, s.certain_units, s.shared_units) for s in golf_2020.codes] == [
+        ("Q601", 10, 0)
+    ]
+    assert [(s.code, s.shared_units, s.shared_with) for s in golf_2021.codes] == [
+        ("Q601", 3, ("Q602",)),
+        ("Q602", 3, ("Q601",)),
+    ]
+    assert golf_2020.codes[0].label == "Volkswagen Golf A"
+    assert (polo_2020.codes, polo_2020.unreviewed_units) == ((), 8)
+
+    by_model = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL))
+    for row in by_model.items:
+        assert row.eurocodes is not None
+        assert row.eurocodes.total_units == row.demand.base_units
+    golf = next(row for row in by_model.items if row.model == "Golf").eurocodes
+    assert golf is not None
+    assert [(s.code, s.certain_units, s.shared_units) for s in golf.codes] == [
+        ("Q601", 10, 3),
+        ("Q602", 0, 3),
+    ]
+
+    detail = repository.get(rows[("Golf", 2021)].group_id, OpportunityQuery(
+        group_by=OpportunityGroupBy.MODEL_YEAR
+    ))
+    assert detail is not None and detail.eurocodes == golf_2021
+
+    brands = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.BRAND))
+    assert all(row.eurocodes is None for row in brands.items)
+
+
+def test_eurocodes_never_move_a_score_or_a_unit(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    """The same rankings with Eurocodes loaded or not, on inline attribution."""
+
+    plain = _opportunity_repository(sqlite_repository, tmp_path)
+    annotated = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "annotated-coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+    assert annotated._materialized_attribution is False
+
+    for group_by in OpportunityGroupBy:
+        for query in (
+            OpportunityQuery(group_by=group_by),
+            OpportunityQuery(group_by=group_by, markets=("DE",), text="golf"),
+            OpportunityQuery(group_by=group_by, sort=OpportunitySort.VEHICLE),
+        ):
+            expected = plain.search(query)
+            actual = annotated.search(query)
+            assert replace(
+                actual,
+                items=tuple(replace(row, eurocodes=None) for row in actual.items),
+                eurocodes_loaded=False,
+            ) == expected, query
+            for row in actual.items:
+                if row.eurocodes is not None:
+                    assert row.eurocodes.total_units == row.demand.base_units, query
+
+
+def test_a_market_filter_narrows_the_eurocode_units_with_the_row(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+
+    page = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL, markets=("FR",))
+    )
+    assert page.items == ()
+    whole = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL))
+    golf = next(row for row in whole.items if row.model == "Golf").eurocodes
+    assert golf is not None and golf.single_units == 13
+
+
+def test_eurocode_status_measures_every_forecast_cell(
+    sqlite_repository: SnapshotPlannerRepository,
+) -> None:
+    _with_golf_2021_cohort(sqlite_repository)
+    path = sqlite_repository._ledger.path
+
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        status = measure(
+            _fictional_eurocodes("volkswagen|golf", "volkswagen|retired"),
+            connection,
+            "snapshot-test",
+        )
+
+    (coverage,) = status.coverage
+    assert coverage.horizon == 2028
+    assert (
+        coverage.total_units,
+        coverage.single_units,
+        coverage.shared_units,
+        coverage.unreviewed_units,
+    ) == (21, 10, 3, 8)
+    assert status.state.loaded
+    assert status.state.orphaned_identities == 1
+    assert status.state.warnings == ("1 reviewed identities no longer exist in this snapshot.",)

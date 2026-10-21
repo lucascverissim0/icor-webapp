@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from icor.api.completeness import router as completeness_router
+from icor.api.eurocodes import router as eurocode_router
 from icor.api.evidence import router as evidence_router
 from icor.api.exports import router as export_router
 from icor.api.opportunities import router as opportunity_router
@@ -30,6 +31,8 @@ from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandScoreV2
 from icor.application.registrations import RegistrationService
 from icor.application.worked_models import IcorWorkedModelCatalog
+from icor.eurocodes.runtime import NOT_LOADED, EurocodeMap, EurocodeState
+from icor.infrastructure.snapshot_eurocodes import EurocodeStatus, SnapshotEurocodeStatus
 from icor.infrastructure.snapshot_opportunity_repository import SnapshotOpportunityRepository
 from icor.infrastructure.snapshot_planner_repository import SnapshotPlannerRepository
 from icor.infrastructure.snapshot_store import (
@@ -47,6 +50,43 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WEB_ORIGIN = "http://127.0.0.1:5173"
 DEFAULT_COVERAGE_DB = ROOT / ".local" / "production-coverage.sqlite3"
 DEFAULT_EVIDENCE_ROOT = ROOT / ".local" / "evidence"
+DEFAULT_EUROCODE_DIR = ROOT / ".local" / "private" / "eurocode"
+
+
+class _FixedEurocodeStatus:
+    """A status known without measuring: nothing loaded, or no snapshot to measure."""
+
+    def __init__(self, status: EurocodeStatus) -> None:
+        self._status = status
+
+    def status(self) -> EurocodeStatus:
+        return self._status
+
+
+def _configured_eurocodes(*, local_active_snapshot: bool) -> tuple[EurocodeMap | None, str | None]:
+    """The private Eurocode map this process serves, and why none is, if none is.
+
+    ``ICOR_EUROCODE_DIR`` names the folder explicitly, and a folder named that
+    way that cannot be loaded stops the process rather than serving rows
+    without codes. Without it, only a local service reading the active snapshot
+    falls back to the private folder in this checkout, when present; the client
+    release and services composed with their own sources never do, so what
+    they serve does not depend on which machine they run on.
+    """
+
+    configured = os.getenv("ICOR_EUROCODE_DIR")
+    if configured:
+        return EurocodeMap.from_directory(Path(configured)), None
+    if not local_active_snapshot or not (
+        (DEFAULT_EUROCODE_DIR / "catalog.json").is_file()
+        and (DEFAULT_EUROCODE_DIR / "decisions.json").is_file()
+    ):
+        return None, None
+    try:
+        return EurocodeMap.from_directory(DEFAULT_EUROCODE_DIR), None
+    except (OSError, ValueError, KeyError) as error:
+        LOGGER.warning("Eurocodes not loaded error_type=%s", type(error).__name__)
+        return None, f"The private Eurocode files could not be loaded ({type(error).__name__})."
 
 
 def _problem(request: Request, *, code: str, message: str, status_code: int) -> JSONResponse:
@@ -76,6 +116,7 @@ def create_app(
     snapshot_root: Path | None = None,
     vehicle_forecast_service=None,
     client_release: bool = False,
+    eurocodes: EurocodeMap | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
@@ -112,6 +153,16 @@ def create_app(
             snapshot_manifest = None
             snapshot_ledger = None
             LOGGER.warning("Planning snapshot unavailable error_type=%s", type(error).__name__)
+    eurocode_warning = None
+    if eurocodes is None:
+        eurocodes, eurocode_warning = _configured_eurocodes(
+            local_active_snapshot=(
+                not client_release
+                and repository is None
+                and snapshot_root is None
+                and snapshot_manifest is not None
+            )
+        )
     selected_coverage_repository = coverage_repository or SQLiteCoverageRepository(
         Path(os.getenv("ICOR_COVERAGE_DB", DEFAULT_COVERAGE_DB))
     )
@@ -134,6 +185,7 @@ def create_app(
                 ROOT / "data" / "icor_supported_models.txt"
             ),
             model_year_catalog=client_release,
+            eurocodes=eurocodes,
         )
         if client_release:
             # Grouping the whole snapshot is what makes a score comparable
@@ -153,6 +205,7 @@ def create_app(
             selected_repository,
             selected_coverage_repository,
             DemandScoreV2(),
+            eurocodes=eurocodes,
         )
     else:
         app.state.opportunity_service = None
@@ -168,6 +221,35 @@ def create_app(
         registration_service = RegistrationService(snapshot_ledger.path, snapshot_manifest)
     app.state.snapshot_manifest = snapshot_manifest
     app.state.snapshot_repository = snapshot_ledger
+    app.state.eurocodes = eurocodes
+    if eurocodes is not None and snapshot_manifest is not None and snapshot_ledger is not None:
+        snapshot_status = SnapshotEurocodeStatus(
+            eurocodes, snapshot_ledger.path, snapshot_manifest.snapshot_id
+        )
+        # Measuring coverage reads every forecast cell; start it now so the
+        # first visitor does not wait for it.
+        snapshot_status.warm_in_background()
+        app.state.eurocode_status = snapshot_status
+    elif eurocodes is not None:
+        app.state.eurocode_status = _FixedEurocodeStatus(
+            EurocodeStatus(
+                EurocodeState(
+                    loaded=True,
+                    catalogue_sha256=eurocodes.catalogue_sha256,
+                    decisions_snapshot_id=eurocodes.decisions.metadata.get("snapshot_id"),
+                    reviewed_identities=len(eurocodes.decisions.identities),
+                    warnings=("No snapshot is open, so coverage is not measured.",),
+                )
+            )
+        )
+    else:
+        app.state.eurocode_status = _FixedEurocodeStatus(
+            EurocodeStatus(
+                NOT_LOADED
+                if eurocode_warning is None
+                else EurocodeState(loaded=False, warnings=(eurocode_warning,))
+            )
+        )
     if (
         vehicle_forecast_service is None
         and snapshot_manifest is not None
@@ -239,6 +321,7 @@ def create_app(
     )
     app.include_router(planner_router)
     app.include_router(opportunity_router)
+    app.include_router(eurocode_router)
     app.include_router(vehicle_forecast_router)
     app.include_router(evidence_router)
     app.include_router(registration_router)

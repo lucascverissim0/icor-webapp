@@ -306,6 +306,228 @@
         "title": "EquipmentResponse",
         "type": "object"
       },
+      "EurocodeBreakdownResponse": {
+        "additionalProperties": false,
+        "description": "A row's base units by Eurocode outcome; each unit is counted once.",
+        "properties": {
+          "codes": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeShareResponse"
+            },
+            "title": "Codes",
+            "type": "array"
+          },
+          "outside_units": {
+            "title": "Outside Units",
+            "type": "integer"
+          },
+          "shared_units": {
+            "title": "Shared Units",
+            "type": "integer"
+          },
+          "single_units": {
+            "title": "Single Units",
+            "type": "integer"
+          },
+          "unassignable_units": {
+            "title": "Unassignable Units",
+            "type": "integer"
+          },
+          "unreviewed_units": {
+            "title": "Unreviewed Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "codes",
+          "single_units",
+          "shared_units",
+          "outside_units",
+          "unassignable_units",
+          "unreviewed_units"
+        ],
+        "title": "EurocodeBreakdownResponse",
+        "type": "object"
+      },
+      "EurocodeCoverageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "horizon": {
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "outside_units": {
+            "title": "Outside Units",
+            "type": "integer"
+          },
+          "shared_units": {
+            "title": "Shared Units",
+            "type": "integer"
+          },
+          "shared_with_uncoded_units": {
+            "title": "Shared With Uncoded Units",
+            "type": "integer"
+          },
+          "single_units": {
+            "title": "Single Units",
+            "type": "integer"
+          },
+          "total_units": {
+            "title": "Total Units",
+            "type": "integer"
+          },
+          "unassignable_units": {
+            "title": "Unassignable Units",
+            "type": "integer"
+          },
+          "unreviewed_units": {
+            "title": "Unreviewed Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "horizon",
+          "total_units",
+          "single_units",
+          "shared_units",
+          "outside_units",
+          "unassignable_units",
+          "unreviewed_units",
+          "shared_with_uncoded_units"
+        ],
+        "title": "EurocodeCoverageResponse",
+        "type": "object"
+      },
+      "EurocodeShareResponse": {
+        "additionalProperties": false,
+        "description": "One Eurocode's part of a row: units certainly its own, and units it may share.",
+        "properties": {
+          "certain_units": {
+            "title": "Certain Units",
+            "type": "integer"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "drive": {
+            "title": "Drive",
+            "type": "string"
+          },
+          "first_year": {
+            "title": "First Year",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Year"
+          },
+          "shared_units": {
+            "title": "Shared Units",
+            "type": "integer"
+          },
+          "shared_with": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared With",
+            "type": "array"
+          },
+          "shared_with_uncoded": {
+            "title": "Shared With Uncoded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "first_year",
+          "last_year",
+          "drive",
+          "certain_units",
+          "shared_units",
+          "shared_with",
+          "shared_with_uncoded"
+        ],
+        "title": "EurocodeShareResponse",
+        "type": "object"
+      },
+      "EurocodeStatusResponse": {
+        "additionalProperties": false,
+        "description": "Whether Eurocodes are served, against which catalogue, and how much they cover.",
+        "properties": {
+          "catalogue_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue Sha256"
+          },
+          "coverage": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeCoverageResponse"
+            },
+            "title": "Coverage",
+            "type": "array"
+          },
+          "decisions_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decisions Snapshot Id"
+          },
+          "loaded": {
+            "title": "Loaded",
+            "type": "boolean"
+          },
+          "orphaned_identities": {
+            "title": "Orphaned Identities",
+            "type": "integer"
+          },
+          "reviewed_identities": {
+            "title": "Reviewed Identities",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "loaded",
+          "catalogue_sha256",
+          "decisions_snapshot_id",
+          "reviewed_identities",
+          "orphaned_identities",
+          "warnings",
+          "coverage"
+        ],
+        "title": "EurocodeStatusResponse",
+        "type": "object"
+      },
       "EuropeanCoverageResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1104,6 +1326,11 @@
             "title": "Demand Population",
             "type": "integer"
           },
+          "eurocodes_loaded": {
+            "default": false,
+            "title": "Eurocodes Loaded",
+            "type": "boolean"
+          },
           "integrity_warnings": {
             "items": {
               "type": "string"
@@ -1201,6 +1428,16 @@
           },
           "demand": {
             "$ref": "#/components/schemas/DemandRangeResponse"
+          },
+          "eurocodes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeBreakdownResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "evidence_status": {
             "$ref": "#/components/schemas/EvidenceStatus"
@@ -2883,6 +3120,37 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/eurocodes/status": {
+      "get": {
+        "operationId": "eurocode_status_api_v1_eurocodes_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EurocodeStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Eurocode Status",
+        "tags": [
+          "eurocodes"
+        ]
       }
     },
     "/api/v1/evidence/observations": {

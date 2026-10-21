@@ -21,6 +21,7 @@ The reviewed rules live in `data/vehicle_identity.json` so they can be audited.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unicodedata
@@ -58,6 +59,12 @@ class _Rules:
     trim_vocabulary_max_tokens: int
     passenger_car_volume_share: float
     variant_volume_share: float
+
+
+def identity_rules_sha256() -> str:
+    """The reviewed rules' fingerprint, so work keyed on identities can tell they moved."""
+
+    return hashlib.sha256(_RULES_PATH.read_bytes()).hexdigest()
 
 
 @lru_cache(maxsize=1)

@@ -6,6 +6,7 @@ import base64
 import contextlib
 import json
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
@@ -33,6 +34,8 @@ from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
+from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.runtime import EurocodeMap, identity_key
 from icor.evidence.normalization import source_vehicle_display_label
 from icor.evidence.vehicle_identity import VehicleIdentityIndex
 from icor.generations.public_catalog import ranking_public_generation_catalog
@@ -53,6 +56,8 @@ from icor.infrastructure.snapshot_planner_repository import (
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
 _GENERATION_REGISTRY = "public-generation-registry-v2"
+#: Row breakdowns kept per grouping and market/horizon filter; a page holds 100 at most.
+_EUROCODE_CACHE_SIZE = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +103,7 @@ class SnapshotOpportunityRepository:
         worked_models: IcorWorkedModelCatalog | None = None,
         verified_only: bool = False,
         model_year_catalog: bool = False,
+        eurocodes: EurocodeMap | None = None,
     ) -> None:
         path = getattr(planner._ledger, "path", None)
         if not isinstance(path, Path):
@@ -110,6 +116,8 @@ class SnapshotOpportunityRepository:
         self._generation_catalog = ranking_public_generation_catalog()
         self._verified_only = verified_only
         self._model_year_catalog = model_year_catalog
+        self._eurocodes = eurocodes
+        self._eurocode_cache: dict[tuple[object, ...], EurocodeBreakdown] = {}
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
@@ -188,7 +196,11 @@ class SnapshotOpportunityRepository:
                     "population and are reported unscored.",
                 )
             markets, horizons = self._available_facets(connection)
-        items = tuple(self._row(row, query.group_by, universe) for row in rows)
+            breakdowns = self._eurocode_breakdowns(connection, query, rows)
+        items = tuple(
+            self._row(row, query.group_by, universe, breakdowns.get(_row_key(row)))
+            for row in rows
+        )
         total = int(summary["summary_total"])
         result = OpportunityPage(
             items=items,
@@ -212,6 +224,7 @@ class SnapshotOpportunityRepository:
             available_horizons=horizons,
             demand_population=universe.population,
             demand_basis=universe.basis,
+            eurocodes_loaded=self._eurocodes is not None,
         )
         if not has_manual_coverage:
             if len(self._uncovered_cache) >= 128:
@@ -261,7 +274,10 @@ class SnapshotOpportunityRepository:
                 f"{cte} SELECT * FROM scored WHERE {' AND '.join(clauses)}",
                 (*parameters, *identity_parameters),
             ).fetchone()
-        return self._row(row, query.group_by, universe) if row is not None else None
+            if row is None:
+                return None
+            breakdowns = self._eurocode_breakdowns(connection, query, (row,))
+        return self._row(row, query.group_by, universe, breakdowns.get(_row_key(row)))
 
     def contributions(
         self, group_id: str, query: OpportunityQuery
@@ -979,11 +995,123 @@ class SnapshotOpportunityRepository:
             for row in rows
         )
 
+    def _eurocode_breakdowns(
+        self,
+        connection: sqlite3.Connection,
+        query: OpportunityQuery,
+        rows: Sequence[sqlite3.Row],
+    ) -> dict[tuple[str, str | None, int | None], EurocodeBreakdown]:
+        """The Eurocodes of each row shown, from the same estimates its units sum.
+
+        Every registration cell is allocated on its own: a reviewed variant is
+        keyed on the publisher's spelling, a drive side on the market, a code's
+        window on the registration year. Cohort attribution supplies the year
+        and reconciles each estimate to its rounded total, so a breakdown sums
+        to its row's units; an estimate without cohorts has no registration
+        year to allocate and is the one thing it can leave out.
+
+        Brand rows span too many codes to list, and the reviewed-only ranking
+        groups under other labels, so neither is annotated. Search text names
+        the whole group, so it never changes a shown group's estimates and is
+        not part of the cache key.
+        """
+
+        if (
+            self._eurocodes is None
+            or self._verified_only
+            or query.group_by is OpportunityGroupBy.BRAND
+            or not rows
+        ):
+            return {}
+        scope = (query.group_by, query.markets, query.horizons)
+        found = {
+            key: self._eurocode_cache[(scope, key)]
+            for key in {_row_key(row) for row in rows}
+            if (scope, key) in self._eurocode_cache
+        }
+        missing = sorted(
+            {_row_key(row) for row in rows} - found.keys(),
+            key=lambda key: (key[0], key[1] or "", key[2] or 0),
+        )
+        if missing:
+            by_year = query.group_by is OpportunityGroupBy.MODEL_YEAR
+            predicates = self._filter(query)
+            if self._materialized_attribution:
+                prefix = "WITH "
+                attribution = "opportunity_cohort_attribution"
+                parameters: tuple[object, ...] = ()
+            else:
+                prefix = f"WITH {_cohort_attribution_ctes(predicates.estimates)}, "
+                attribution = "cohort_attribution"
+                parameters = predicates.estimate_parameters
+            pairs = sorted({(brand, model) for brand, model, _ in missing})
+            year_filter = ""
+            year_parameters: tuple[object, ...] = ()
+            if by_year:
+                year_filter = (
+                    "AND (page_vehicle.brand, page_vehicle.model, "
+                    "attribution.registration_cohort_year) IN (VALUES "
+                    + ", ".join("(?, ?, ?)" for _ in missing)
+                    + ")"
+                )
+                year_parameters = tuple(value for key in missing for value in key)
+            # The page's vehicles first: the estimate table has no index on its
+            # vehicle, and testing membership before joining the labels keeps a
+            # page to a fraction of a second.
+            cells = connection.execute(
+                f"""{prefix}page_vehicle AS MATERIALIZED (
+                    SELECT vehicle_id, brand, model FROM temp.canonical_identity ident
+                    WHERE (brand, model) IN (VALUES {", ".join("(?, ?)" for _ in pairs)})
+                )
+                SELECT page_vehicle.brand, page_vehicle.model,
+                    attribution.registration_cohort_year registration_year,
+                    o.canonical_vehicle_id, v.make, v.model raw_model, o.geography,
+                    SUM(attribution.base_units) base_units
+                FROM opportunity_estimate o
+                JOIN page_vehicle ON page_vehicle.vehicle_id = o.canonical_vehicle_id
+                JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+                JOIN temp.canonical_identity ident
+                    ON ident.vehicle_id = o.canonical_vehicle_id
+                JOIN {attribution} attribution
+                    ON attribution.opportunity_id = o.opportunity_id
+                WHERE o.canonical_vehicle_id IN (SELECT vehicle_id FROM page_vehicle)
+                    AND {predicates.atoms} {year_filter}
+                GROUP BY 1, 2, 3, 4, 5, 6, 7""",
+                (
+                    *parameters,
+                    *(value for pair in pairs for value in pair),
+                    *predicates.atom_parameters,
+                    *year_parameters,
+                ),
+            ).fetchall()
+            assert self._identity_index is not None, "set when the connection opened"
+            grouped: dict[tuple[str, str | None, int | None], list[EurocodeCell]] = {
+                key: [] for key in missing
+            }
+            for brand, model, year, vehicle_id, make, raw_model, geography, units in cells:
+                key = (brand, model, int(year) if by_year else None)
+                grouped[key].append(
+                    EurocodeCell(
+                        identity=identity_key(self._identity_index, vehicle_id, make, raw_model),
+                        year=int(year),
+                        geography=geography,
+                        raw_model=raw_model,
+                        units=int(units),
+                    )
+                )
+            for key, key_cells in grouped.items():
+                found[key] = eurocode_breakdown(self._eurocodes, key_cells)
+                if len(self._eurocode_cache) >= _EUROCODE_CACHE_SIZE:
+                    self._eurocode_cache.pop(next(iter(self._eurocode_cache)), None)
+                self._eurocode_cache[(scope, key)] = found[key]
+        return found
+
     def _row(
         self,
         row: sqlite3.Row,
         group_by: OpportunityGroupBy,
         universe: OpportunityUniverse,
+        eurocodes: EurocodeBreakdown | None = None,
     ) -> OpportunityRow:
         identity = (row["brand"], row["model"], row["model_year"])
         group_id = _encode_group_id(group_by, identity)
@@ -1056,7 +1184,12 @@ class SnapshotOpportunityRepository:
             score=score,
             evidence_status=EvidenceStatus.VALIDATED,
             data_version=self.snapshot_id,
+            eurocodes=eurocodes,
         )
+
+
+def _row_key(row: sqlite3.Row) -> tuple[str, str | None, int | None]:
+    return row["brand"], row["model"], row["model_year"]
 
 
 def _escape_like(value: str) -> str:

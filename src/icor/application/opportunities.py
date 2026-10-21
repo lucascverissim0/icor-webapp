@@ -30,6 +30,8 @@ from icor.domain.planner import (
     PlanningConfiguration,
 )
 from icor.domain.snapshots import SnapshotVersions
+from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.runtime import EurocodeMap
 
 _CURRENT_EUROPE_MARKETS = frozenset(
     {
@@ -181,6 +183,9 @@ class OpportunityRow:
     score: OpportunityScore
     evidence_status: EvidenceStatus
     data_version: str
+    # Which Eurocodes the row's registrations may carry. None when Eurocodes
+    # are not loaded, and for brand rows, which span too many codes to list.
+    eurocodes: EurocodeBreakdown | None = None
 
     @property
     def icor_worked(self) -> bool:
@@ -213,6 +218,9 @@ class OpportunityPage:
     # claim matters most — has no row to read it from.
     demand_population: int = 0
     demand_basis: str = WHOLE_MARKET_BASIS
+    # Whether rows carry Eurocodes at all, so "no codes" is never mistaken for
+    # "none assigned".
+    eurocodes_loaded: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,11 +332,13 @@ class OpportunityService:
         ranking_strategy: RankingStrategy | None = None,
         *,
         repository: OpportunityRepository | None = None,
+        eurocodes: EurocodeMap | None = None,
     ) -> None:
         self._planner_repository = planner_repository
         self._coverage_repository = coverage_repository
         self._ranking_strategy = ranking_strategy
         self._repository = repository
+        self._eurocodes = eurocodes
 
     def list(self, query: OpportunityQuery) -> OpportunityPage:
         if self._repository is not None:
@@ -356,7 +366,10 @@ class OpportunityService:
         markets, horizons = self._available_facets()
         start = (query.page - 1) * query.page_size
         return OpportunityPage(
-            items=rows[start : start + query.page_size],
+            items=tuple(
+                self._with_eurocodes(row, grouped[row.group_id], query.group_by)
+                for row in rows[start : start + query.page_size]
+            ),
             summary=OpportunitySummary(
                 base_units=sum(row.demand.base_units for row in rows),
                 exact_covered_base_units=sum(
@@ -385,7 +398,36 @@ class OpportunityService:
                 else _demand_population(population)
             ),
             demand_basis=WHOLE_MARKET_BASIS,
+            eurocodes_loaded=self._eurocodes is not None,
         )
+
+    def _with_eurocodes(
+        self,
+        row: OpportunityRow,
+        atoms: tuple[_DemandAtom, ...],
+        group_by: OpportunityGroupBy,
+    ) -> OpportunityRow:
+        """The row with the Eurocodes its registrations may carry.
+
+        This source has no identity index: its labels are already canonical,
+        so a vehicle is keyed by its case-folded make and model.
+        """
+
+        if self._eurocodes is None or group_by is OpportunityGroupBy.BRAND:
+            return row
+        cells = (
+            EurocodeCell(
+                identity=" ".join(
+                    f"{atom.configuration.brand}|{atom.configuration.model}".split()
+                ).casefold(),
+                year=atom.model_year_demand.model_year,
+                geography=atom.configuration.market,
+                raw_model=atom.configuration.model,
+                units=atom.model_year_demand.demand.base_units,
+            )
+            for atom in atoms
+        )
+        return replace(row, eurocodes=eurocode_breakdown(self._eurocodes, cells))
 
     def _population(
         self, query: OpportunityQuery
@@ -427,7 +469,11 @@ class OpportunityService:
                 candidates, population=self._population(query)
             )
         }
-        return self._row(group_id, selected, query.group_by, scores[group_id])
+        return self._with_eurocodes(
+            self._row(group_id, selected, query.group_by, scores[group_id]),
+            selected,
+            query.group_by,
+        )
 
     def drill_down(
         self,

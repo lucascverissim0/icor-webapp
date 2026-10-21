@@ -197,6 +197,9 @@ class Allocation:
     status: str
     family: str | None = None
     uncoded: bool = False
+    #: Every family the registration was routed to (a pooled label names several):
+    #: provenance for describing the codes, not part of what was allocated.
+    families: tuple[str, ...] = field(default=(), compare=False)
 
 
 UNREVIEWED = Allocation((), "unreviewed")
@@ -402,13 +405,13 @@ class EurocodeDecisions:
         }
         codes = tuple(sorted({code for found in per_family.values() for code in found}))
         if not codes:
-            return Allocation((), "outside", families[0])
+            return Allocation((), "outside", families[0], families=tuple(families))
         uncoded = any(
             self._timelines[family].shared_with_uncoded(year, drive, found)
             for family, found in per_family.items()
         )
         status = "single" if len(codes) == 1 and not uncoded else "shared"
-        return Allocation(codes, status, families[0], uncoded)
+        return Allocation(codes, status, families[0], uncoded, tuple(families))
 
     def timeline(self, family: str) -> FamilyTimeline:
         return self._timelines[family]

@@ -272,6 +272,56 @@ class OpportunityScoreResponse(ApiModel):
         return round(value, 1)
 
 
+class EurocodeShareResponse(ApiModel):
+    """One Eurocode's part of a row: units certainly its own, and units it may share."""
+
+    code: str
+    label: str
+    # Registration years the code can explain; last_year None means still current.
+    first_year: int
+    last_year: int | None
+    drive: str
+    certain_units: int
+    # Never split: these units belong to this code or to one in shared_with.
+    shared_units: int
+    shared_with: tuple[str, ...]
+    shared_with_uncoded: bool
+
+
+class EurocodeBreakdownResponse(ApiModel):
+    """A row's base units by Eurocode outcome; each unit is counted once."""
+
+    codes: tuple[EurocodeShareResponse, ...]
+    single_units: int
+    shared_units: int
+    outside_units: int
+    unassignable_units: int
+    unreviewed_units: int
+
+
+class EurocodeCoverageResponse(ApiModel):
+    horizon: int
+    total_units: int
+    single_units: int
+    shared_units: int
+    outside_units: int
+    unassignable_units: int
+    unreviewed_units: int
+    shared_with_uncoded_units: int
+
+
+class EurocodeStatusResponse(ApiModel):
+    """Whether Eurocodes are served, against which catalogue, and how much they cover."""
+
+    loaded: bool
+    catalogue_sha256: str | None
+    decisions_snapshot_id: str | None
+    reviewed_identities: int
+    orphaned_identities: int
+    warnings: tuple[str, ...]
+    coverage: tuple[EurocodeCoverageResponse, ...]
+
+
 class OpportunityRowResponse(ApiModel):
     group_id: str
     group_by: str
@@ -295,6 +345,8 @@ class OpportunityRowResponse(ApiModel):
     score: OpportunityScoreResponse
     evidence_status: EvidenceStatus
     data_version: str
+    # None when Eurocodes are not loaded, and for brand rows.
+    eurocodes: EurocodeBreakdownResponse | None = None
 
 
 class OpportunitySummaryResponse(ApiModel):
@@ -337,6 +389,7 @@ class OpportunityPageResponse(ApiModel):
     # scores would have been measured against.
     demand_population: int = 0
     demand_basis: str = ""
+    eurocodes_loaded: bool = False
 
 
 class OpportunityDrillDownResponse(ApiModel):
