@@ -7368,3 +7368,83 @@ stop rule**. No code changed; nothing was promoted, pushed or deployed.
 Scratch files (session scratchpad, not kept): the aggregate CSV and the profiling JSON. The
 1.65 GB ZIP and the MATRABA sample were deleted after measuring; the ZIP can be fetched again
 and checked against the sha256 above. The local service is still running (web :5173, API :8000).
+
+### Lucas chose (2026-10-21): Spain for old cars only, labelled "at least", then Czechia
+
+Built the same day (commits `33d5131`, `2304653`, `fcfdfea`; not pushed):
+
+- **Planner** (`generation_planning.py`): a register replaces registration cohorts only in the
+  cohort years it reports. Before, it replaced every year up to its stock date, so a
+  pre-2010-only register would have erased Spain's 2010–2025 EEA cohorts.
+  - Observations flagged `STOCK_LOWER_BOUND_FLAG` ("stock-lower-bound", `domain/evidence.py`)
+    give cohorts the extra reason code `observed-stock-lower-bound`
+    (`STOCK_LOWER_BOUND_REASON`).
+  - Estimation version `register-years-stock-anchored-cohorts-v4`.
+  - The tests failed on the old planner and pass on the new one.
+- **Source:** `src/icor/evidence/sources/dgt.py` (parser `dgt_parque_cohorts_csv_v1`),
+  `src/icor/evidence/dgt_fleet_acquisition.py` and `scripts/acquire_dgt_fleet.py`.
+  - The script streams the pinned ZIP (size and sha256), keeps M1/M1G plus TURISMOS without a
+    category, and writes counts only by MARCA × MODELO × year of FEC_PRIM_MATR. It deletes
+    the ZIP afterwards.
+  - The loader rejects masked (`¡`) groups and cohorts after 2009, and flags every observation
+    as lower bound.
+  - Catalogue entry `dgt-es-fleet` / release `dgt-es-parque-2025`: CSV 2,006,272 bytes,
+    sha256 `595678b5…e550a5`, 75,749 groups (47,137 accepted, 28,612 rejected),
+    27,269,567 passenger cars, 7,749,970 accepted cars and 7,567,257 masked cars.
+  - The bootstrap plan now holds 24 releases.
+  - The CSV is at `.local/evidence/downloads/dgt-es-fleet.csv` and staged in
+    `.local/evidence/releases`.
+- **Report and page:**
+  - `FleetCell.lower_bound`; per code `lower_bound_p50` and the flag `lower-bound`; per market
+    `lower_bound`.
+  - API schema fields added and OpenAPI regenerated; the web shows "At least".
+- **Identity fix** (`fcfdfea`): `VehicleIdentityIndex.from_rows(vocabulary_volume=...)` and
+  `snapshot_identity._vocabulary_volume`.
+  - Lower-bound stock no longer teaches the model vocabulary. Without the fix, DGT's bare
+    "SERIE" label (old BMWs) inflated BMW's volume and became a model name: 270 existing
+    vehicles (118k cars in 2028) refolded, the 3, 5 and other Series were merged, and
+    respellings broke reviewed links.
+  - With the fix, 0 of 139,984 existing vehicles refold.
+  - On a snapshot without lower-bound stock the index is built exactly as before (same code
+    path).
+
+**Candidate `snapshot-581241df1ba0aa0dfd19`** (`.local/evidence/candidates/`): built from
+`2304653`, 24 releases, as-of 2026-09-22T12:00Z, seed 20260922, 38 min, db sha256
+`d66f8684…733f53`, 1,862,535 observations. **Not promoted.** The identity fix is applied when
+the snapshot is read, so no rebuild is needed.
+
+- **Regression** (scratch `compare.py`): 0 cohorts changed and 0 lost outside ES pre-2010; 74,152
+  new ES pre-2010 cohort rows, all lower bound. ES 2028 fleet goes from 15.74M to 19.85M.
+- **Before/after** (`b05d…` → candidate, 2026 fleet; private JSON
+  `.local/private/eurocode/reports/data-coverage-candidate-snapshot-581241df1ba0aa0dfd19.json`):
+  - Model total: 189.15M → 195.13M. ES: 14.37M → 20.34M, of which 5.97M lower bound.
+  - ES age bands, official vs model: 10–20 y 9.15M vs 3.51M → 6.65M; 20+ y 7.50M vs 0 → 4.17M.
+  - Tiers: A 482 (111.60M certain cars, unchanged or up slightly), B 295 (30.38M → 30.97M),
+    C 579 (7.54M → 10.77M). 373 tier C codes gained 3.23M certain cars; 615 codes are
+    flagged lower bound.
+  - No code changes tier: the pre-2010 caps are rule-based on production years, and were
+    left as they are deliberately.
+- **ES pre-2010 Eurocode outcome:** single 3.82M, shared 1.46M, unreviewed 0.64M (2,044
+  identities; 222 cover 90%, top: Seat Córdoba/Marbella, Nissan Terrano/Patrol, Mitsubishi
+  Montero, old Renault "R" labels), outside 24k (Suzuki Vitara, Jeep Grand Cherokee, Defender:
+  family windows end too late), unassignable 24k.
+- **Gate:** 2028 demand reviewed on the candidate is 98.78% (unreviewed 105,263 of 8,604,758),
+  **below the 99% target**. The review must be extended before promotion.
+
+### Next actions (supersede the list above)
+1. Extend the Eurocode review to the candidate:
+   - add `--database` and "only identities without a decision" to `eurocode_review.py prepare`;
+   - review the new identities with two blind reviewers at maximum rigour, then adjudicate;
+   - `merge` with the existing decisions; `coverage` must reach at least 99%;
+   - also re-check the "outside" families (Vitara, Grand Cherokee, Defender) for older codes.
+2. Rerun the before/after and show Lucas. Promote only on his OK.
+3. Czech register: verify licence, masking and deregistration semantics on the real file, then
+   follow the same path.
+
+Verification this session:
+- `uv run pytest -q`: 1130 passed, 7 skipped, 4 xfailed.
+- Ruff: new files clean; no modified file gained a warning.
+- Web: typecheck and lint clean; Vitest 131 passed; `openapi:generate` diff committed.
+- Playwright was not rerun.
+
+The local service is still running (web :5173, API :8000) on the **active** snapshot `b05d…`.
