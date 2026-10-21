@@ -6724,3 +6724,108 @@ model label per registration cell.
 - `uv run ruff check` and `ruff format --check` on the touched files: clean.
   Repository-wide `ruff format --check` lists pre-existing unformatted files in
   `src/icor/api` and `src/icor/application` that this work did not touch.
+
+### Successors without a code share their launch span; forecast years verified (2026-10-21)
+
+**Rule change (commit `60f28c9`).** `uncoded_successor` now behaves like a coded successor.
+- **Launch span:** from that year through `uncoded_successor_latest` (defaults to the same
+  year), the code stays possible. `Allocation.uncoded` flags it as shared with a vehicle
+  without a code, and the status becomes `shared` even with one code. After the span the
+  registration is `outside`.
+- **New fact `uncoded_sibling`:** a same-name vehicle without a code sold alongside (an
+  electric version on another platform). The code stays and its years are flagged.
+- **Tooling:** `compare` includes the flag. `coverage` reports `shared_with_uncoded`.
+  `preview` marks those years with `?`. The brief documents both fields.
+- **Validation:** `_latest` needs the base field and cannot precede it. Neither field may
+  fall after the run-out year, and a sibling cannot precede `first_year`.
+- **Earlier uses:** the nine `uncoded_successor` uses set before this change were re-read
+  under the new meaning. Each still holds, with three corrections listed below.
+
+**Forecast verification.** About 40 targeted web searches, with no catalogue strings, plus
+the first-pass checker outputs, each re-verified against its sources. Policy: an officially
+confirmed successor, sibling or ending sets the fact; a press-only report keeps the code and
+goes on the risk list. The private scripts `review/adjudication/forecast_apply.py` and
+`forecast_apply2.py` hold every change with its sources (also appended to each fact's `note`).
+- **Successor without a code:**
+  - Tucson V: 2027.
+  - ID.4 and ID.5 → ID. Tiguan: 2027.
+  - RAV4 VI: 2026.
+  - Q7 III: 2026.
+  - Lexus ES 8th generation: 2026.
+  - new GLB: 2026.
+  - X5 G65: 2026–27.
+  - new GLA: 2026–27.
+  - 3 Series G50: 2026–28, because the G51 Touring follows in the second half of 2027.
+  - X7 G67: 2027–28.
+  - electric Alpine A110: 2027.
+- **Same-name sibling without a code:**
+  - electric GLC: 2026;
+  - electric C-Class saloon: 2026;
+  - Cayenne Electric: 2026;
+  - electric Juke: 2027 (the hybrid Juke stays).
+- **Ended (`last_year`):**
+  - Audi A1 and Q2 in 2026, and the A8 in 2026 (orders closed Feb 2026).
+  - Kia Ceed hatch/SW and ProCeed in 2025. The XCeed, which shares the code, continues in
+    its own family.
+  - EQB in 2025, because its successor is sold as the GLB.
+  - SEAT and CUPRA Ateca in 2026.
+  - Arkana, F-Pace, Peugeot 508 and DS 9 in 2025.
+  - A110 (2017) in 2026.
+  - V90 and V90 Cross Country in 2025.
+  - Swace and Jimny (EU) in 2025.
+- **Corrected earlier facts:**
+  - Eclipse Cross: European production ended 2024, and its electric successor launched at the
+    end of 2025 (was an assumed 2026).
+  - Mazda CX-5: the 3rd generation reached Europe at the end of 2025, so the span is 2025–26.
+  - Corvette: C8 European deliveries began in 2022, so C7 stock shares 2020–21.
+- **New coded successor:** the A6 allroad C9 (orders June 2026) takes the A6 C9 codes, pooled
+  as in the A6 family, the same way the C8 allroad uses the C8 code.
+
+**Finding: the Grande Panda is filed under the bare "Panda" label from 2025.**
+- **Evidence:** bare-label units jump in 2025 in FR (+76%), AT (×2.6), PL (×3.3), NL (×2.7),
+  BE (×1.9), PT (+65%) and IT (+13%). The separate Grande Panda identity holds only 34 units.
+- **Fix:** a new `fiat/grande-panda` family, using the catalogue's own Grande Panda code. A
+  variant pools bare 'panda'/'fiat panda' labels from 2025 (open-ended, years 2025–2099) with
+  it. Explicit Pandina and trim labels stay with the Panda.
+- **Tail:** the two small Grande Panda identities belong to no batch and stay unreviewed.
+- **Detector:** the year-lumping detector missed this because the new name adds a word in
+  front of the old one. Private `review/adjudication/prefix_lumping.py` checks that pattern
+  for every family launched since 2023. It found nothing else that changes codes: e-C3,
+  e-3008/e-5008, California, Tayron and A6 C9 all share their base's code or are handled.
+
+**Known forecast risks, kept on the current code (press-only or not yet dated):**
+- **Expected successors:**
+  - Kia Sportage NQ6 (2027?);
+  - Dacia Sandero IV (2027–28);
+  - Opel Corsa G (BEV, CEO target 2028);
+  - next Toyota Corolla.
+- **Expected siblings:** Peugeot 208 III (EV-only reveal in 2027; the current car stays).
+- **Possible endings:**
+  - Mercedes B-Class (end 2025 or 2026 per press; the A-Class runs to 2028);
+  - Hyundai i30;
+  - Ford Kuga;
+  - Volvo S90 (Europe end undated).
+- **Renault Trafic:** a new EV-only van comes at the end of 2026; no passenger version is
+  announced.
+
+**Coverage after merge** (private `decisions.json`: 761 families, 1,590 identities):
+- reviewed 99.001%;
+- single 82.28%;
+- shared 15.34%;
+- outside 0.62%;
+- unassignable 0.77%;
+- unreviewed 1.00%;
+- shared with a vehicle without a code: 0.76%.
+
+**Verification:**
+- every decided batch passes `validate` with `problems: []`;
+- spot checks with `EurocodeDecisions.allocate`: Panda 2024 single, 2025 pooled, Pandina
+  single; GLC bodiless 2027 flagged, coupé not; EQB 2026 single, 2027 outside;
+- `uv run pytest tests/eurocodes tests/test_repository_security.py -q`: 81 passed.
+
+**Next:** plan step 3 completion.
+1. Re-check 100% of the top 200 families and a random 10% of the rest.
+2. Write the private golden test.
+3. Then steps 4–8, starting with passing `raw_model` through the runtime.
+
+No server or long-running process is active.
