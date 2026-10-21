@@ -7115,8 +7115,8 @@ without printing codes):
 - **Known limitation, by design:** on the Eurocode view, ICOR coverage (exact, fallback, worked)
   counts only certain units. Coverage of shared or unassigned units shows only in the vehicle
   groupings.
-- **Visual check** on the real snapshot (screenshots kept in the session scratchpad only, since
-  they show real codes): ranking, detail page and phone width. No alerts and no horizontal
+- **Visual check** on the real snapshot (screenshots were taken outside the repository and then
+  deleted, since they show real codes): ranking, detail page and phone width. No alerts and no horizontal
   overflow at 390 px.
 
 **Gates (after `1e39eb6`):**
