@@ -7506,3 +7506,82 @@ cars first registered 2006–2025 appear in the app. Approved plan (outside the 
 Follow the approved plan: Phase 0 (PL API pilot and crawl, terms checks), Phase 1 (report
 fixes), Phase 2 (recovery, RDW re-pin, net retention), Phase 3 (registers), Phase 4 (review gate),
 then promote locally.
+
+### Progress, 2026-10-21 late evening (Claude Code)
+**Committed (local, not pushed):**
+- `e287505`: resumable CEPiK crawler (`src/icor/evidence/cepik_fleet_acquisition.py`,
+  `scripts/acquire_cepik_fleet.py`).
+- `184f50e`: report v2 (`DOCUMENT_VERSION = 2`).
+  - Eurostat status flags kept; bands taken from the newest year that has all of them; open-ended
+    IT/CZ detected.
+  - The band convention is measured per market-year from `road_eqr_carmot`
+    (`eurostat_age_conventions.py`, `eurostat_new_registrations.py`).
+  - A register is never aged back before its own date.
+  - The gap is split into estimated before-sources / unnamed / other, for country totals only.
+  - `scripts/report_eurocode_data.py --candidate <id>`, `--eurostat-registrations`.
+- `1654b9f`: `/data-coverage` shows the estimated column, its split, under-20 columns, flags and
+  per-country bands.
+- `2120933`: RDW re-pinned as insured cars only, release `rdw-nl-registered-cars-20261021`
+  (sha256 `65108c1e…`, 9,754,074 cars). It is staged in `.local/evidence/releases` but not yet in
+  a snapshot. CBS confirms the definition: "Tot 2019 werd er ten onrechte een groep onverzekerde
+  voertuigen meegenomen" (CBS 82472NED).
+
+**Verification:**
+- `uv run pytest -q`: 1161 passed (before the RDW commit), then 363 passed in tests/evidence and
+  tests/preview.
+- Web: typecheck, lint, vitest 142 passed, build plus verified build, `openapi:check` clean, and
+  Playwright `e2e/data-coverage.spec.ts` 3 passed (run by a sub-agent; rerun at the final check).
+
+**Report v2 on the active snapshot b05d…** (`.local/private/eurocode/reports/`): official
+299.97M, model 183.61M. Under 20 y:
+- NL 101.2% (2024 bands, 3y)
+- BE 115.1%
+- LU 147.1%
+- GB 99.1%
+- FI 91.2%
+- SE 92.0%
+- DE 88.8%
+- DK 87.6%
+- AT 82.3%
+- FR 73.4%
+- ES 68.9%
+- SI 65.7%
+- EE 53.5%
+- PT 53.4%
+- HU 43.7%
+- NO 37.0%
+- PL 34.5%
+- LV 34.0%
+- MT 34.1%
+- HR 32.7%
+- CY 31.4%
+- RO 28.4%
+- LT 26.9%
+
+IT, CZ and IE are open-ended, so they have no under-20 figure. BG, GR, IS and SK publish a total
+only.
+
+**EEA blank-model recovery, measured** (`.local/evidence/downloads/eea-*-final.csv`, 2010–2023):
+- 532,576 unnamed cars in total. Same-year matching on (MS,Mk,TAN,T,Va,Ve) → (Mk,TAN,T,Va,Ve) →
+  (Mk,TAN,T,Va) → (Mk,TAN,T), with share ≥95% and support ≥20, recovers 72,202 cars:
+  - DK 2022: 52,214
+  - PL 2021: 8,596
+  - ES 2020: 6,774
+- Pooling ±1 year recovers fewer (63,008), because it dilutes the share, so the ±1 rung from the
+  plan is dropped.
+- IT 2010 (209k) and the DE rows have no make or type approval and cannot be recovered.
+
+**Registers verified on 2026-10-21** (agent profiles; samples in the session scratchpad only):
+
+| Register | Source and licence | Fields and filters | Notes |
+|---|---|---|---|
+| CZ | `https://download.dataovozidlech.cz/vypiszregistru/vypisvozidel`, monthly full CSV (UTF-8 BOM, comma, 99 cols); CC0-equivalent (data.gov.cz terms object, narrowMatch CC0) | make `Tovární značka`, model `Obchodní označení`, cohort year of `Datum 1. registrace` (first anywhere; `… v ČR` separate), category `Kategorie vozidla` startswith M1, `Status`='PROVOZOVANÉ' (others: VYŘAZENO Z PROVOZU, ZÁNIK, VÝVOZ) | Drop VIN, engine, body and TP/ORV numbers, PČV. Includes deregistered rows. |
+| LT | `https://www.regitra.lt/wp-content/uploads/failai/Atviri_TP_parko_duomenys.zip` (168 MB, needs a browser User-Agent; CSV 2,502,084 rows); CC BY 4.0 | `MARKE`, `KOMERCINIS_PAV`, `KATEGORIJA_KLASE`='M1', `DAE_STATUSAS`='T', cohort `PIRM_REG_DATA` (first anywhere; 7.5% empty, LT date only an upper bound) | 48,362 M1 rows masked `Nuasmeninta`. Drop owner birth interval, owner type and municipality. |
+| EE | andmed.eesti.ee dataset `9c5ef13d-…`, monthly `ar_YYYY-MM-01_M1+M1G.csv` (semicolon, 788,081 rows); CC BY-SA 4.0 (the newest two distributions have an empty licence field) | `MARK`, `MUDEL`, `KATEGOORIA` in (M1, M1G), `YLDINE_STAATUS`='REGISTREERITUD' (680,843), cohort `ESMANE_REG` (first anywhere) | Drop county and private/corporate. |
+| LU | data.public.lu `parc-automobile-du-luxembourg`, monthly per-vehicle XML (849 MB) or XLSX (179 MB); CC0; "all registered vehicles currently running" | `LIBMRQ`, `TYPCOM`, `CATEU` in (M1, M1G), cohort `DATCIRPRM` (first anywhere, YYYYMMDD) | Drop `INFOUTI`, `INDUTI`. Make labels are not normalised (MERCEDES vs MERCEDES-BENZ). |
+| SI | podatki.gov.si `evidenca-registriranih-vozil-presek-stanja`, last snapshot 2023-06-30 (385 MB zip, 3 cp1250 CSVs); CC BY 4.0 | `D1-Znamka`, `D3-Komerc oznaka`, `J-Kategorija…(oznaka)` in (M1, M1G), `Status vozila (id)`=1, cohort `B-Datum prve registracije vozila` (DD.MM.YYYY) | Publication stopped "do nadaljnjega" (GDPR). Drop owner/user age, sex, type and location, VIN, plate area. |
+| DK | anonymous FTP `ftp://5.44.137.84/ESStatistikListeModtag/`, weekly zip of about 7.1 GB holding one 129 GB XML; motorst.dk "Statistikudtræk" page | `KoeretoejArtNummer`=1 (Personbil), `KoeretoejOplysningStatus`='Registreret', make `KoeretoejMaerkeTypeNavn`, model `KoeretoejModelTypeNavn`, cohort `KoeretoejOplysningFoersteRegistreringDato` (only one date; whether imports carry the foreign date is unverified) | The page says use is free ("Det koster ikke noget at anvende udtrækket") and states no licence. Reuse is not forbidden, so per Lucas's rule it may be used. Holds scrapped and exported vehicles. Drop VIN, plate, KoeretoejIdent, comments. |
+
+**CEPiK crawl:** running detached (`nohup … acquire_cepik_fleet.py crawl --state-dir
+.local/evidence/cepik-crawl --workers 2`). The state is resumable; rerun the same command if it
+stopped. Then run `aggregate`.
