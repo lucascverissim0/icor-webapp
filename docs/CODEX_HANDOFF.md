@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 ## Project objective
 
@@ -7041,6 +7041,117 @@ without printing codes):
 - web `typecheck`, `lint`, `build`, `openapi:check`: ok;
 - Vitest: 107 passed; Playwright: 28 passed.
 
-**Next:** plan step 7 (`group_by=eurocode` as the default ranking), then step 8 (close-out).
+**Next:** plan step 7 (done; see the next section).
 
-No server or long-running process is active.
+### Step 7: rank by Eurocode (2026-10-21, backend `2dcf078`)
+
+**Design: as planned and approved, with one deliberate deviation.**
+- **Rows:** one per code. A row's `demand` is the code's certain units (cells allocated to it
+  alone), so its score is a conservative lower bound computed by the same `DemandScoreV2`
+  against the whole market's codes.
+- **Shared units:** reported beside the row, never split. `OpportunityRow.eurocode` carries
+  `{code, label, make, first_year, last_year, drive, shared_units, shared_with,
+  shared_with_uncoded, vehicles[{brand, model, certain_units, shared_units}]}`. `brand` and
+  `model` hold the code's make and label; `model_year` is null.
+- **Page totals:** `eurocode_totals` holds the view's units by outcome, with shared units counted
+  once, so the rows' certain units plus the totals equal what the other groupings show.
+- **Deviation:** computed in Python rather than through SQL temp tables. Allocation depends on
+  the spelling, market and year (variants, drive side, windows), so one allocator stays the
+  single source of truth. `icor/eurocodes/grouping.py` (`rank_by_eurocode`) is shared by the
+  snapshot repository and the in-memory service.
+
+**How the snapshot repository builds it.**
+- `_grouped_cte(cells=True)` adds the vehicle, raw label, market, horizon and estimate rowid to
+  the atoms; the default statement is unchanged.
+- **Caching:** one view per (markets, horizons, coverage). Views are cached (16 entries) until
+  production coverage changes, and builds are serialized by a lock.
+- **Boot:** the local service warms the whole-market view in a background thread.
+- **Detail endpoints:** detail and contributions (per market and horizon) are served; fleet and
+  configurations return `[]` for codes.
+- **No map:** a 422 `eurocodes_not_loaded`.
+- **Client release:** its allowlist is unchanged and serves model years only, pending Lucas's
+  decision on carrying the map.
+
+**Verified on the real snapshot:**
+- Under every filter tested (all; GB; 2028; DE+FR 2031), the rows' certain units plus the
+  shared, outside, unassignable and unreviewed totals equal the model-year totals exactly
+  (17,243,901 units across both horizons).
+- 1,302 code rows, of which 1,179 have certain units (the score population).
+- The top code is a three-model shared windscreen.
+- Times:
+  - whole-market view built at boot: about 7 s of work, 20 s for a request that waited behind
+    the warm-up and the status measure;
+  - filtered views: 1.8–6.8 s;
+  - cached: 0.01 s;
+  - a text search over code, label, make and vehicles: 0.01 s.
+- Peak memory of the API process with the whole-market view built: about 590 MB RSS (116 MB
+  after boot without it). Acceptable locally; worth watching on a small host if the client
+  release ever carries the map.
+
+**UI (`1e39eb6`; built by a Sonnet agent, then reviewed and corrected).**
+- **Default grouping:** `eurocode` (`defaultGrouping()` in `web/src/lib/opportunity-search.ts`).
+  The verified client release keeps `model_year`. The control reads Eurocodes, Model years,
+  Models, Brands.
+- **Ranking card:** headed "`code` · label · years". It shows "N certain replacements", plus
+  "up to +S shared with …" and up to three vehicles with "+N more vehicles".
+- **Totals strip:** "Certain on the codes listed / Shared between codes, counted once / Not
+  assigned to a Eurocode (reasons)". The KPI reads "Certain replacements" on this view, and the
+  score note names Eurocodes.
+- **Detail page:** the make and drive side in words, and a vehicles table with Certain and Up
+  to (shared) columns. The base forecast is labelled as certain units. Contributions read "Certain
+  units of `code`", and the fleet section is replaced by a note that the fleet is not broken
+  down by code.
+- **No map loaded (422):** a calm "Show model years" state replaces the error.
+- **My review fixes:**
+  - The new test file imported fixtures from another test file, which ran 23 tests twice.
+    The fixtures moved to `web/tests/opportunity-fixtures.tsx`.
+  - The raw drive value was shown; it is now in words (`driveText`).
+  - The KPI "Forecast replacements" understated the view; it now reads "Certain replacements".
+  - "ranked vehicles" became "ranked Eurocodes" on a code row.
+  - My own JSX edit rendered "Eurocodewith"; a test caught it, and it is fixed.
+  - The agent's e2e comment gave a wrong reason for reading model years in the coverage test.
+    The real reason: the fixture's covered year is a shared launch year, so its coverage lands
+    on no code's certain units.
+- **Known limitation, by design:** on the Eurocode view, ICOR coverage (exact, fallback, worked)
+  counts only certain units. Coverage of shared or unassigned units shows only in the vehicle
+  groupings.
+- **Visual check** on the real snapshot (screenshots kept in the session scratchpad only, since
+  they show real codes): ranking, detail page and phone width. No alerts and no horizontal
+  overflow at 390 px.
+
+**Gates (after `1e39eb6`):**
+- pytest: 1081 passed, 7 skipped, 4 xfailed;
+- CI ruff list: clean;
+- `uv lock --check`: ok;
+- web `typecheck` and `lint`: ok; `build` and `VITE_ICOR_CLIENT_RELEASE=verified` build: ok;
+- `openapi:check`: exit 0;
+- Vitest: 114 passed; Playwright: 29 passed.
+
+### Step 8: close-out (2026-10-21) — Mission 1 is complete locally
+
+All Eurocode work is committed locally on `fix/client-release-production`, from `2dcf078` to
+`1e39eb6` plus this handoff. **Nothing is pushed or deployed**, and the client snapshot is
+untouched.
+
+**Local service running for Lucas's review** (`scripts/planner_service.py`, detached):
+- Web: http://127.0.0.1:5173. API: http://127.0.0.1:8000. Both read the active snapshot
+  `snapshot-b05d20c2d34a9b0a340d` with the private map.
+- Started with
+  `ICOR_EVIDENCE_ACTIVE_ROOT=/Users/lucascravoverissimo/ICOR/.local/evidence uv run python scripts/planner_service.py start`.
+- Stop it with `uv run python scripts/planner_service.py stop`. It survives closing the terminal.
+
+**Open for Lucas:**
+1. A private backup location for `.local/private/eurocode/` (it exists only on this Mac).
+2. Whether the client release may carry the private mapping. Until then it serves model years
+   only.
+3. The EQA, which no catalogue row names (it stays not-in-catalogue).
+4. Authorization to push the branch. Credentials are ready: the `~/.config/gh-icor` login
+   already has the `workflow` scope, fixed 2026-10-20. Origin was last in sync at `2f8b9c9`.
+
+**Next recommended actions:**
+- Lucas reviews the Eurocode ranking on the local service.
+- Then Mission 2 (vehicle database on the Eurocode backbone).
+- Optional refinements, not yet requested:
+  - break the fleet down by code;
+  - attribute coverage of shared units on the Eurocode view;
+  - add a sidecar for the client release once item 2 is decided.
