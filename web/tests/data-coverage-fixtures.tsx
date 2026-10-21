@@ -13,6 +13,9 @@ import type { components } from '../src/lib/api/schema'
 
 type Report = components['schemas']['EurocodeDataReportResponse']
 type Code = components['schemas']['EurocodeDataCodeResponse']
+type Country = components['schemas']['EurocodeDataCountryGapResponse']
+type Band = components['schemas']['EurocodeDataBandResponse']
+type Estimate = components['schemas']['EurocodeDataEstimateResponse']
 
 export const evidence = { stock: 0, registrations: 0, interpolated: 0, forecast: 0 }
 
@@ -40,6 +43,38 @@ export function code(overrides: Partial<Code> & Pick<Code, 'code'>): Code {
     sources: ['pub-a'],
     tier: 'B',
     years_before_2010: 0,
+    ...overrides,
+  }
+}
+
+export function estimate(overrides: Partial<Estimate> = {}): Estimate {
+  return { above_official: 0, before_sources: 0, missing: 0, other: 0, unnamed: 0, ...overrides }
+}
+
+export function band(name: string, official: number, modelled: number, overrides: Partial<Band> = {}): Band {
+  return {
+    band: name, official, modelled, modelled_alternative: null, status: null, estimated: estimate(),
+    ...overrides,
+  }
+}
+
+/** A market whose office publishes a total only, unless the overrides say otherwise. */
+export function country(overrides: Partial<Country> & Pick<Country, 'geography'>): Country {
+  return {
+    publisher_geography: overrides.geography,
+    year: 2026,
+    official: 1000,
+    official_status: null,
+    modelled: 900,
+    modelled_share: 0.9,
+    estimated: estimate({ missing: 100, before_sources: 60, unnamed: 10, other: 30 }),
+    band_year: null,
+    band_official_total: null,
+    convention: null,
+    open_ended: false,
+    bands: [],
+    under_20: null,
+    registrations_include_used_imports: [],
     ...overrides,
   }
 }
@@ -75,28 +110,65 @@ export const report: Report = {
     }),
   ],
   country_gap: [
-    {
-      geography: 'FR', publisher_geography: 'FR', year: 2026, official: 1000, modelled: 900,
-      modelled_share: 0.9,
-      bands: [
-        { band: 'Y_LT2', official: 100, modelled: 90 },
-        { band: 'Y2-5', official: 200, modelled: 180 },
-        { band: 'Y5-10', official: 300, modelled: 270 },
-        { band: 'Y10-20', official: 400, modelled: 360 },
-        { band: 'Y_GT20', official: null, modelled: 0 },
-      ],
-    },
-    {
-      geography: 'GB', publisher_geography: 'UK', year: 2026, official: 5000, modelled: 2000,
+    // Total only, flagged imputed.
+    country({ geography: 'FR', official_status: 'i' }),
+    // Age bands of an earlier year, no 20+ band, both conventions shown, a provisional total.
+    country({
+      geography: 'GB',
+      publisher_geography: 'UK',
+      official: 5000,
+      official_status: 'p',
+      modelled: 2000,
       modelled_share: 0.4,
+      estimated: estimate({ missing: 3000, before_sources: 1200, unnamed: 300, other: 1500 }),
+      band_year: 2025,
+      band_official_total: 4800,
+      convention: 'unclear',
+      open_ended: true,
       bands: [
-        { band: 'Y_LT2', official: 1000, modelled: 900 },
-        { band: 'Y2-5', official: null, modelled: 500 },
-        { band: 'Y5-10', official: 1500, modelled: 400 },
-        { band: 'Y10-20', official: 1500, modelled: 200 },
-        { band: 'Y_GT20', official: 1000, modelled: 0 },
+        band('Y_LT2', 1000, 900, {
+          modelled_alternative: 1100,
+          status: 'b',
+          estimated: estimate({ missing: 100, before_sources: 40, unnamed: 10, other: 50 }),
+        }),
+        band('Y2-5', 1000, 500, {
+          modelled_alternative: 400,
+          estimated: estimate({ missing: 500, before_sources: 200, unnamed: 100, other: 200 }),
+        }),
+        band('Y5-10', 1500, 400, {
+          modelled_alternative: 300,
+          estimated: estimate({ missing: 1100, before_sources: 500, unnamed: 100, other: 500 }),
+        }),
+        band('Y10-20', 1300, 200, {
+          modelled_alternative: 200,
+          estimated: estimate({ missing: 1100, before_sources: 400, unnamed: 100, other: 600 }),
+        }),
       ],
-    },
+    }),
+    // Full age bands under the 3-year convention, a band the model overshoots.
+    country({
+      geography: 'NL',
+      official: 3000,
+      modelled: 2600,
+      modelled_share: 0.8667,
+      estimated: estimate({ missing: 400, before_sources: 150, unnamed: 50, other: 200 }),
+      band_year: 2026,
+      band_official_total: 3000,
+      convention: '3y',
+      bands: [
+        band('Y_LT2', 300, 350, { estimated: estimate({ above_official: 50 }) }),
+        band('Y2-5', 600, 600),
+        band('Y5-10', 900, 800, { estimated: estimate({ missing: 100, other: 100 }) }),
+        band('Y10-20', 900, 700, { estimated: estimate({ missing: 200, before_sources: 150, unnamed: 50 }) }),
+        band('Y_GT20', 300, 150, { estimated: estimate({ missing: 150, other: 150 }) }),
+      ],
+      under_20: {
+        official: 2700,
+        modelled: 2450,
+        modelled_share: 0.9074,
+        estimated: estimate({ missing: 300, before_sources: 150, unnamed: 50, other: 100, above_official: 50 }),
+      },
+    }),
   ],
   markets: [],
   no_data: [

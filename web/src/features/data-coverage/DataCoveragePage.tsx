@@ -14,11 +14,19 @@ import {
 import { driveText, format } from '../eurocodes/eurocode-text'
 import {
   BAND_LABELS,
+  ESTIMATE_PARTS,
+  NO_AGE_SPLIT,
+  NO_OVER_20_BAND,
   PAGE_SIZE,
+  STATUS_LEGEND,
+  bandLabel,
   buildRows,
+  countryNotes,
   filterRows,
+  hasStatus,
   sortCountries,
   sortRows,
+  statusText,
   type CountryGap,
   type CoverageRow,
   type DataReport,
@@ -107,20 +115,192 @@ function TierLegend({ report }: { report: DataReport }) {
   )
 }
 
-function bandCell(gap: CountryGap, band: string): string {
+function marketName(gap: CountryGap): string {
+  return gap.publisher_geography === gap.geography
+    ? gap.geography
+    : `${gap.geography} (${gap.publisher_geography})`
+}
+
+/** Eurostat's flag on a figure, small and named for screen readers. */
+function StatusFlag({ status }: { status: string | null }) {
+  if (status === null) return null
+  return (
+    <small className="coverage-flag" title={statusText(status)}>
+      {status}
+      <span className="sr-only"> ({statusText(status).toLowerCase()})</span>
+    </small>
+  )
+}
+
+function BandCell({ gap, band }: { gap: CountryGap; band: string }) {
   const item = gap.bands.find((candidate) => candidate.band === band)
-  if (!item) return '—'
-  return `${item.official === null ? '—' : format(item.official)} / ${format(item.modelled)}`
+  if (!item) {
+    const reason = gap.open_ended && band === 'Y_GT20' ? NO_OVER_20_BAND : undefined
+    return <td className="coverage-number" title={reason}>—</td>
+  }
+  return (
+    <td className="coverage-number">
+      <span>{format(item.official)} / {format(item.modelled)}</span>
+      <StatusFlag status={item.status} />
+      {item.modelled_alternative !== null && (
+        <small className="coverage-aside">(other convention: {format(item.modelled_alternative)})</small>
+      )}
+      {gap.open_ended && band === 'Y10-20' && <small className="coverage-aside">{bandLabel(band, true)}</small>}
+    </td>
+  )
+}
+
+function EstimateCell({ gap }: { gap: CountryGap }) {
+  const { estimated } = gap
+  return (
+    <td className="coverage-number coverage-estimate">
+      <span>{format(estimated.missing)}</span>
+      {estimated.above_official > 0
+        ? <small className="coverage-aside">Model above official: {format(estimated.above_official)}</small>
+        : (
+          <details className="coverage-split">
+            <summary>Split<span className="sr-only"> of the estimate for {marketName(gap)}</span></summary>
+            <ul>
+              {ESTIMATE_PARTS.map(([key, label]) => (
+                <li key={key}><span>{label}</span><span>{format(estimated[key])}</span></li>
+              ))}
+            </ul>
+          </details>
+        )}
+    </td>
+  )
+}
+
+function Under20Cells({ gap }: { gap: CountryGap }) {
+  const { under_20: under20 } = gap
+  if (under20 === null) {
+    const reason = gap.open_ended ? NO_OVER_20_BAND : NO_AGE_SPLIT
+    return (
+      <td className="coverage-number" colSpan={3} title={reason}>
+        —<span className="sr-only"> {reason}</span>
+      </td>
+    )
+  }
+  return (
+    <>
+      <td className="coverage-number">{format(under20.official)}</td>
+      <td className="coverage-number">{format(under20.modelled)}</td>
+      <td className="coverage-number">{under20.modelled_share === null ? '—' : percent(under20.modelled_share)}</td>
+    </>
+  )
+}
+
+function CountryRow({ gap }: { gap: CountryGap }) {
+  return (
+    <tr>
+      <th scope="row">{marketName(gap)}</th>
+      <td>{gap.year}</td>
+      <td className="coverage-number">
+        {format(gap.official)}
+        <StatusFlag status={gap.official_status} />
+      </td>
+      <td className="coverage-number">{format(gap.modelled)}</td>
+      <td className="coverage-number">{gap.modelled_share === null ? '—' : percent(gap.modelled_share)}</td>
+      <EstimateCell gap={gap} />
+      {gap.bands.length === 0
+        ? <td className="coverage-muted" colSpan={3 + BAND_LABELS.length}>— {NO_AGE_SPLIT}</td>
+        : (
+          <>
+            <Under20Cells gap={gap} />
+            {BAND_LABELS.map(([band]) => <BandCell band={band} gap={gap} key={band} />)}
+          </>
+        )}
+    </tr>
+  )
+}
+
+/** One country's age bands with the split of each band's estimated gap. */
+function BandDetail({ gap }: { gap: CountryGap }) {
+  const market = marketName(gap)
+  return (
+    <details className="coverage-detail">
+      <summary>{market}: age bands and the estimate split</summary>
+      <div aria-label={`Age bands for ${market}`} className="coverage-scroll" role="region" tabIndex={0}>
+        <table className="coverage-table coverage-table--bands">
+          <caption className="sr-only">Age bands for {market}: official cars, model cars and the estimated split of each gap</caption>
+          <thead>
+            <tr>
+              <th scope="col">Age band</th>
+              <th scope="col">Official</th>
+              <th scope="col">Model</th>
+              <th scope="col">Estimated missing</th>
+              {ESTIMATE_PARTS.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
+              <th scope="col">Model above official</th>
+            </tr>
+          </thead>
+          <tbody>
+            {gap.bands.map((item) => (
+              <tr key={item.band}>
+                <th scope="row">{bandLabel(item.band, gap.open_ended)}</th>
+                <td className="coverage-number">
+                  {format(item.official)}
+                  <StatusFlag status={item.status} />
+                </td>
+                <td className="coverage-number">
+                  {format(item.modelled)}
+                  {item.modelled_alternative !== null && (
+                    <small className="coverage-aside">(other convention: {format(item.modelled_alternative)})</small>
+                  )}
+                </td>
+                <td className="coverage-number">{format(item.estimated.missing)}</td>
+                {ESTIMATE_PARTS.map(([key]) => (
+                  <td className="coverage-number" key={key}>{format(item.estimated[key])}</td>
+                ))}
+                <td className="coverage-number">
+                  {item.estimated.above_official > 0 ? format(item.estimated.above_official) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  )
+}
+
+function CountryNotes({ countries }: { countries: CountryGap[] }) {
+  const notes = countries.flatMap((gap) => countryNotes(gap).map((note) => ({ gap, note })))
+  const flags = hasStatus(countries)
+  if (notes.length === 0 && !flags) return null
+  return (
+    <div className="coverage-footnotes">
+      {notes.length > 0 && (
+        <ul aria-label="Notes on the countries">
+          {notes.map(({ gap, note }) => (
+            <li key={`${gap.geography}-${note}`}><strong>{marketName(gap)}</strong>: {note}</li>
+          ))}
+        </ul>
+      )}
+      {flags && (
+        <p className="coverage-note">
+          Eurostat flags on a figure:{' '}
+          {STATUS_LEGEND.map(([flag, text], index) => (
+            <span key={flag}>{index > 0 && ' · '}<strong>{flag}</strong> {text.toLowerCase()}</span>
+          ))}
+        </p>
+      )}
+    </div>
+  )
 }
 
 function CountriesTable({ countries }: { countries: CountryGap[] }) {
   if (countries.length === 0) return null
+  const sorted = sortCountries(countries)
+  const withBands = sorted.filter((gap) => gap.bands.length > 0)
   return (
     <section aria-labelledby="coverage-countries-title" className="coverage-panel">
       <h3 id="coverage-countries-title">Countries: official cars against the model</h3>
       <p className="coverage-note">Largest gap first. Age bands read official / model.</p>
+      <p className="coverage-note">
+        Estimated missing cars are country totals only. They are never assigned to a model or a Eurocode.
+      </p>
       <div aria-label="Countries table" className="coverage-scroll" role="region" tabIndex={0}>
-        <table className="coverage-table">
+        <table className="coverage-table coverage-table--countries">
           <caption className="sr-only">Official cars on the road against the model, by market and age band</caption>
           <thead>
             <tr>
@@ -129,28 +309,24 @@ function CountriesTable({ countries }: { countries: CountryGap[] }) {
               <th scope="col">Official cars</th>
               <th scope="col">Model cars</th>
               <th scope="col">Model share</th>
+              <th scope="col">Estimated missing (country total)</th>
+              <th scope="col">Under 20 years: official</th>
+              <th scope="col">Under 20 years: model</th>
+              <th scope="col">Under 20 years: share</th>
               {BAND_LABELS.map(([band, label]) => <th key={band} scope="col">{label}</th>)}
             </tr>
           </thead>
           <tbody>
-            {sortCountries(countries).map((gap) => (
-              <tr key={gap.geography}>
-                <th scope="row">
-                  {gap.geography}
-                  {gap.publisher_geography !== gap.geography && ` (${gap.publisher_geography})`}
-                </th>
-                <td>{gap.year}</td>
-                <td className="coverage-number">{format(gap.official)}</td>
-                <td className="coverage-number">{format(gap.modelled)}</td>
-                <td className="coverage-number">{gap.modelled_share === null ? '—' : percent(gap.modelled_share)}</td>
-                {BAND_LABELS.map(([band]) => (
-                  <td className="coverage-number" key={band}>{bandCell(gap, band)}</td>
-                ))}
-              </tr>
-            ))}
+            {sorted.map((gap) => <CountryRow gap={gap} key={gap.geography} />)}
           </tbody>
         </table>
       </div>
+      <CountryNotes countries={sorted} />
+      {withBands.length > 0 && (
+        <div className="coverage-details">
+          {withBands.map((gap) => <BandDetail gap={gap} key={gap.geography} />)}
+        </div>
+      )}
     </section>
   )
 }
