@@ -129,6 +129,7 @@ def create_app(
     client_release: bool = False,
     eurocodes: EurocodeMap | None = None,
     eurocode_report_dir: Path | None = None,
+    eurocode_report_snapshot_id: str | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
@@ -247,6 +248,13 @@ def create_app(
     app.state.snapshot_repository = snapshot_ledger
     app.state.eurocodes = eurocodes
     app.state.eurocode_report_dir = eurocode_report_dir
+    # The snapshot a data report must have been written for. A service composed
+    # without a snapshot (the browser fixture) names one explicitly.
+    app.state.eurocode_report_snapshot_id = (
+        snapshot_manifest.snapshot_id
+        if snapshot_manifest is not None
+        else eurocode_report_snapshot_id
+    )
     if eurocodes is not None and snapshot_manifest is not None and snapshot_ledger is not None:
         snapshot_status = SnapshotEurocodeStatus(
             eurocodes, snapshot_ledger.path, snapshot_manifest.snapshot_id

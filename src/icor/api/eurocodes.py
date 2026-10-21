@@ -76,20 +76,20 @@ def eurocode_data_coverage(request: Request) -> EurocodeDataCoverageResponse | J
             correlation_id=request.state.correlation_id,
         )
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
-    manifest = request.app.state.snapshot_manifest
+    snapshot_id = request.app.state.eurocode_report_snapshot_id
     directory = request.app.state.eurocode_report_dir
-    if manifest is None or directory is None:
+    if snapshot_id is None or directory is None:
         return EurocodeDataCoverageResponse(
             available=False, message="No snapshot report can be read by this service."
         )
-    path = report_path(directory, manifest.snapshot_id)
+    path = report_path(directory, snapshot_id)
     if not path.is_file():
         return EurocodeDataCoverageResponse(available=False, message=_RUN_REPORT)
     document = json.loads(path.read_text(encoding="utf-8"))
     if (
         document.get("format") != DOCUMENT_FORMAT
         or document.get("version") != DOCUMENT_VERSION
-        or document.get("snapshot_id") != manifest.snapshot_id
+        or document.get("snapshot_id") != snapshot_id
         or document.get("catalogue_sha256") != eurocodes.catalogue_sha256
     ):
         return EurocodeDataCoverageResponse(

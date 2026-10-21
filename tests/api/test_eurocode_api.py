@@ -8,7 +8,6 @@ import json
 from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -237,9 +236,12 @@ def _data_client(tmp_path: Path, document: dict | None) -> TestClient:
     reports.mkdir()
     if document is not None:
         report_path(reports, "demo-snapshot").write_text(json.dumps(document))
-    test_client = _client(tmp_path, eurocodes=demo_eurocodes(), eurocode_report_dir=reports)
-    test_client.app.state.snapshot_manifest = SimpleNamespace(snapshot_id="demo-snapshot")
-    return test_client
+    return _client(
+        tmp_path,
+        eurocodes=demo_eurocodes(),
+        eurocode_report_dir=reports,
+        eurocode_report_snapshot_id="demo-snapshot",
+    )
 
 
 def test_the_data_report_for_the_active_snapshot_is_served(tmp_path: Path) -> None:
