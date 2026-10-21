@@ -16,6 +16,7 @@ export const queryKeys = {
     ['opportunities', groupId, 'fleet', query] as const,
   coverage: ['production-coverage'] as const,
   eurocodeStatus: ['eurocodes', 'status'] as const,
+  eurocodeDataCoverage: ['eurocodes', 'data-coverage'] as const,
 }
 
 

@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
+import tempfile
+from decimal import Decimal
 from pathlib import Path
 
 from icor.api.app import create_app
+from icor.api.eurocodes import report_path
 from icor.application.completeness import CompletenessQueryService
 from icor.application.evidence_review import EvidenceReviewService
 from icor.application.registrations import RegistrationService
 from icor.domain.planner import DemandRange
 from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.data_coverage import FleetCell, FleetRange, OfficialStock, build_report
 from icor.eurocodes.demo import demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
@@ -45,6 +50,57 @@ def _fictional_eurocodes() -> EurocodeBreakdown:
             for identity, year, units in cells
         ),
     )
+
+
+E2E_REPORT_SNAPSHOT_ID = "e2e-fixture"
+
+
+def _fleet_cell(identity, raw_model, geography, year, evidence, cars, *, sources=()):  # type: ignore[no-untyped-def]
+    units = Decimal(cars)
+    return FleetCell(
+        identity=identity,
+        raw_model=raw_model,
+        geography=geography,
+        cohort_year=year,
+        evidence=evidence,
+        fleet=FleetRange(units * Decimal("0.9"), units, units * Decimal("1.1")),
+        fleet_2028=units * Decimal("0.8"),
+        sources=frozenset(sources),
+    )
+
+
+def _write_data_report() -> Path:
+    """The Eurocode data report for fictional cars only, in a fresh temporary directory."""
+
+    aurora, meridian = "aurora mobility|a1 horizon", "meridian motors|m5 vector"
+    cells = [
+        _fleet_cell(aurora, "A1 HORIZON", "DE", 2022, "registrations", 4000, sources={"pub-a"}),
+        _fleet_cell(aurora, "A1 HORIZON", "FR", 2022, "registrations", 2500, sources={"pub-a"}),
+        _fleet_cell(aurora, "A1 HORIZON", "NL", 2023, "interpolated", 900),
+        # 2025 is a launch year both Aurora codes cover: shared, never split.
+        _fleet_cell(aurora, "A1 HORIZON", "DE", 2025, "registrations", 600, sources={"pub-a"}),
+        _fleet_cell(meridian, "M5 VECTOR", "DE", 2024, "stock", 300, sources={"pub-b"}),
+        _fleet_cell(meridian, "M5 VECTOR", "DE", 2025, "interpolated", 1800),
+        _fleet_cell(meridian, "M5 VECTOR", "FR", 2026, "forecast", 300),
+    ]
+    report = build_report(
+        demo_eurocodes(),
+        cells,
+        year=2026,
+        snapshot_id=E2E_REPORT_SNAPSHOT_ID,
+        official_stock={
+            "DE": OfficialStock(
+                geography="DE",
+                year=2026,
+                total=10_000,
+                bands={"Y_LT2": 1_000, "Y2-5": 2_500, "Y5-10": 3_000, "Y10-20": 2_500},
+            )
+        },
+        official_fleet={"DE": {2025: Decimal(2400), 2024: Decimal(300), 2022: Decimal(4000)}},
+    )
+    directory = Path(tempfile.mkdtemp(prefix="icor-e2e-data-report-"))
+    report_path(directory, E2E_REPORT_SNAPSHOT_ID).write_text(json.dumps(report), encoding="utf-8")
+    return directory
 
 
 class E2EVehicleForecasts:
@@ -134,6 +190,8 @@ def create_e2e_app():  # type: ignore[no-untyped-def]
         ),
         vehicle_forecast_service=E2EVehicleForecasts(),
         eurocodes=demo_eurocodes(),
+        eurocode_report_dir=_write_data_report(),
+        eurocode_report_snapshot_id=E2E_REPORT_SNAPSHOT_ID,
     )
 
 

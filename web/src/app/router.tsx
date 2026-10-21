@@ -16,7 +16,9 @@ import { ConfigurationDetailPage } from '../features/planner/ConfigurationDetail
 import { PlannerPage } from '../features/planner/PlannerPage'
 import { RegistrationsPage } from '../features/registrations/RegistrationsPage'
 import { CompletenessPage } from '../features/completeness/CompletenessPage'
+import { DataCoveragePage } from '../features/data-coverage/DataCoveragePage'
 import { ExportPage } from '../features/exports/ExportPage'
+import { parseDataCoverageSearch, type DataCoverageSearch } from '../lib/data-coverage-search'
 import { parseEvidenceSearch, type EvidenceSearch } from '../lib/evidence-search'
 import { parsePlannerSearch, type PlannerRouteSearch } from '../lib/planner-search'
 import {
@@ -147,6 +149,16 @@ export const completenessRoute = createRoute({
   errorComponent: RouteErrorFallback,
 })
 
+export const dataCoverageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/data-coverage',
+  validateSearch: (raw: DataCoverageSearch) => parseDataCoverageSearch(
+    raw as unknown as Record<string, unknown>,
+  ),
+  component: DataCoveragePage,
+  errorComponent: RouteErrorFallback,
+})
+
 export const exportRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/exports',
@@ -163,6 +175,7 @@ const routeTree = rootRoute.addChildren([
   opportunityDetailRoute,
   evidenceRoute,
   completenessRoute,
+  dataCoverageRoute,
   exportRoute,
 ])
 

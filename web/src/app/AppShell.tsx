@@ -1,5 +1,5 @@
 import { Outlet } from '@tanstack/react-router'
-import { BarChart3, Database, Download, Menu, Search, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { BarChart3, Database, Gauge, Download, Menu, Search, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useState, type PropsWithChildren } from 'react'
 
 import { EvidenceBadge } from '../components/EvidenceBadge'
@@ -14,6 +14,7 @@ const navigationIcons: Record<string, LucideIcon> = {
   '/registrations': Database,
   '/evidence': ShieldCheck,
   '/completeness': ShieldCheck,
+  '/data-coverage': Gauge,
   '/exports': Download,
 }
 
@@ -43,6 +44,7 @@ function PrimaryLinks({ clientRelease }: { clientRelease: boolean }) {
         <NavigationLink href="/registrations" label="Official registrations" />
         <NavigationLink href="/evidence" label="Source evidence" />
         <NavigationLink href="/completeness" label="Completeness" />
+        <NavigationLink href="/data-coverage" label="Data coverage" />
         <span className="navigation-section-label">Administration</span>
         <NavigationLink href="/exports" label="ML export" />
       </>}

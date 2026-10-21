@@ -23,6 +23,7 @@ type RegistrationPage = components['schemas']['RegistrationPageResponse']
 type CompletenessReport = components['schemas']['CompletenessResponse']
 type VehicleForecastOptions = components['schemas']['VehicleForecastOptionsResponse']
 type EurocodeStatus = components['schemas']['EurocodeStatusResponse']
+type EurocodeDataCoverage = components['schemas']['EurocodeDataCoverageResponse']
 type VehicleForecast = components['schemas']['VehicleForecastResponse']
 type ApiQuery = NonNullable<
   operations['configurations_api_v1_planner_configurations_get']['parameters']['query']
@@ -258,6 +259,10 @@ export class PlannerApiClient {
 
   async eurocodeStatus(): Promise<EurocodeStatus> {
     return this.request<EurocodeStatus>('/api/v1/eurocodes/status')
+  }
+
+  async eurocodeDataCoverage(): Promise<EurocodeDataCoverage> {
+    return this.request<EurocodeDataCoverage>('/api/v1/eurocodes/data-coverage')
   }
 
   async coverage(): Promise<ProductionCoverage[]> {
