@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eurocode data coverage</title>
+<style>
+:root{--ink:#0b2545;--muted:#5b6b82;--line:#d9e1ec;--cyan:#00a7c4;--bg:#fff;--soft:#f3f7fb}
+body{margin:0;font:14px/1.4 -apple-system,system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+header{padding:16px 24px;border-bottom:3px solid var(--cyan)}
+h1{margin:0;font-size:20px} .sub{color:var(--muted)}
+main{padding:16px 24px} section{margin-bottom:28px}
+.kpis{display:flex;gap:12px;flex-wrap:wrap}
+.kpi{border:1px solid var(--line);padding:10px 14px;min-width:150px}
+.kpi b{display:block;font-size:20px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;white-space:nowrap}
+th{background:var(--soft);cursor:pointer;position:sticky;top:0}
+td.n,th.n{text-align:right} .tier{font-weight:700}
+.A{color:#1b7f3b}.B{color:#00799a}.C{color:#b25e00}.D{color:#b3261e}
+input,select{font:inherit;padding:4px 6px;border:1px solid var(--line)}
+.wrap{overflow-x:auto}
+</style></head><body>
+<header><h1>Eurocode data coverage</h1>
+<div class="sub" id="meta"></div></header>
+<main>
+<section><div class="kpis" id="kpis"></div></section>
+<section><h2>Countries: official cars on the road vs the model</h2>
+<div class="wrap"><table id="gap"></table></div></section>
+<section><h2>Eurocodes</h2>
+<p><input id="q" placeholder="Search code, vehicle"> <select id="tier">
+<option value="">All tiers</option><option>A</option><option>B</option><option>C</option>
+<option>D</option></select> <span id="count" class="sub"></span></p>
+<div class="wrap"><table id="codes"></table></div></section>
+</main>
+<script>
+const R = __DATA__;
+const fmt = n => n == null ? "" : Number(n).toLocaleString("en-GB");
+const pct = n => n == null ? "" : (100 * n).toFixed(1) + "%";
+document.getElementById("meta").textContent =
+  `Snapshot ${R.snapshot_id} · cars on the road at end of ${R.year} (P50) · ` +
+  `tier A: ≥${pct(R.thresholds.tier_a_observed_share)} observed in ≥${R.thresholds.tier_a_markets} markets, ` +
+  `B: ≥${pct(R.thresholds.tier_b_observed_share)}, C: less, D: no cars in the model`;
+const t = R.totals;
+const kpi = (label, value) => `<div class="kpi">${label}<b>${value}</b></div>`;
+document.getElementById("kpis").innerHTML =
+  kpi("Cars in the model", fmt(t.fleet)) +
+  kpi("Observed (register + registrations)", pct((t.by_evidence.register + t.by_evidence.registrations) / t.fleet)) +
+  ["A","B","C","D"].map(k => kpi(`Tier ${k}`, `${fmt(t.tiers[k].codes)} codes · ${fmt(t.tiers[k].certain_p50)} cars`)).join("");
+const bands = ["Y_LT2","Y2-5","Y5-10","Y10-20","Y_GT20"];
+const bandLabel = {"Y_LT2":"<2","Y2-5":"2–4","Y5-10":"5–9","Y10-20":"10–19","Y_GT20":"20+"};
+document.getElementById("gap").innerHTML =
+  "<tr><th>Market</th><th class=n>Official</th><th class=n>Model</th><th class=n>Model share</th>" +
+  bands.map(b => `<th class=n>${bandLabel[b]} y: official / model</th>`).join("") + "</tr>" +
+  R.country_gap.map(g => `<tr><td>${g.geography}${g.publisher_geography !== g.geography ? " (" + g.publisher_geography + ")" : ""} ${g.year}</td>` +
+    `<td class=n>${fmt(g.official)}</td><td class=n>${fmt(g.modelled)}</td><td class=n>${pct(g.modelled_share)}</td>` +
+    g.bands.map(b => `<td class=n>${fmt(b.official)} / ${fmt(b.modelled)}</td>`).join("") + "</tr>").join("");
+const rows = R.codes.map(c => ({code:c.code,label:c.label,tier:c.tier,years:`${c.first_year}–${c.last_year ?? ""}`,
+  cars:c.fleet.certain_p50,shared:c.fleet.shared_p50,observed:c.observed_share,markets:c.observed_markets.length,
+  sources:c.sources.length,flags:c.flags.join(" ")})).concat(R.no_data.map(c => ({code:c.code,
+  label:c.label || c.descriptions.join(" | "),tier:"D",years:`${c.first_year ?? ""}–${c.last_year ?? ""}`,cars:0,shared:0,
+  observed:null,markets:0,sources:0,flags:c.reviewed ? "reviewed, no cars" : "not reviewed"})));
+const cols = [["code","Code"],["label","Vehicles"],["tier","Tier"],["years","Years"],["cars","Cars (certain)","n"],
+  ["shared","Shared","n"],["observed","Observed","n"],["markets","Observed markets","n"],["sources","Sources","n"],["flags","Flags"]];
+let sortKey = "cars", dir = -1;
+function draw() {
+  const q = document.getElementById("q").value.toLowerCase(), tier = document.getElementById("tier").value;
+  const list = rows.filter(r => (!tier || r.tier === tier) && (!q || (r.code + " " + r.label).toLowerCase().includes(q)))
+    .sort((a, b) => ((a[sortKey] ?? -1) > (b[sortKey] ?? -1) ? 1 : (a[sortKey] ?? -1) < (b[sortKey] ?? -1) ? -1 : 0) * dir);
+  document.getElementById("count").textContent = `${fmt(list.length)} codes`;
+  document.getElementById("codes").innerHTML = "<tr>" + cols.map(([k, l, n]) => `<th data-k="${k}" class="${n || ""}">${l}</th>`).join("") + "</tr>" +
+    list.slice(0, 2000).map(r => "<tr>" + cols.map(([k, , n]) => {
+      const v = k === "observed" ? pct(r[k]) : n ? fmt(r[k]) : (r[k] ?? "");
+      return `<td class="${n || ""} ${k === "tier" ? "tier " + r.tier : ""}">${String(v).replace(/[&<>]/g, s => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[s]))}</td>`;
+    }).join("") + "</tr>").join("");
+  document.querySelectorAll("#codes th").forEach(th => th.onclick = () => { const k = th.dataset.k; dir = k === sortKey ? -dir : -1; sortKey = k; draw(); });
+}
+document.getElementById("q").oninput = draw; document.getElementById("tier").onchange = draw; draw();
+</script></body></html>
