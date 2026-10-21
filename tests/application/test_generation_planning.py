@@ -5,7 +5,12 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from icor.application.generation_planning import GenerationPlanningService
-from icor.domain.evidence import ConfidenceBand, Measure
+from icor.domain.evidence import (
+    STOCK_LOWER_BOUND_FLAG,
+    STOCK_LOWER_BOUND_REASON,
+    ConfidenceBand,
+    Measure,
+)
 from icor.domain.generations import GenerationIdentityKind
 
 
@@ -527,12 +532,13 @@ def test_the_only_publisher_present_decomposes_the_country_year() -> None:
     assert result.superseded_coverage_input_count == 0
 
 
-def _add_stock(repository, generation, geography: str, stock_date: date, cohorts):
+def _add_stock(repository, generation, geography: str, stock_date: date, cohorts, *, flags=()):
     """Observed active fleet by cohort, as the RDW register or DfT VEH0124 report it."""
 
     observations = tuple(
         SimpleNamespace(
             observation_id=f"stock-{generation.generation_id}-{geography.lower()}-{year}",
+            validation_flags=flags,
             release_id="release-stock",
             canonical_vehicle_id=generation.canonical_vehicle_id,
             geography=geography,
@@ -635,6 +641,82 @@ def test_stock_in_a_geography_without_registrations_is_never_added_on_top() -> N
 
     assert {item.geography for item in repository.cohorts} == {"DE"}
     assert {item.geography for item in repository.opportunities} == {"DE"}
+
+
+def test_a_register_replaces_only_the_cohort_years_it_reports() -> None:
+    """A register published only for old cohorts must not erase the newer ones.
+
+    Spain's DGT stock is used for cohorts before 2010 only; its 2025 year end
+    once made every DE-style registration cohort up to 2025 disappear.
+    """
+
+    repository = Repository()
+    _add_stock(
+        repository,
+        repository.generation,
+        "DE",
+        date(2025, 12, 31),
+        ((2005, "40"), (2006, "45")),
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    cohorts = {
+        item.registration_cohort_year: item
+        for item in repository.cohorts
+        if item.as_of_year == 2028
+    }
+    assert {2005, 2006, 2020, 2021, 2022} <= set(cohorts)
+    for year in (2005, 2006):
+        assert "observed-stock-anchored-cohort" in cohorts[year].reason_codes
+    for year in (2020, 2021, 2022):
+        assert "reconciled-registration-cohort" in cohorts[year].reason_codes
+        assert cohorts[year].registrations == Decimal((100, 110, 120)[year - 2020])
+
+
+def test_a_register_year_replaces_every_vehicle_in_that_market_year() -> None:
+    """Within a year the register reports, it is the market's count of record.
+
+    A vehicle the register files under another name sold its cars there too,
+    so its registration cohort for that year is not added on top.
+    """
+
+    repository = Repository()
+    other = _add_vehicle(repository, "other", ())
+    _add_stock(repository, other, "DE", date(2025, 12, 31), ((2021, "30"),))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    golf_years = _cohort_years(repository, "vehicle-volkswagen-golf-eu")
+    assert 2021 not in golf_years
+    assert {2020, 2022} <= golf_years
+
+
+def test_lower_bound_stock_keeps_its_label_on_every_cohort() -> None:
+    repository = Repository()
+    _add_stock(
+        repository,
+        repository.generation,
+        "DE",
+        date(2025, 12, 31),
+        ((2005, "40"), (2006, "45")),
+        flags=(STOCK_LOWER_BOUND_FLAG,),
+    )
+    _add_stock(
+        repository, repository.generation, "DE", date(2025, 12, 31), ((2007, "50"),)
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    codes = {
+        item.registration_cohort_year: item.reason_codes
+        for item in repository.cohorts
+        if item.as_of_year == 2028
+    }
+    assert STOCK_LOWER_BOUND_REASON in codes[2005]
+    assert STOCK_LOWER_BOUND_REASON in codes[2006]
+    assert STOCK_LOWER_BOUND_REASON not in codes[2007]
+    assert codes[2005][0] == "observed-stock-anchored-cohort"
 
 
 def test_a_gap_in_a_year_the_market_reported_is_not_invented() -> None:

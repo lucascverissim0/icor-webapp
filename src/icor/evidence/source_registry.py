@@ -14,6 +14,8 @@ from icor.evidence.identity import (
     ExactNormalizedIdentityResolver,
     IdentityAttributingRepository,
 )
+from icor.evidence.sources.dgt import PARSER_NAME as DGT_PARSER_NAME
+from icor.evidence.sources.dgt import DGTParqueLoader
 from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
 from icor.evidence.sources.rdw import PARSER_NAME as RDW_PARSER_NAME
@@ -33,7 +35,7 @@ OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     identity_registry="exact-normalized-model-family-v1",
     reconciliation_method="single-coverage-corroboration-v2",
     confidence_method="source-evidence-v1",
-    estimation_method="reported-years-stock-anchored-cohorts-v3",
+    estimation_method="register-years-stock-anchored-cohorts-v4",
     survival_method="uk-dft-licensed-stock-band-v1",
     hazard_method="france-insurance-windshield-hazard-v2",
     forecast_method="validated-recency-damped-ensemble-v2",
@@ -55,6 +57,7 @@ def official_loader_registry() -> Mapping[str, EvidenceLoader]:
         "uk_dft_veh0124_csv_v1": UKVehicleAgeLoader(),
         RDW_PARSER_NAME: RDWRegisteredCarsLoader(),
         TRAFICOM_PARSER_NAME: TraficomVehicleLoader(),
+        DGT_PARSER_NAME: DGTParqueLoader(),
     }
 
 

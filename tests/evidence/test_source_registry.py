@@ -1,4 +1,5 @@
 from icor.evidence.source_registry import OFFICIAL_SOURCE_VERSIONS, official_loader_registry
+from icor.evidence.sources.dgt import DGTParqueLoader
 from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
 from icor.evidence.sources.rdw import RDWRegisteredCarsLoader
@@ -22,6 +23,7 @@ def test_official_registry_contains_only_reviewed_parser_contracts() -> None:
         "uk_dft_veh0124_csv_v1",
         "rdw_registered_cars_csv_v1",
         "traficom_vehicles_zip_v1",
+        "dgt_parque_cohorts_csv_v1",
     }
     assert isinstance(registry["eea_co2_cars_zip_v1"], EEAPassengerCarLoader)
     assert isinstance(
@@ -33,6 +35,7 @@ def test_official_registry_contains_only_reviewed_parser_contracts() -> None:
     assert isinstance(registry["uk_dft_veh0124_csv_v1"], UKVehicleAgeLoader)
     assert isinstance(registry["rdw_registered_cars_csv_v1"], RDWRegisteredCarsLoader)
     assert isinstance(registry["traficom_vehicles_zip_v1"], TraficomVehicleLoader)
+    assert isinstance(registry["dgt_parque_cohorts_csv_v1"], DGTParqueLoader)
 
 
 def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() -> None:
@@ -49,7 +52,7 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
     )
     assert (
         OFFICIAL_SOURCE_VERSIONS.estimation_method
-        == "reported-years-stock-anchored-cohorts-v3"
+        == "register-years-stock-anchored-cohorts-v4"
     )
     assert OFFICIAL_SOURCE_VERSIONS.survival_method == "uk-dft-licensed-stock-band-v1"
     assert (

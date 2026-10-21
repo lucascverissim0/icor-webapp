@@ -10,7 +10,12 @@ from decimal import Decimal
 from typing import Protocol
 
 from icor.domain.cohorts import CohortEstimate, OpportunityEstimate
-from icor.domain.evidence import ConfidenceBand, Measure
+from icor.domain.evidence import (
+    STOCK_LOWER_BOUND_FLAG,
+    STOCK_LOWER_BOUND_REASON,
+    ConfidenceBand,
+    Measure,
+)
 from icor.domain.generations import GenerationIdentityKind
 from icor.evidence.normalization import stable_evidence_id
 from icor.forecasting.reconciliation import (
@@ -270,6 +275,12 @@ class GenerationPlanningService:
             if key[2] in anchor_year
         }
         anchored_stock = {key: cohorts for key, cohorts in anchored_stock.items() if cohorts}
+        # The register is the market's count of record only for the cohort years
+        # it reports. One published for old cohorts alone (Spain's, before 2010)
+        # leaves the newer years to registrations.
+        stock_years: dict[str, set[int]] = defaultdict(set)
+        for (_generation, _vehicle, geography), cohorts in anchored_stock.items():
+            stock_years[geography].update(cohorts)
 
         evidence_only_series_count = short_history_series_count = 0
         stock_anchored_series_count = beyond_support_cohort_count = 0
@@ -323,7 +334,7 @@ class GenerationPlanningService:
                 values = {
                     year: annual
                     for year, annual in values.items()
-                    if year > anchor_year[geography]
+                    if year not in stock_years[geography]
                 }
             if not values and not stock:
                 evidence_only_series_count += 1
@@ -350,6 +361,7 @@ class GenerationPlanningService:
                         cohort_codes = (
                             "observed-stock-anchored-cohort",
                             self.survival.reason_code(geography),
+                            *annual.extra_reason_codes,
                         )
                     else:
                         annual = values[cohort_year]
@@ -553,6 +565,9 @@ def _collect_stock(observation, assignment, stock_dates, stock_series) -> None:
     key = (assignment.selected_generation_id, observation.canonical_vehicle_id, geography)
     cohorts = stock_series.setdefault(key, {})
     existing = cohorts.get(year)
+    lower_bound = STOCK_LOWER_BOUND_FLAG in observation.validation_flags or bool(
+        existing and existing.extra_reason_codes
+    )
     cohorts[year] = _AnnualValue(
         (existing.registrations if existing else Decimal(0)) + observation.value,
         tuple(
@@ -561,6 +576,7 @@ def _collect_stock(observation, assignment, stock_dates, stock_series) -> None:
             )
         ),
         "observed-stock",
+        (STOCK_LOWER_BOUND_REASON,) if lower_bound else (),
     )
 
 

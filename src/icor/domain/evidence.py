@@ -52,6 +52,13 @@ class ConfidenceBand(StrEnum):
     HIGH = "high"
 
 
+#: Validation flag on an active-fleet observation that counts only part of its
+#: cars, such as a register that masks rare model names: the cars are at least
+#: this many, and the cohorts built from it say so.
+STOCK_LOWER_BOUND_FLAG = "stock-lower-bound"
+#: Reason code on a cohort built from such an observation.
+STOCK_LOWER_BOUND_REASON = "observed-stock-lower-bound"
+
 _IDENTIFIER_PATTERN = r"[a-z0-9][a-z0-9._-]{0,79}"
 _SHA256_PATTERN = r"[0-9a-f]{64}"
 _NON_PUBLISHABLE_STATUSES = frozenset(
