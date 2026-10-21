@@ -31,7 +31,7 @@ from icor.forecasting.survival import load_promoted_survival_model
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
-    source_registry="official-sources-v1",
+    source_registry="official-sources-v2",
     identity_registry="exact-normalized-model-family-v1",
     reconciliation_method="single-coverage-corroboration-v2",
     confidence_method="source-evidence-v1",

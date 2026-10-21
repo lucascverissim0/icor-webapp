@@ -11,6 +11,8 @@ from typing import Protocol
 
 from icor.domain.cohorts import CohortEstimate, OpportunityEstimate
 from icor.domain.evidence import (
+    MODEL_RECOVERED_FLAG,
+    MODEL_RECOVERED_REASON,
     STOCK_LOWER_BOUND_FLAG,
     STOCK_LOWER_BOUND_REASON,
     ConfidenceBand,
@@ -118,6 +120,8 @@ class GenerationPlanningService:
         release_buckets: dict[
             tuple[str, str, str, int, str], tuple[Decimal, list[str]]
         ] = {}
+        # Release buckets holding registrations named from their type approval.
+        recovered_buckets: set[tuple[str, str, str, int, str]] = set()
         # Observed active fleet by cohort, kept only at each market's newest
         # stock date so memory holds one register snapshot per market.
         stock_dates: dict[str, date] = {}
@@ -143,6 +147,8 @@ class GenerationPlanningService:
                 year,
                 observation.release_id,
             )
+            if MODEL_RECOVERED_FLAG in observation.validation_flags:
+                recovered_buckets.add(key)
             value, identifiers = release_buckets.get(key, (Decimal(0), []))
             release_buckets[key] = (
                 value + observation.value,
@@ -215,13 +221,18 @@ class GenerationPlanningService:
                     ]
                 )
             )
+            recovered = any(
+                (generation_id, vehicle_id, geography, year, release_id) in recovered_buckets
+                for release_id in result.selected_input_ids
+            )
             series[generation_id, vehicle_id, geography][year] = _AnnualValue(
                 result.value,
                 observation_ids,
                 result.status,
                 _coverage_reason_codes(
                     result.agreement, coverage_corroborators[geography, year]
-                ),
+                )
+                + ((MODEL_RECOVERED_REASON,) if recovered else ()),
             )
 
         cohort_buffer: list[CohortEstimate] = []

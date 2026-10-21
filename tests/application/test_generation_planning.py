@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 from icor.application.generation_planning import GenerationPlanningService
 from icor.domain.evidence import (
+    MODEL_RECOVERED_FLAG,
+    MODEL_RECOVERED_REASON,
     STOCK_LOWER_BOUND_FLAG,
     STOCK_LOWER_BOUND_REASON,
     ConfidenceBand,
@@ -39,6 +41,7 @@ class Repository:
                 period_start=date(year, 1, 1),
                 period_end=date(year, 12, 31),
                 measure=Measure.NEW_REGISTRATIONS,
+                validation_flags=(),
                 value=Decimal(value),
             )
             for year, value in ((2020, "100"), (2021, "110"), (2022, "120"))
@@ -126,6 +129,7 @@ def _add_vehicle(repository, name: str, years_values, *, kind=None, end_month=No
             period_start=date(year, 1, 1),
             period_end=date(year, 12, 31),
             measure=Measure.NEW_REGISTRATIONS,
+            validation_flags=(),
             value=Decimal(value),
         )
         for year, value in years_values
@@ -366,6 +370,7 @@ class TwoPublisherRepository:
                     period_start=date(year, 1, 1),
                     period_end=date(year, 12, 31),
                     measure=Measure.NEW_REGISTRATIONS,
+                    validation_flags=(),
                     value=Decimal("100"),
                 )
             )
@@ -380,6 +385,7 @@ class TwoPublisherRepository:
                         period_start=date(year, 1 + 3 * quarter, 1),
                         period_end=date(year, 3 + 3 * quarter, 28),
                         measure=Measure.NEW_REGISTRATIONS,
+                        validation_flags=(),
                         value=Decimal("24"),
                     )
                 )
@@ -393,6 +399,7 @@ class TwoPublisherRepository:
                     period_start=date(year, 1, 1),
                     period_end=date(year, 12, 31),
                     measure=Measure.NEW_REGISTRATIONS,
+                    validation_flags=(),
                     value=Decimal("40"),
                 )
             )
@@ -717,6 +724,22 @@ def test_lower_bound_stock_keeps_its_label_on_every_cohort() -> None:
     assert STOCK_LOWER_BOUND_REASON in codes[2006]
     assert STOCK_LOWER_BOUND_REASON not in codes[2007]
     assert codes[2005][0] == "observed-stock-anchored-cohort"
+
+
+def test_registrations_named_from_their_type_approval_say_so_on_their_cohort() -> None:
+    repository = Repository()
+    repository.observations[1].validation_flags = (MODEL_RECOVERED_FLAG,)
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    codes = {
+        item.registration_cohort_year: item.reason_codes
+        for item in repository.cohorts
+        if item.as_of_year == 2028
+    }
+    assert MODEL_RECOVERED_REASON in codes[2021]
+    assert MODEL_RECOVERED_REASON not in codes[2020]
+    assert MODEL_RECOVERED_REASON not in codes[2022]
 
 
 def test_a_gap_in_a_year_the_market_reported_is_not_invented() -> None:

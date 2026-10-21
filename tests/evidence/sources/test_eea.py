@@ -215,6 +215,38 @@ def test_loader_rejects_unidentifiable_rows_and_reconciles_manifest(tmp_path: Pa
     ]
 
 
+def test_loader_names_unnamed_rows_from_their_type_approval(tmp_path: Path) -> None:
+    named = [
+        _row(identifier=str(number), country="DK", make="VW", model="GOLF", variant="A")
+        for number in range(25)
+    ]
+    unnamed = [
+        _row(identifier=f"u{number}", country="DK", make="VW", model="", variant="A")
+        for number in range(3)
+    ]
+    release = _stored_release(tmp_path, [*named, *unnamed])
+    release = replace(
+        release,
+        manifest=replace(release.manifest, accepted_record_count=25, rejected_record_count=3),
+    )
+    repository = SQLiteEvidenceRepository(tmp_path / "evidence.sqlite3", writable=True)
+    repository.add_release(release.manifest)
+
+    EEAPassengerCarLoader().load((release,), repository)
+
+    rows = sorted(
+        (row.original_model, row.value, row.validation_flags)
+        for row in repository.list_observations()
+    )
+    assert rows == [
+        ("GOLF", Decimal("3"), ("model-recovered-by-type-approval",)),
+        ("GOLF", Decimal("25"), ()),
+    ]
+    recovered = [row for row in repository.list_observations() if row.validation_flags]
+    assert recovered[0].normalized_model == "golf"
+    assert any("no commercial name" in note for note in recovered[0].transformation_notes)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [("Status", "P", "final status"), ("Year", "2023", "2024"), ("R", "2", "weight")],
@@ -380,12 +412,107 @@ def test_annual_aggregate_loader_reconciles_source_rows_and_registration_weights
     EEAAnnualAggregateLoader().load((release,), repository)
 
     observations = repository.list_observations()
-    assert sorted(
-        (row.geography, row.original_model, row.value) for row in observations
-    ) == [
+    assert sorted((row.geography, row.original_model, row.value) for row in observations) == [
         ("DE", "GOLF", Decimal("6")),
         ("FR", "CLIO", Decimal("3")),
     ]
     assert {row.registration_cohort_year for row in observations} == {2010}
     assert {row.manufacture_year for row in observations} == {None}
     assert {row.model_year for row in observations} == {None}
+
+
+def test_annual_aggregate_loader_names_unnamed_groups_from_their_type_approval(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "eea-2022-final.csv"
+    base = {
+        "Year": "2022",
+        "Status": "F",
+        "Version_file": "v26",
+        "MS": "DK",
+        "Mk": "skoda",
+        "TAN": "e8*2007/46*0001",
+        "T": "ne",
+        "Va": "a",
+        "Ve": "1",
+        "Ft": "petrol",
+    }
+    rows = [
+        {**base, "Cn": "octavia", "Registrations": "40", "SourceRows": "40"},
+        {**base, "Cn": "", "Registrations": "60", "SourceRows": "60"},
+        {**base, "Cn": "", "Va": "zz", "Registrations": "5", "SourceRows": "5"},
+    ]
+    with artifact.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(
+            stream, (*base, "Cn", "Registrations", "SourceRows"), delimiter=";", lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    lines = artifact.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split(";")
+    order = [
+        "Year",
+        "Status",
+        "Version_file",
+        "MS",
+        "Mk",
+        "Cn",
+        "TAN",
+        "T",
+        "Va",
+        "Ve",
+        "Ft",
+        "Registrations",
+        "SourceRows",
+    ]
+    reordered = [";".join(order)] + [
+        ";".join(dict(zip(header, line.split(";"), strict=True))[name] for name in order)
+        for line in lines[1:]
+    ]
+    artifact.write_text("\n".join(reordered) + "\n", encoding="utf-8")
+    manifest = ReleaseManifest(
+        release_id="eea-co2cars-2022-final-v26",
+        source_id="eea-co2-monitoring",
+        publisher="European Environment Agency / DG CLIMA",
+        source_url="https://discodata.eea.europa.eu/sql",
+        retrieved_at=datetime(2026, 8, 28, tzinfo=UTC),
+        published_at=datetime(2023, 12, 31, tzinfo=UTC),
+        coverage_start=date(2022, 1, 1),
+        coverage_end=date(2022, 12, 31),
+        geography="EEA reporting countries",
+        geography_version="EEA CO2 monitoring 2022 final v26",
+        measure=Measure.NEW_REGISTRATIONS,
+        unit="vehicles",
+        publication_status=PublicationStatus.FINAL,
+        dependency_group="european-passenger-car-registrations-2022",
+        terms_url="https://creativecommons.org/licenses/by/4.0/",
+        permitted_local_use="CC BY 4.0 with attribution",
+        artifact_path="artifact.csv",
+        artifact_bytes=artifact.stat().st_size,
+        sha256=sha256_file(artifact),
+        parser_name="eea_co2_cars_annual_aggregate_csv_v1",
+        parser_version="v1",
+        expected_schema="EEA 2022 final v26 canonical aggregate export",
+        raw_record_count=105,
+        accepted_record_count=40,
+        rejected_record_count=65,
+        quarantined_record_count=0,
+    )
+    release = StoredRelease(
+        manifest.source_id, manifest.release_id, artifact, tmp_path / "manifest.json", manifest
+    )
+    repository = SQLiteEvidenceRepository(tmp_path / "annual.sqlite3", writable=True)
+    repository.add_release(manifest)
+
+    EEAAnnualAggregateLoader().load((release,), repository)
+
+    rows = sorted(
+        (row.geography, row.original_model, row.value, row.validation_flags)
+        for row in repository.list_observations()
+    )
+    # The 'zz' variant is unknown at the most specific key and the next one, but
+    # (Mk, TAN, T) names it: all 40 named cars of that approval are Octavias.
+    assert rows == [
+        ("DK", "octavia", Decimal("40"), ()),
+        ("DK", "octavia", Decimal("65"), ("model-recovered-by-type-approval",)),
+    ]

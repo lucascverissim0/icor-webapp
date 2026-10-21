@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 import sqlite3
 import tempfile
 from collections.abc import Iterator
@@ -15,6 +16,7 @@ from re import fullmatch
 from zipfile import BadZipFile, ZipFile
 
 from icor.domain.evidence import (
+    MODEL_RECOVERED_FLAG,
     EvidenceConfidence,
     MappingStatus,
     Measure,
@@ -23,6 +25,7 @@ from icor.domain.evidence import (
     PublicationStatus,
 )
 from icor.evidence.normalization import normalize_vehicle_label, stable_evidence_id
+from icor.evidence.sources.eea_model_recovery import ModelRecovery, Recovery
 from icor.infrastructure.release_store import StoredRelease
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
@@ -89,6 +92,7 @@ EXPECTED_SCHEMA = (
     "RLFI",
 )
 _GROUP_COLUMNS = ("MS", "Mk", "Cn", "TAN", "T", "Va", "Ve", "Ft")
+_KEY_SQL = "country, make, model, type_approval, vehicle_type, variant, version, fuel"
 _INSERT_BATCH_SIZE = 5_000
 _OBSERVATION_BATCH_SIZE = 2_000
 
@@ -147,15 +151,18 @@ class EEAAnnualAggregateLoader:
 
         with tempfile.TemporaryDirectory(prefix="eea-annual-model-") as temporary:
             aggregate_path = Path(temporary) / "aggregate.sqlite3"
-            self._aggregate_models(
+            recovered = self._aggregate_models(
                 release.artifact_path, year, version, publication_status, aggregate_path
             )
             self._write_annual_observations(release, year, aggregate_path, repository)
+            self._write_recovered_observations(release, year, recovered, repository)
 
     def _aggregate_models(
         self, artifact_path: Path, year: int, version: str,
         publication_status: PublicationStatus, database_path: Path
-    ) -> None:
+    ) -> dict[tuple[str, str, str], _RecoveredGroups]:
+        recovery = ModelRecovery()
+        unnamed: list[tuple[int, int, int, tuple[str, ...]]] = []
         with closing(sqlite3.connect(database_path)) as connection:
             connection.execute(
                 """CREATE TABLE aggregate (
@@ -176,7 +183,10 @@ class EEAAnnualAggregateLoader:
                 artifact_path, year, version, publication_status
             ):
                 if any(normalize_vehicle_label(value) is None for value in key[:3]):
+                    if ModelRecovery.is_candidate(key):
+                        unnamed.append((group_number, source_rows, registrations, key))
                     continue
+                recovery.add_named(key, registrations)
                 country, make, model = key[:3]
                 country = country.upper()
                 batch.append(
@@ -196,6 +206,75 @@ class EEAAnnualAggregateLoader:
             if batch:
                 connection.executemany(statement, batch)
             connection.commit()
+        recovered: dict[tuple[str, str, str], _RecoveredGroups] = {}
+        for group_number, source_rows, registrations, key in unnamed:
+            found = recovery.resolve(key)
+            if found is None:
+                continue
+            name = (key[0].upper(), key[1], found.model)
+            recovered.setdefault(name, _RecoveredGroups()).add(
+                group_number, source_rows, registrations, found
+            )
+        return recovered
+
+    def _write_recovered_observations(
+        self,
+        release: StoredRelease,
+        year: int,
+        recovered: dict[tuple[str, str, str], _RecoveredGroups],
+        repository: SQLiteEvidenceRepository,
+    ) -> None:
+        observations = []
+        for (country, make, model), groups in sorted(recovered.items()):
+            observations.append(
+                Observation(
+                    observation_id=stable_evidence_id(
+                        "obs-eea-annual-recovered", release.release_id, country, make, model
+                    ),
+                    release_id=release.release_id,
+                    original_row_locator=(
+                        f"official-sql-groups-{groups.first}-{groups.last}:"
+                        f"technical-groups-{groups.technical_groups}:"
+                        f"source-rows-{groups.source_rows}"
+                    ),
+                    geography=country,
+                    geography_version=release.manifest.geography_version,
+                    period_start=date(year, 1, 1),
+                    period_end=date(year, 12, 31),
+                    period_precision=PeriodPrecision.YEAR,
+                    measure=Measure.NEW_REGISTRATIONS,
+                    value=Decimal(groups.registrations),
+                    unit="vehicles",
+                    publication_status=release.manifest.publication_status,
+                    original_make=make,
+                    original_model=model,
+                    original_model_year=None,
+                    original_type=None,
+                    source_make_identifier=make,
+                    source_model_identifier=stable_evidence_id("eea-model", make, model),
+                    normalized_make=normalize_vehicle_label(make),
+                    normalized_model=normalize_vehicle_label(model),
+                    normalized_model_year=None,
+                    canonical_vehicle_id=None,
+                    mapping_status=MappingStatus.UNRESOLVED,
+                    transformation_notes=(
+                        "Canonical aggregate exported from the official EEA data API.",
+                        *groups.notes(),
+                    ),
+                    validation_flags=(MODEL_RECOVERED_FLAG,),
+                    evidence_confidence=_unresolved_confidence(
+                        release.manifest.publication_status
+                    ),
+                    registration_cohort_year=year,
+                    manufacture_year=None,
+                    model_year=None,
+                )
+            )
+            if len(observations) >= _OBSERVATION_BATCH_SIZE:
+                repository.add_observations(observations)
+                observations.clear()
+        if observations:
+            repository.add_observations(observations)
 
     def _write_annual_observations(
         self,
@@ -303,6 +382,36 @@ class EEAAnnualAggregateLoader:
             raise ValueError("EEA annual aggregate row version is unexpected")
 
 
+class _RecoveredGroups:
+    """Unnamed source groups that one recovered name covers."""
+
+    def __init__(self) -> None:
+        self.first = self.last = 0
+        self.technical_groups = self.source_rows = self.registrations = 0
+        self.levels: dict[str, int] = {}
+        self.lowest_share: Decimal | None = None
+
+    def add(self, number: int, source_rows: int, registrations: int, found: Recovery) -> None:
+        self.first = number if self.technical_groups == 0 else min(self.first, number)
+        self.last = max(self.last, number)
+        self.technical_groups += 1
+        self.source_rows += source_rows
+        self.registrations += registrations
+        self.levels[found.level] = self.levels.get(found.level, 0) + registrations
+        if self.lowest_share is None or found.share < self.lowest_share:
+            self.lowest_share = found.share
+
+    def notes(self) -> tuple[str, ...]:
+        levels = ", ".join(f"{name} {count}" for name, count in sorted(self.levels.items()))
+        return (
+            f"Contributing source rows: {self.source_rows}.",
+            f"Contributing technical-key groups: {self.technical_groups}.",
+            "The source rows carry no commercial name (Cn); the name is the one the "
+            "release's named rows give the same make and type approval.",
+            f"Registrations named per key: {levels}; lowest share {self.lowest_share}.",
+        )
+
+
 def _parse_nonnegative_integer(value: str | None, label: str) -> int:
     if value is None or fullmatch(r"0|[1-9]\d*", value) is None:
         raise ValueError(f"EEA annual aggregate {label} must be a non-negative integer")
@@ -396,10 +505,25 @@ class EEAPassengerCarLoader:
                 )
                 ) WITHOUT ROWID"""
             )
+            connection.execute(
+                """CREATE TABLE unnamed (
+                country TEXT NOT NULL, make TEXT NOT NULL, model TEXT NOT NULL,
+                type_approval TEXT NOT NULL, vehicle_type TEXT NOT NULL,
+                variant TEXT NOT NULL, version TEXT NOT NULL, fuel TEXT NOT NULL,
+                first_row INTEGER NOT NULL, last_row INTEGER NOT NULL,
+                registrations INTEGER NOT NULL,
+                PRIMARY KEY (
+                    country, make, model, type_approval, vehicle_type,
+                    variant, version, fuel
+                )
+                ) WITHOUT ROWID"""
+            )
             statement = """INSERT INTO aggregate VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT DO UPDATE SET last_row = excluded.last_row,
             registrations = registrations + 1"""
+            unnamed_statement = statement.replace("INTO aggregate", "INTO unnamed")
             batch: list[tuple[object, ...]] = []
+            unnamed: list[tuple[object, ...]] = []
             raw_count = accepted_count = rejected_count = 0
             with (
                 archive.open(member) as binary,
@@ -419,6 +543,11 @@ class EEAPassengerCarLoader:
                     key = tuple((row[column] or "").strip() for column in _GROUP_COLUMNS)
                     if any(normalize_vehicle_label(value) is None for value in key[:3]):
                         rejected_count += 1
+                        if ModelRecovery.is_candidate(key):
+                            unnamed.append((*key, row_number, row_number))
+                            if len(unnamed) >= _INSERT_BATCH_SIZE:
+                                connection.executemany(unnamed_statement, unnamed)
+                                unnamed.clear()
                         continue
                     accepted_count += 1
                     batch.append((*key, row_number, row_number))
@@ -427,8 +556,46 @@ class EEAPassengerCarLoader:
                         batch.clear()
                 if batch:
                     connection.executemany(statement, batch)
+                if unnamed:
+                    connection.executemany(unnamed_statement, unnamed)
+            self._recover_models(connection)
             connection.commit()
             return raw_count, accepted_count, rejected_count
+
+    @staticmethod
+    def _recover_models(connection: sqlite3.Connection) -> None:
+        """Name the unnamed groups the release's named groups identify (see eea_model_recovery)."""
+
+        connection.execute(
+            """CREATE TABLE recovered (
+            country TEXT NOT NULL, make TEXT NOT NULL, model TEXT NOT NULL,
+            type_approval TEXT NOT NULL, vehicle_type TEXT NOT NULL,
+            variant TEXT NOT NULL, version TEXT NOT NULL, fuel TEXT NOT NULL,
+            first_row INTEGER NOT NULL, last_row INTEGER NOT NULL,
+            registrations INTEGER NOT NULL, recovered_model TEXT NOT NULL,
+            level TEXT NOT NULL, support INTEGER NOT NULL, share TEXT NOT NULL,
+            PRIMARY KEY (
+                country, make, model, type_approval, vehicle_type,
+                variant, version, fuel
+            )
+            ) WITHOUT ROWID"""
+        )
+        recovery = ModelRecovery()
+        for row in connection.execute(f"SELECT {_KEY_SQL}, registrations FROM aggregate"):
+            recovery.add_named(tuple(row[:8]), row[8])
+        recovered = []
+        for row in connection.execute(
+            f"SELECT {_KEY_SQL}, first_row, last_row, registrations FROM unnamed"
+        ):
+            found = recovery.resolve(tuple(row[:8]))
+            if found is not None:
+                recovered.append(
+                    (*row, found.model, found.level, found.support, str(found.share))
+                )
+        connection.executemany(
+            "INSERT INTO recovered VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            recovered,
+        )
 
     @staticmethod
     def _validate_row(
@@ -459,30 +626,41 @@ class EEAPassengerCarLoader:
         batch: list[Observation] = []
         with closing(sqlite3.connect(database_path)) as connection:
             connection.row_factory = sqlite3.Row
-            rows = connection.execute(
-                """SELECT * FROM aggregate ORDER BY country, make, model,
-                type_approval, vehicle_type, variant, version, fuel"""
+            rows = itertools.chain(
+                ((row, False) for row in connection.execute(
+                    f"SELECT * FROM aggregate ORDER BY {_KEY_SQL}"
+                )),
+                ((row, True) for row in connection.execute(
+                    f"SELECT * FROM recovered ORDER BY {_KEY_SQL}"
+                )),
             )
-            for row in rows:
-                key = tuple(
-                    str(row[column])
-                    for column in (
-                        "country",
-                        "make",
-                        "model",
-                        "type_approval",
-                        "vehicle_type",
-                        "variant",
-                        "version",
-                        "fuel",
-                    )
+            for row, recovered in rows:
+                key = tuple(str(row[column]) for column in _KEY_SQL.split(", "))
+                country, make, source_model, type_approval, vehicle_type, variant, version, fuel = (
+                    key
                 )
-                country, make, model, type_approval, vehicle_type, variant, version, fuel = key
+                model = row["recovered_model"] if recovered else source_model
                 group_id = stable_evidence_id("eea-group", *key)
                 original_type = "|".join((type_approval, vehicle_type, variant, version, fuel))
+                notes = (
+                    f"Aggregated {release.manifest.publication_status.value} "
+                    "registration rows on MS, Mk, Cn, "
+                    "TAN, T, Va, Ve, and Ft.",
+                    f"Contributing raw rows: {row['registrations']}.",
+                )
+                if recovered:
+                    notes += (
+                        "The source rows carry no commercial name (Cn); the name is the one "
+                        f"the release's named rows give {row['level']} "
+                        f"({row['share']} of {row['support']} registrations).",
+                    )
                 batch.append(
                     Observation(
-                        observation_id=stable_evidence_id("obs-eea", release.release_id, *key),
+                        observation_id=stable_evidence_id(
+                            "obs-eea-recovered" if recovered else "obs-eea",
+                            release.release_id,
+                            *key,
+                        ),
                         release_id=release.release_id,
                         original_row_locator=(
                             f"{group_id}:rows-{row['first_row']}-{row['last_row']}:members-{row['registrations']}"
@@ -509,13 +687,8 @@ class EEAPassengerCarLoader:
                         normalized_model_year=None,
                         canonical_vehicle_id=None,
                         mapping_status=MappingStatus.UNRESOLVED,
-                        transformation_notes=(
-                            f"Aggregated {release.manifest.publication_status.value} "
-                            "registration rows on MS, Mk, Cn, "
-                            "TAN, T, Va, Ve, and Ft.",
-                            f"Contributing raw rows: {row['registrations']}.",
-                        ),
-                        validation_flags=(),
+                        transformation_notes=notes,
+                        validation_flags=(MODEL_RECOVERED_FLAG,) if recovered else (),
                         evidence_confidence=_unresolved_confidence(
                             release.manifest.publication_status
                         ),

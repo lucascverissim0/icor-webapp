@@ -39,7 +39,7 @@ def test_official_registry_contains_only_reviewed_parser_contracts() -> None:
 
 
 def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() -> None:
-    assert OFFICIAL_SOURCE_VERSIONS.source_registry == "official-sources-v1"
+    assert OFFICIAL_SOURCE_VERSIONS.source_registry == "official-sources-v2"
     assert OFFICIAL_SOURCE_VERSIONS.identity_registry == "exact-normalized-model-family-v1"
     assert (
         OFFICIAL_SOURCE_VERSIONS.generation_registry
