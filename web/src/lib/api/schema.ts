@@ -523,10 +523,15 @@ export interface components {
         EurocodeDataBandResponse: {
             /** Band */
             band: string;
+            estimated: components["schemas"]["EurocodeDataEstimateResponse"];
             /** Modelled */
             modelled: number;
+            /** Modelled Alternative */
+            modelled_alternative: number | null;
             /** Official */
-            official: number | null;
+            official: number;
+            /** Status */
+            status: string | null;
         };
         /** EurocodeDataCodeResponse */
         EurocodeDataCodeResponse: {
@@ -574,8 +579,15 @@ export interface components {
          * @description A market's official count of cars on the road against the model's, by age band.
          */
         EurocodeDataCountryGapResponse: {
+            /** Band Official Total */
+            band_official_total: number | null;
+            /** Band Year */
+            band_year: number | null;
             /** Bands */
             bands: components["schemas"]["EurocodeDataBandResponse"][];
+            /** Convention */
+            convention: string | null;
+            estimated: components["schemas"]["EurocodeDataEstimateResponse"];
             /** Geography */
             geography: string;
             /** Modelled */
@@ -584,8 +596,15 @@ export interface components {
             modelled_share: number | null;
             /** Official */
             official: number;
+            /** Official Status */
+            official_status: string | null;
+            /** Open Ended */
+            open_ended: boolean;
             /** Publisher Geography */
             publisher_geography: string;
+            /** Registrations Include Used Imports */
+            registrations_include_used_imports: number[];
+            under_20: components["schemas"]["EurocodeDataUnder20Response"] | null;
             /** Year */
             year: number;
         };
@@ -599,6 +618,39 @@ export interface components {
             /** Message */
             message?: string | null;
             report?: components["schemas"]["EurocodeDataReportResponse"] | null;
+        };
+        /**
+         * EurocodeDataEstimateResponse
+         * @description Cars an official count holds and the model does not, by likely reason.
+         *
+         *     Estimates for the country total only: never assigned to a vehicle or a code.
+         */
+        EurocodeDataEstimateResponse: {
+            /** Above Official */
+            above_official: number;
+            /** Before Sources */
+            before_sources: number;
+            /** Missing */
+            missing: number;
+            /** Other */
+            other: number;
+            /** Unnamed */
+            unnamed: number;
+        };
+        /** EurocodeDataEurostatFileResponse */
+        EurocodeDataEurostatFileResponse: {
+            /** Dataset */
+            dataset: string;
+            /** File */
+            file: string;
+            /** Licence */
+            licence: string;
+            /** Sha256 */
+            sha256: string;
+            /** Updated */
+            updated: string | null;
+            /** Url */
+            url: string;
         };
         /**
          * EurocodeDataEvidenceResponse
@@ -664,6 +716,7 @@ export interface components {
             licence: string;
             /** Missing Markets */
             missing_markets: string[];
+            registrations?: components["schemas"]["EurocodeDataEurostatFileResponse"] | null;
             /** Sha256 */
             sha256: string;
             /** Updated */
@@ -731,6 +784,16 @@ export interface components {
             tiers: {
                 [key: string]: components["schemas"]["EurocodeDataTierResponse"];
             };
+        };
+        /** EurocodeDataUnder20Response */
+        EurocodeDataUnder20Response: {
+            estimated: components["schemas"]["EurocodeDataEstimateResponse"];
+            /** Modelled */
+            modelled: number;
+            /** Modelled Share */
+            modelled_share: number | null;
+            /** Official */
+            official: number;
         };
         /**
          * EurocodeGroupResponse

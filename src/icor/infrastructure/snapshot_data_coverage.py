@@ -14,13 +14,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from icor.domain.evidence import STOCK_LOWER_BOUND_REASON
-from icor.eurocodes.data_coverage import FleetCell, FleetRange
+from icor.eurocodes.data_coverage import CountryComparison, FleetCell, FleetRange, OfficialStock
 from icor.eurocodes.runtime import identity_key
+from icor.evidence.eurostat_new_registrations import NewRegistrations, includes_used_imports
 from icor.forecasting.survival import CalibratedCohortSurvivalModel
 from icor.infrastructure.snapshot_identity import load_identity_index
 
@@ -38,14 +39,16 @@ _SCALE = Decimal(1_000_000)
 
 @dataclass(frozen=True, slots=True)
 class FleetRead:
-    """Fleet cells at the report year, and some markets' cars by cohort at their own year."""
+    """Fleet cells at the report year, and some markets' cars by cohort at their own years."""
 
     cells: tuple[FleetCell, ...]
-    #: market -> registration year -> cars on the road (P50) at that market's
-    #: comparison year.
-    comparison: dict[str, dict[int, Decimal]]
+    #: market -> comparison year -> registration year -> cars on the road (P50).
+    comparison: dict[str, dict[int, dict[int, Decimal]]]
     #: Cohorts whose stored 2028 value was recomputed and matched.
     verified_cohorts: int
+    #: market -> registration year -> the evidence behind the market's cars of that
+    #: year: "registrations", "stock" and, for a register that masks names, "lower-bound".
+    cohort_evidence: dict[str, dict[int, frozenset[str]]] = field(default_factory=dict)
 
 
 def _fleet(
@@ -60,7 +63,10 @@ def _fleet(
 
     ``stored`` is registrations for a registration cohort and the register's
     count for a register cohort; the latter mirrors
-    `GenerationPlanningService._conditional_fleet`.
+    `GenerationPlanningService._conditional_fleet` forward in time. Before the
+    register's own year it is the register's count: aging it back with the
+    curve would add cars the register never saw, and the curve, measured in
+    the United Kingdom, overstates how many such cars another country scraps.
     """
 
     age = year - cohort_year
@@ -69,6 +75,8 @@ def _fleet(
     if stock_year is None:
         interval = survival.interval(stored, age_years=age)
         return FleetRange(interval.p10, interval.p50, interval.p90)
+    if year < stock_year:
+        return FleetRange(stored, stored, stored)
     at_stock = survival.interval(_SCALE, age_years=max(stock_year - cohort_year, 0))
     at_year = survival.interval(_SCALE, age_years=age)
     if min(at_stock.p10, at_stock.p50, at_stock.p90) <= 0:
@@ -122,20 +130,22 @@ def read_fleet(
     survival: CalibratedCohortSurvivalModel,
     *,
     year: int,
-    comparison_years: Mapping[str, int],
+    comparison_years: Mapping[str, Collection[int]],
 ) -> FleetRead:
-    """Every fleet cell at ``year``, and each market's cohorts at its comparison year.
+    """Every fleet cell at ``year``, and each market's cohorts at its comparison years.
 
-    ``comparison_years`` names, per market, the year an official stock count
+    ``comparison_years`` names, per market, the years an official stock count
     is compared at; markets differ (the United Kingdom stopped reporting to
-    Eurostat earlier than the member states).
+    Eurostat earlier than the member states, and an office may publish a total
+    a year before its age bands).
 
     Raises when a stored 2028 value cannot be reproduced, when a cohort's
     evidence is not one of the known kinds, or when a register cohort's market
     has no register date.
     """
 
-    if max((year, *comparison_years.values())) > STORED_HORIZON:
+    requested = [item for years in comparison_years.values() for item in years]
+    if max((year, *requested)) > STORED_HORIZON:
         raise ValueError(f"years after {STORED_HORIZON} need registrations forecast past it")
     index = load_identity_index(connection)
     labels = {
@@ -156,7 +166,10 @@ def read_fleet(
     fleet_2028: dict[tuple[str, str, int, str], Decimal] = defaultdict(Decimal)
     cell_sources: dict[tuple[str, str, int, str], set[str]] = defaultdict(set)
     lower_bound: set[tuple[str, str, int, str]] = set()
-    comparison: dict[str, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+    comparison: dict[str, dict[int, dict[int, Decimal]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(Decimal))
+    )
+    cohort_evidence: dict[str, dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
     verified = 0
     for (
         cohort_id,
@@ -204,6 +217,9 @@ def read_fleet(
         cell_sources[key].update(sources.get(cohort_id, ()))
         if STOCK_LOWER_BOUND_REASON in codes:
             lower_bound.add(key)
+            cohort_evidence[geography][cohort_year].add("lower-bound")
+        elif evidence in ("registrations", "stock"):
+            cohort_evidence[geography][cohort_year].add(evidence)
         at_year = _fleet(
             survival, stored_value, cohort_year=cohort_year, year=year, stock_year=stock_year
         )
@@ -211,18 +227,16 @@ def read_fleet(
             total = fleet.setdefault(key, [Decimal(0)] * 3)
             for position, value in enumerate(at_year):
                 total[position] += value
-        comparison_year = comparison_years.get(geography)
-        if comparison_year is None:
-            continue
-        at_comparison = _fleet(
-            survival,
-            stored_value,
-            cohort_year=cohort_year,
-            year=comparison_year,
-            stock_year=stock_year,
-        )
-        if at_comparison is not None:
-            comparison[geography][cohort_year] += at_comparison.p50
+        for comparison_year in comparison_years.get(geography, ()):
+            at_comparison = _fleet(
+                survival,
+                stored_value,
+                cohort_year=cohort_year,
+                year=comparison_year,
+                stock_year=stock_year,
+            )
+            if at_comparison is not None:
+                comparison[geography][comparison_year][cohort_year] += at_comparison.p50
 
     cells = tuple(
         FleetCell(
@@ -241,6 +255,79 @@ def read_fleet(
     )
     return FleetRead(
         cells=cells,
-        comparison={geography: dict(years) for geography, years in comparison.items()},
+        comparison={
+            geography: {item: dict(cohorts) for item, cohorts in years.items()}
+            for geography, years in comparison.items()
+        },
         verified_cohorts=verified,
+        cohort_evidence={
+            geography: {cohort: frozenset(kinds) for cohort, kinds in cohorts.items()}
+            for geography, cohorts in cohort_evidence.items()
+        },
     )
+
+
+#: The survival curve's support: older cohorts have no share on the road.
+_MAX_AGE = 40
+
+
+def country_comparisons(
+    fleet: FleetRead,
+    stocks: Mapping[str, OfficialStock],
+    registrations: Mapping[str, Mapping[int, NewRegistrations]],
+    conventions: Mapping[str, str | None],
+    share: Callable[[str, int], Decimal],
+) -> dict[str, CountryComparison]:
+    """Each market's official stock beside the model, with estimates for the gap.
+
+    For every registration year the office reports new cars for, those cars'
+    survivors (``share`` gives the fraction still on the road at an age) are
+    compared with what the model holds of that year:
+
+    * no model-level registrations that year (only a register that masks
+      names, or nothing): the excess is cars registered before the sources;
+    * registrations that year: the excess is cars the sources leave unnamed,
+      unless the office's count includes used imports or differs in definition
+      (flag ``d``), when it cannot tell unnamed cars from imports;
+    * a register's full count that year: nothing, since it counts every car,
+      used imports included.
+    """
+
+    comparisons = {}
+    for geography, stock in stocks.items():
+        years = {stock.year, *((stock.band_year,) if stock.band_year is not None else ())}
+        modelled = {year: fleet.comparison.get(geography, {}).get(year, {}) for year in years}
+        evidence = fleet.cohort_evidence.get(geography, {})
+        official = registrations.get(geography, {})
+        before: dict[int, dict[int, Decimal]] = {year: {} for year in years}
+        unnamed: dict[int, dict[int, Decimal]] = {year: {} for year in years}
+        imports = set()
+        for cohort, item in official.items():
+            kinds = evidence.get(cohort, frozenset())
+            if "stock" in kinds:
+                continue
+            with_imports = includes_used_imports(geography, cohort)
+            for year in years:
+                age = year - cohort
+                if not 0 <= age <= _MAX_AGE:
+                    continue
+                excess = Decimal(item.count) * share(geography, age) - modelled[year].get(
+                    cohort, Decimal(0)
+                )
+                if excess <= 0:
+                    continue
+                if "registrations" not in kinds:
+                    before[year][cohort] = excess
+                    if with_imports:
+                        imports.add(cohort)
+                elif not with_imports and item.status != "d":
+                    unnamed[year][cohort] = excess
+        comparisons[geography] = CountryComparison(
+            stock,
+            modelled,
+            convention=conventions.get(geography),
+            before_sources=before,
+            unnamed=unnamed,
+            imports_in_registrations=frozenset(imports),
+        )
+    return comparisons

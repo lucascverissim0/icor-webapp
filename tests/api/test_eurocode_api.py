@@ -15,7 +15,13 @@ from fastapi.testclient import TestClient
 from icor.api import app as app_module
 from icor.api.app import _configured_eurocodes, create_app
 from icor.api.eurocodes import report_path
-from icor.eurocodes.data_coverage import FleetCell, FleetRange, build_report
+from icor.eurocodes.data_coverage import (
+    CountryComparison,
+    FleetCell,
+    FleetRange,
+    OfficialStock,
+    build_report,
+)
 from icor.eurocodes.demo import demo_eurocodes, write_demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
@@ -257,6 +263,58 @@ def test_the_data_report_for_the_active_snapshot_is_served(tmp_path: Path) -> No
     assert aurora["observed_markets"] == ["DE", "FR"]
     assert report["official_source"] is None
     assert {item["code"] for item in report["no_data"]} >= {"Q301", "Q401"}
+
+
+def test_the_country_comparison_is_served_with_its_estimates(tmp_path: Path) -> None:
+    stock = OfficialStock(
+        geography="DE",
+        year=2025,
+        total=1_000,
+        bands={"Y_LT2": 100, "Y2-5": 200, "Y5-10": 300, "Y10-20": 300, "Y_GT20": 100},
+        band_year=2025,
+        band_total=1_000,
+        status={"TOTAL": "p"},
+    )
+    document = build_report(
+        demo_eurocodes(),
+        [],
+        year=2026,
+        snapshot_id="demo-snapshot",
+        countries={
+            "DE": CountryComparison(
+                stock,
+                {2025: {2024: Decimal(150), 2012: Decimal(200)}},
+                convention="unclear",
+                before_sources={2025: {2008: Decimal(80)}},
+            )
+        },
+    )
+
+    with _data_client(tmp_path, document) as test_client:
+        body = test_client.get("/api/v1/eurocodes/data-coverage").json()
+
+    (gap,) = body["report"]["country_gap"]
+    assert (gap["official_status"], gap["convention"], gap["band_year"]) == ("p", "unclear", 2025)
+    bands = {band["band"]: band for band in gap["bands"]}
+    assert bands["Y_LT2"]["estimated"]["above_official"] == 50
+    assert bands["Y10-20"]["estimated"] == {
+        "missing": 100,
+        "before_sources": 80,
+        "unnamed": 0,
+        "other": 20,
+        "above_official": 0,
+    }
+    assert gap["under_20"]["official"] == 900
+    assert gap["under_20"]["modelled"] == 350
+
+
+def test_a_report_in_the_previous_format_is_not_served(tmp_path: Path) -> None:
+    document = {**_demo_report("demo-snapshot"), "version": 1}
+
+    with _data_client(tmp_path, document) as test_client:
+        body = test_client.get("/api/v1/eurocodes/data-coverage").json()
+
+    assert body["available"] is False
 
 
 def test_a_report_written_for_another_snapshot_is_not_served(tmp_path: Path) -> None:

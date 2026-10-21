@@ -31,7 +31,7 @@ from icor.eurocodes.catalog import CatalogueRow
 from icor.eurocodes.runtime import EurocodeMap
 
 DOCUMENT_FORMAT = "icor-eurocode-data-coverage"
-DOCUMENT_VERSION = 1
+DOCUMENT_VERSION = 2
 
 #: Evidence behind a fleet cell, strongest first: a national register's count of
 #: the cars on the road (stock), reported registrations, an interpolated gap, a forecast.
@@ -54,7 +54,9 @@ PRE_2010_SHARE_CAP_C = Decimal("0.5")
 #: cars are mostly the forecast year's, so a low observed share is expected.
 NEW_CODE_YEARS = 2
 
-#: Eurostat's age bands, as ages in whole years at the end of the stock year.
+#: Eurostat's age bands, as ages in whole years at the end of the stock year, for
+#: an office that counts two registration years as "less than 2 years". One that
+#: counts three moves every edge up a year (`CountryComparison.convention`).
 AGE_BANDS: tuple[tuple[str, int, int | None], ...] = (
     ("Y_LT2", 0, 1),
     ("Y2-5", 2, 4),
@@ -99,10 +101,20 @@ class OfficialStock:
     geography: str
     year: int
     total: int
-    #: Cars by Eurostat age band; a band the office did not report is absent.
+    #: Cars by Eurostat age band in ``band_year``; empty when no year reports them all.
     bands: Mapping[str, int] = field(default_factory=dict)
     #: The publisher's own territory code when it differs (UK, counted for GB).
     publisher_geography: str | None = None
+    #: Eurostat status flags of the total's year (``i``, ``p``, ``b``) by age key.
+    status: Mapping[str, str] = field(default_factory=dict)
+    #: The newest year, up to ``year``, whose age bands are all reported.
+    band_year: int | None = None
+    #: The total of ``band_year``, which the bands sum to.
+    band_total: int | None = None
+    band_status: Mapping[str, str] = field(default_factory=dict)
+    #: The office publishes no band over twenty years: its "Y10-20" counts every car
+    #: ten years and older.
+    open_ended: bool = False
 
 
 @dataclass
@@ -130,11 +142,162 @@ def _share(part: Decimal, whole: Decimal) -> float | None:
     return None if not whole else round(float(part / whole), 4)
 
 
-def _band(age: int) -> str | None:
+def _band(age: int, shift: int = 0, *, open_ended: bool = False) -> str | None:
+    """The Eurostat band of a cohort ``age`` years old, under an office's convention."""
+
+    if age < 0:
+        return None
+    age = max(age - shift, 0)
     for name, low, high in AGE_BANDS:
         if age >= low and (high is None or age <= high):
+            if open_ended and name == AGE_BANDS[-1][0]:
+                return AGE_BANDS[-2][0]
             return name
     return None
+
+
+#: Age-band conventions (see `icor.evidence.eurostat_age_conventions`).
+TWO_YEARS, THREE_YEARS, UNCLEAR = "2y", "3y", "unclear"
+
+
+@dataclass(frozen=True, slots=True)
+class CountryComparison:
+    """One market's official stock and what the model and other evidence say of it.
+
+    Every mapping is comparison year -> registration year -> cars (P50).
+    ``before_sources`` holds the survivors of the office's own new registrations
+    in years the model has no model-level registrations for, and ``unnamed`` the
+    survivors of new registrations the model's sources leave without a model
+    name, in years they do report. Both are estimates for the country total only:
+    they are never assigned to a vehicle or a code.
+    """
+
+    stock: OfficialStock
+    modelled: Mapping[int, Mapping[int, Decimal]]
+    #: The band convention of ``stock.band_year``: "2y", "3y" or "unclear".
+    convention: str | None = None
+    before_sources: Mapping[int, Mapping[int, Decimal]] = field(default_factory=dict)
+    unnamed: Mapping[int, Mapping[int, Decimal]] = field(default_factory=dict)
+    #: Registration years estimated from official new registrations that include used imports.
+    imports_in_registrations: frozenset[int] = frozenset()
+
+
+def _split(gap: Decimal, before: Decimal, unnamed: Decimal) -> dict[str, int]:
+    """Cars the official count holds and the model does not, by likely reason.
+
+    The two estimates are capped by the gap they explain, in that order; the
+    rest is used imports, definitions and anything else. A negative gap is
+    cars the model holds above the official count.
+    """
+
+    if gap <= 0:
+        return {
+            "missing": 0,
+            "before_sources": 0,
+            "unnamed": 0,
+            "other": 0,
+            "above_official": _whole(-gap),
+        }
+    explained_before = min(before, gap)
+    explained_unnamed = min(unnamed, gap - explained_before)
+    return {
+        "missing": _whole(gap),
+        "before_sources": _whole(explained_before),
+        "unnamed": _whole(explained_unnamed),
+        "other": _whole(gap - explained_before - explained_unnamed),
+        "above_official": 0,
+    }
+
+
+def _by_band(
+    cohorts: Mapping[int, Decimal], year: int, shift: int, open_ended: bool
+) -> dict[str, Decimal]:
+    totals: dict[str, Decimal] = defaultdict(Decimal)
+    for cohort, units in cohorts.items():
+        name = _band(year - cohort, shift, open_ended=open_ended)
+        if name is not None:
+            totals[name] += units
+    return totals
+
+
+def _country_gap(comparison: CountryComparison) -> dict[str, Any]:
+    stock = comparison.stock
+    modelled = comparison.modelled.get(stock.year, {})
+    modelled_total = sum(modelled.values(), _ZERO)
+    before_total = sum(comparison.before_sources.get(stock.year, {}).values(), _ZERO)
+    unnamed_total = sum(comparison.unnamed.get(stock.year, {}).values(), _ZERO)
+    entry: dict[str, Any] = {
+        "geography": stock.geography,
+        "publisher_geography": stock.publisher_geography or stock.geography,
+        "year": stock.year,
+        "official": stock.total,
+        "official_status": stock.status.get("TOTAL"),
+        "modelled": _whole(modelled_total),
+        "modelled_share": _share(modelled_total, Decimal(stock.total)),
+        "estimated": _split(Decimal(stock.total) - modelled_total, before_total, unnamed_total),
+        "band_year": stock.band_year,
+        "band_official_total": stock.band_total,
+        "convention": comparison.convention,
+        "open_ended": stock.open_ended,
+        "bands": [],
+        "under_20": None,
+        "registrations_include_used_imports": sorted(comparison.imports_in_registrations),
+    }
+    band_year = stock.band_year
+    if band_year is None:
+        return entry
+    shift = 1 if comparison.convention == THREE_YEARS else 0
+    model_bands = _by_band(
+        comparison.modelled.get(band_year, {}), band_year, shift, stock.open_ended
+    )
+    alternative = (
+        _by_band(comparison.modelled.get(band_year, {}), band_year, 1, stock.open_ended)
+        if comparison.convention == UNCLEAR
+        else None
+    )
+    before_bands = _by_band(
+        comparison.before_sources.get(band_year, {}), band_year, shift, stock.open_ended
+    )
+    unnamed_bands = _by_band(
+        comparison.unnamed.get(band_year, {}), band_year, shift, stock.open_ended
+    )
+    for name, _low, _high in AGE_BANDS:
+        if stock.open_ended and name == AGE_BANDS[-1][0]:
+            continue
+        official = stock.bands[name]
+        model_units = model_bands.get(name, _ZERO)
+        entry["bands"].append(
+            {
+                "band": name,
+                "official": official,
+                "status": stock.band_status.get(name),
+                "modelled": _whole(model_units),
+                "modelled_alternative": (
+                    _whole(alternative.get(name, _ZERO)) if alternative is not None else None
+                ),
+                "estimated": _split(
+                    Decimal(official) - model_units,
+                    before_bands.get(name, _ZERO),
+                    unnamed_bands.get(name, _ZERO),
+                ),
+            }
+        )
+    if not stock.open_ended:
+        # Cars under twenty years, summed band by band so that an excess in one
+        # band does not hide a gap in another.
+        younger = entry["bands"][:-1]
+        official_under_20 = sum(band["official"] for band in younger)
+        modelled_under_20 = sum((model_bands.get(band["band"], _ZERO) for band in younger), _ZERO)
+        entry["under_20"] = {
+            "official": official_under_20,
+            "modelled": _whole(modelled_under_20),
+            "modelled_share": _share(modelled_under_20, Decimal(official_under_20)),
+            "estimated": {
+                key: sum(band["estimated"][key] for band in younger)
+                for key in ("missing", "before_sources", "unnamed", "other", "above_official")
+            },
+        }
+    return entry
 
 
 def depth_tier(
@@ -177,14 +340,14 @@ def build_report(
     year: int,
     snapshot_id: str,
     catalogue_rows: Iterable[CatalogueRow] = (),
-    official_stock: Mapping[str, OfficialStock] | None = None,
-    official_fleet: Mapping[str, Mapping[int, Decimal]] | None = None,
+    countries: Mapping[str, CountryComparison] | None = None,
     official_source: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The data-coverage document for one snapshot and report year.
 
-    ``official_fleet`` is the model's own fleet per market and registration
-    year at the official stock's year, so the two can be compared band by band.
+    ``countries`` holds, per market, the official stock and the model's own
+    fleet per registration year at the stock's years, so the two can be
+    compared band by band, with the estimated reasons for any gap.
 
     The totals are checked before anything is rounded: a code's certain cars
     must sum to the single-code cars of every market, and each market's cars
@@ -349,34 +512,7 @@ def build_report(
         for geography, total in sorted(market_total.items())
     ]
 
-    gap = []
-    for geography, stock in sorted((official_stock or {}).items()):
-        modelled = (official_fleet or {}).get(geography, {})
-        bands = []
-        for name, _low, _high in AGE_BANDS:
-            band_model = sum(
-                (units for cohort, units in modelled.items() if _band(stock.year - cohort) == name),
-                _ZERO,
-            )
-            bands.append(
-                {
-                    "band": name,
-                    "official": stock.bands.get(name),
-                    "modelled": _whole(band_model),
-                }
-            )
-        modelled_total = sum(modelled.values(), _ZERO)
-        gap.append(
-            {
-                "geography": geography,
-                "publisher_geography": stock.publisher_geography or geography,
-                "year": stock.year,
-                "official": stock.total,
-                "modelled": _whole(modelled_total),
-                "modelled_share": _share(modelled_total, Decimal(stock.total)),
-                "bands": bands,
-            }
-        )
+    gap = [_country_gap(item) for _geography, item in sorted((countries or {}).items())]
 
     tiers: dict[str, dict[str, int]] = {
         tier: {"codes": 0, "certain_p50": 0} for tier in ("A", "B", "C", "D")

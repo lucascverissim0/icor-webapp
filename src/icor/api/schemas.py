@@ -337,10 +337,39 @@ class EurocodeDataMarketResponse(ApiModel):
     lower_bound: int
 
 
+class EurocodeDataEstimateResponse(ApiModel):
+    """Cars an official count holds and the model does not, by likely reason.
+
+    Estimates for the country total only: never assigned to a vehicle or a code.
+    """
+
+    missing: int
+    # Survivors of the office's new registrations in years without model-level sources.
+    before_sources: int
+    # Survivors of new registrations the model's sources leave without a model name.
+    unnamed: int
+    # Used imports, definitions and anything else.
+    other: int
+    # Cars the model holds above the official count.
+    above_official: int
+
+
 class EurocodeDataBandResponse(ApiModel):
     band: str
-    official: int | None
+    official: int
+    # Eurostat status flag: i imputed, p provisional, b break in series.
+    status: str | None
     modelled: int
+    # The model's cars under the other band convention, when the office's is unclear.
+    modelled_alternative: int | None
+    estimated: EurocodeDataEstimateResponse
+
+
+class EurocodeDataUnder20Response(ApiModel):
+    official: int
+    modelled: int
+    modelled_share: float | None
+    estimated: EurocodeDataEstimateResponse
 
 
 class EurocodeDataCountryGapResponse(ApiModel):
@@ -350,9 +379,20 @@ class EurocodeDataCountryGapResponse(ApiModel):
     publisher_geography: str
     year: int
     official: int
+    official_status: str | None
     modelled: int
     modelled_share: float | None
+    estimated: EurocodeDataEstimateResponse
+    # The newest year, up to ``year``, whose age bands the office reports in full.
+    band_year: int | None
+    band_official_total: int | None
+    # Registration years under "less than 2 years": "2y", "3y" or "unclear".
+    convention: str | None
+    # The office has no band over twenty years; its "Y10-20" counts all older cars.
+    open_ended: bool
     bands: tuple[EurocodeDataBandResponse, ...]
+    under_20: EurocodeDataUnder20Response | None
+    registrations_include_used_imports: tuple[int, ...]
 
 
 class EurocodeDataTierResponse(ApiModel):
@@ -381,14 +421,19 @@ class EurocodeDataThresholdsResponse(ApiModel):
     pre_2010_share_cap_c: float
 
 
-class EurocodeDataOfficialSourceResponse(ApiModel):
+class EurocodeDataEurostatFileResponse(ApiModel):
     dataset: str
     url: str
     licence: str
     file: str
     sha256: str
     updated: str | None
+
+
+class EurocodeDataOfficialSourceResponse(EurocodeDataEurostatFileResponse):
     missing_markets: tuple[str, ...]
+    # The new registrations the estimates rest on.
+    registrations: EurocodeDataEurostatFileResponse | None = None
 
 
 class EurocodeDataReportResponse(ApiModel):

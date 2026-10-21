@@ -15,7 +15,13 @@ from icor.application.evidence_review import EvidenceReviewService
 from icor.application.registrations import RegistrationService
 from icor.domain.planner import DemandRange
 from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
-from icor.eurocodes.data_coverage import FleetCell, FleetRange, OfficialStock, build_report
+from icor.eurocodes.data_coverage import (
+    CountryComparison,
+    FleetCell,
+    FleetRange,
+    OfficialStock,
+    build_report,
+)
 from icor.eurocodes.demo import demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
@@ -88,15 +94,35 @@ def _write_data_report() -> Path:
         cells,
         year=2026,
         snapshot_id=E2E_REPORT_SNAPSHOT_ID,
-        official_stock={
-            "DE": OfficialStock(
-                geography="DE",
-                year=2026,
-                total=10_000,
-                bands={"Y_LT2": 1_000, "Y2-5": 2_500, "Y5-10": 3_000, "Y10-20": 2_500},
-            )
+        countries={
+            # A market with age bands, an excess under two years and estimates for the gap.
+            "DE": CountryComparison(
+                OfficialStock(
+                    geography="DE",
+                    year=2025,
+                    total=11_000,
+                    bands={
+                        "Y_LT2": 1_000,
+                        "Y2-5": 2_500,
+                        "Y5-10": 3_000,
+                        "Y10-20": 3_500,
+                        "Y_GT20": 1_000,
+                    },
+                    band_year=2025,
+                    band_total=11_000,
+                ),
+                {2025: {2025: Decimal(2400), 2024: Decimal(300), 2022: Decimal(4000)}},
+                convention="2y",
+                before_sources={2025: {2008: Decimal(1200), 2002: Decimal(400)}},
+                unnamed={2025: {2012: Decimal(300)}},
+            ),
+            # A market whose office publishes a total only.
+            "FR": CountryComparison(
+                OfficialStock(geography="FR", year=2025, total=9_000, status={"TOTAL": "i"}),
+                {2025: {2022: Decimal(2500)}},
+                before_sources={2025: {2007: Decimal(1500)}},
+            ),
         },
-        official_fleet={"DE": {2025: Decimal(2400), 2024: Decimal(300), 2022: Decimal(4000)}},
     )
     directory = Path(tempfile.mkdtemp(prefix="icor-e2e-data-report-"))
     report_path(directory, E2E_REPORT_SNAPSHOT_ID).write_text(json.dumps(report), encoding="utf-8")

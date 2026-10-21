@@ -12,6 +12,7 @@ import pytest
 
 from icor.eurocodes.catalog import parse_rows
 from icor.eurocodes.data_coverage import (
+    CountryComparison,
     FleetCell,
     FleetRange,
     OfficialStock,
@@ -203,22 +204,134 @@ def test_the_country_gap_compares_official_stock_band_by_band():
         geography="GB",
         year=2024,
         total=1_000,
-        bands={"Y_LT2": 100, "Y10-20": 400, "Y_GT20": 200},
+        bands={"Y_LT2": 100, "Y2-5": 150, "Y5-10": 150, "Y10-20": 400, "Y_GT20": 200},
         publisher_geography="UK",
+        status={"TOTAL": "i"},
+        band_year=2024,
+        band_total=1_000,
     )
-    modelled = {"GB": {2023: Decimal(90), 2010: Decimal(300), 2004: Decimal(50)}}
+    modelled = {2024: {2023: Decimal(90), 2010: Decimal(300), 2004: Decimal(50)}}
 
     report = _report(
         [_cell(AURORA, 2024, "GB", "registrations", 1)],
-        official_stock={"GB": stock},
-        official_fleet=modelled,
+        countries={"GB": CountryComparison(stock, modelled, convention="2y")},
     )
 
     (gap,) = report["country_gap"]
     assert gap["publisher_geography"] == "UK"
+    assert gap["official_status"] == "i"
     assert (gap["official"], gap["modelled"], gap["modelled_share"]) == (1_000, 440, 0.44)
     bands = {item["band"]: item for item in gap["bands"]}
-    assert bands["Y_LT2"] == {"band": "Y_LT2", "official": 100, "modelled": 90}
+    assert (bands["Y_LT2"]["official"], bands["Y_LT2"]["modelled"]) == (100, 90)
     assert bands["Y10-20"]["modelled"] == 300
     assert bands["Y_GT20"]["modelled"] == 50
-    assert bands["Y2-5"]["official"] is None
+    assert bands["Y2-5"]["modelled"] == 0
+    assert bands["Y_LT2"]["modelled_alternative"] is None
+    # Under twenty years: 800 official, 390 modelled.
+    assert gap["under_20"]["official"] == 800
+    assert gap["under_20"]["modelled"] == 390
+    assert gap["under_20"]["estimated"]["missing"] == 410
+
+
+def test_a_three_year_convention_moves_every_band_edge_up_a_year():
+    stock = OfficialStock(
+        geography="AT",
+        year=2025,
+        total=600,
+        bands={"Y_LT2": 300, "Y2-5": 100, "Y5-10": 100, "Y10-20": 60, "Y_GT20": 40},
+        band_year=2025,
+        band_total=600,
+    )
+    # Ages 2, 5, 10 and 20: under three years they are the last year of each band.
+    modelled = {2025: {2023: Decimal(10), 2020: Decimal(20), 2015: Decimal(30), 2005: Decimal(40)}}
+
+    two = _report([], countries={"AT": CountryComparison(stock, modelled, convention="2y")})
+    three = _report([], countries={"AT": CountryComparison(stock, modelled, convention="3y")})
+
+    def bands(report):
+        return {item["band"]: item["modelled"] for item in report["country_gap"][0]["bands"]}
+
+    assert bands(two) == {"Y_LT2": 0, "Y2-5": 10, "Y5-10": 20, "Y10-20": 30, "Y_GT20": 40}
+    assert bands(three) == {"Y_LT2": 10, "Y2-5": 20, "Y5-10": 30, "Y10-20": 40, "Y_GT20": 0}
+
+
+def test_an_unclear_convention_is_reported_under_both_readings():
+    stock = OfficialStock(
+        geography="SE",
+        year=2025,
+        total=100,
+        bands={"Y_LT2": 50, "Y2-5": 20, "Y5-10": 10, "Y10-20": 10, "Y_GT20": 10},
+        band_year=2025,
+        band_total=100,
+    )
+    modelled = {2025: {2023: Decimal(30)}}
+
+    report = _report([], countries={"SE": CountryComparison(stock, modelled, convention="unclear")})
+
+    band = report["country_gap"][0]["bands"][0]
+    assert (band["band"], band["modelled"], band["modelled_alternative"]) == ("Y_LT2", 0, 30)
+
+
+def test_an_office_without_a_band_over_twenty_years_counts_them_in_ten_to_twenty():
+    stock = OfficialStock(
+        geography="IT",
+        year=2025,
+        total=500,
+        bands={"Y_LT2": 100, "Y2-5": 100, "Y5-10": 100, "Y10-20": 200},
+        band_year=2025,
+        band_total=500,
+        open_ended=True,
+    )
+    modelled = {2025: {2012: Decimal(70), 1999: Decimal(30)}}
+
+    report = _report([], countries={"IT": CountryComparison(stock, modelled, convention="2y")})
+
+    (gap,) = report["country_gap"]
+    assert [band["band"] for band in gap["bands"]] == ["Y_LT2", "Y2-5", "Y5-10", "Y10-20"]
+    assert gap["bands"][-1]["modelled"] == 100
+    assert gap["open_ended"] is True
+    assert gap["under_20"] is None
+
+
+def test_the_missing_cars_are_split_by_likely_reason_and_never_reach_a_code():
+    stock = OfficialStock(
+        geography="PL",
+        year=2025,
+        total=1_000,
+        bands={"Y_LT2": 100, "Y2-5": 100, "Y5-10": 100, "Y10-20": 500, "Y_GT20": 200},
+        band_year=2025,
+        band_total=1_000,
+    )
+    modelled = {2025: {2012: Decimal(100), 2024: Decimal(120)}}
+    before = {2025: {2008: Decimal(150)}}
+    unnamed = {2025: {2012: Decimal(400)}}
+    cells = [_cell(AURORA, 2012, "PL", "registrations", 100)]
+
+    plain = _report(cells)
+    report = _report(
+        cells,
+        countries={
+            "PL": CountryComparison(
+                stock, modelled, convention="2y", before_sources=before, unnamed=unnamed
+            )
+        },
+    )
+
+    bands = {item["band"]: item for item in report["country_gap"][0]["bands"]}
+    # 400 missing at 10-19 years: 150 from years without model-level sources, the
+    # rest of the unnamed estimate capped at what is left, nothing unexplained.
+    assert bands["Y10-20"]["estimated"] == {
+        "missing": 400,
+        "before_sources": 150,
+        "unnamed": 250,
+        "other": 0,
+        "above_official": 0,
+    }
+    # The model holds 20 more cars under two years than the office counts.
+    assert bands["Y_LT2"]["estimated"]["above_official"] == 20
+    assert bands["Y_LT2"]["estimated"]["missing"] == 0
+    assert report["country_gap"][0]["estimated"]["missing"] == 780
+    # Estimates never touch the codes or the market totals.
+    assert report["codes"] == plain["codes"]
+    assert report["markets"] == plain["markets"]
+    assert report["totals"] == plain["totals"]

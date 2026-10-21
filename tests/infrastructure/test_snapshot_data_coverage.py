@@ -85,7 +85,7 @@ def _snapshot(*, tamper: bool = False) -> sqlite3.Connection:
 
 
 def test_fleet_at_another_year_follows_the_curve_the_snapshot_was_built_with():
-    read = read_fleet(_snapshot(), SURVIVAL, year=2026, comparison_years={"NL": 2024})
+    read = read_fleet(_snapshot(), SURVIVAL, year=2026, comparison_years={"NL": [2024, 2028]})
 
     assert read.verified_cohorts == 3
     cells = {(cell.geography, cell.cohort_year): cell for cell in read.cells}
@@ -103,9 +103,15 @@ def test_fleet_at_another_year_follows_the_curve_the_snapshot_was_built_with():
     assert cells["DE", 2027].fleet is None
     assert cells["DE", 2027].sources == frozenset()
     assert set(read.comparison) == {"NL"}
-    assert read.comparison["NL"][2005] == Decimal(
-        _register_fleet("400", age=2024 - 2005, stock_age=2026 - 2005)[1]
+    # Before its own date a register's cohort is its count, never aged back.
+    assert read.comparison["NL"][2024][2005] == Decimal(400)
+    assert read.comparison["NL"][2028][2005] == Decimal(
+        _register_fleet("400", age=2028 - 2005, stock_age=2026 - 2005)[1]
     )
+    assert read.cohort_evidence == {
+        "DE": {2020: frozenset({"registrations"})},
+        "NL": {2005: frozenset({"stock"})},
+    }
 
 
 def test_a_snapshot_built_with_another_curve_is_refused():
@@ -131,3 +137,52 @@ def test_a_lower_bound_register_cohort_is_marked_at_least():
     assert cells["NL", 2005].lower_bound is True
     assert cells["NL", 2005].evidence == "stock"
     assert cells["DE", 2020].lower_bound is False
+    assert read.cohort_evidence["NL"] == {2005: frozenset({"lower-bound"})}
+
+
+def test_official_registrations_the_model_lacks_are_estimated_for_the_country_only():
+    from icor.eurocodes.data_coverage import OfficialStock
+    from icor.evidence.eurostat_new_registrations import NewRegistrations
+    from icor.infrastructure.snapshot_data_coverage import FleetRead, country_comparisons
+
+    fleet = FleetRead(
+        cells=(),
+        comparison={"PL": {2025: {2012: Decimal(80), 2015: Decimal(90), 2008: Decimal(10)}}},
+        verified_cohorts=0,
+        cohort_evidence={
+            "PL": {
+                2012: frozenset({"registrations"}),
+                2015: frozenset({"registrations"}),
+                2008: frozenset({"lower-bound"}),
+                2018: frozenset({"stock"}),
+            }
+        },
+    )
+    stock = OfficialStock(geography="PL", year=2025, total=1_000)
+    registrations = {
+        "PL": {
+            # Before 2013 Poland counted used imports among new registrations.
+            2012: NewRegistrations(200),
+            2015: NewRegistrations(150),
+            2016: NewRegistrations(100, "d"),
+            2008: NewRegistrations(100),
+            2018: NewRegistrations(500),
+            1970: NewRegistrations(900),
+        }
+    }
+
+    (comparison,) = country_comparisons(
+        fleet, {"PL": stock}, registrations, {"PL": "3y"}, lambda _geo, _age: Decimal("0.5")
+    ).values()
+
+    assert comparison.convention == "3y"
+    # Years without model-level registrations: survivors less the register's lower bound.
+    assert comparison.before_sources[2025] == {2008: Decimal(40), 2016: Decimal(50)}
+    # Years with registrations: only where the official count is comparable.
+    assert comparison.unnamed[2025] == {}
+    # 2012 has registrations, so its import-laden official count is not used at all.
+    assert comparison.imports_in_registrations == frozenset({2008})
+    # A full register count leaves nothing to estimate; cohorts past the curve's support neither.
+    assert (
+        2018 not in comparison.before_sources[2025] and 1970 not in comparison.before_sources[2025]
+    )

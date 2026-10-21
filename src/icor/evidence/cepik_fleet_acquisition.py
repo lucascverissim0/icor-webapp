@@ -71,7 +71,9 @@ PASSENGER_KINDS = (
 FIELDS = ("marka", "model", "data-pierwszej-rejestracji", "pochodzenie-pojazdu")
 SCHEMA = ("marka", "model", "cohort", "origin", "vehicles")
 EARLIEST_WINDOW_YEAR = 1900
-_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+#: CEPiK answers 404 now and then for a page it serves on the next try; past the last
+#: page it answers 200 with an empty list, so a 404 is never the end of a slice.
+_RETRYABLE_STATUS = frozenset({404, 429, 500, 502, 503, 504})
 
 
 def _tls_context() -> ssl.SSLContext:

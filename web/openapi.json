@@ -405,11 +405,14 @@
             "title": "Band",
             "type": "string"
           },
+          "estimated": {
+            "$ref": "#/components/schemas/EurocodeDataEstimateResponse"
+          },
           "modelled": {
             "title": "Modelled",
             "type": "integer"
           },
-          "official": {
+          "modelled_alternative": {
             "anyOf": [
               {
                 "type": "integer"
@@ -418,13 +421,31 @@
                 "type": "null"
               }
             ],
-            "title": "Official"
+            "title": "Modelled Alternative"
+          },
+          "official": {
+            "title": "Official",
+            "type": "integer"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
           }
         },
         "required": [
           "band",
           "official",
-          "modelled"
+          "status",
+          "modelled",
+          "modelled_alternative",
+          "estimated"
         ],
         "title": "EurocodeDataBandResponse",
         "type": "object"
@@ -569,12 +590,48 @@
         "additionalProperties": false,
         "description": "A market's official count of cars on the road against the model's, by age band.",
         "properties": {
+          "band_official_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Official Total"
+          },
+          "band_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Year"
+          },
           "bands": {
             "items": {
               "$ref": "#/components/schemas/EurocodeDataBandResponse"
             },
             "title": "Bands",
             "type": "array"
+          },
+          "convention": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Convention"
+          },
+          "estimated": {
+            "$ref": "#/components/schemas/EurocodeDataEstimateResponse"
           },
           "geography": {
             "title": "Geography",
@@ -599,9 +656,41 @@
             "title": "Official",
             "type": "integer"
           },
+          "official_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official Status"
+          },
+          "open_ended": {
+            "title": "Open Ended",
+            "type": "boolean"
+          },
           "publisher_geography": {
             "title": "Publisher Geography",
             "type": "string"
+          },
+          "registrations_include_used_imports": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Registrations Include Used Imports",
+            "type": "array"
+          },
+          "under_20": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeDataUnder20Response"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "year": {
             "title": "Year",
@@ -613,9 +702,17 @@
           "publisher_geography",
           "year",
           "official",
+          "official_status",
           "modelled",
           "modelled_share",
-          "bands"
+          "estimated",
+          "band_year",
+          "band_official_total",
+          "convention",
+          "open_ended",
+          "bands",
+          "under_20",
+          "registrations_include_used_imports"
         ],
         "title": "EurocodeDataCountryGapResponse",
         "type": "object"
@@ -654,6 +751,87 @@
           "available"
         ],
         "title": "EurocodeDataCoverageResponse",
+        "type": "object"
+      },
+      "EurocodeDataEstimateResponse": {
+        "additionalProperties": false,
+        "description": "Cars an official count holds and the model does not, by likely reason.\n\nEstimates for the country total only: never assigned to a vehicle or a code.",
+        "properties": {
+          "above_official": {
+            "title": "Above Official",
+            "type": "integer"
+          },
+          "before_sources": {
+            "title": "Before Sources",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "other": {
+            "title": "Other",
+            "type": "integer"
+          },
+          "unnamed": {
+            "title": "Unnamed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "missing",
+          "before_sources",
+          "unnamed",
+          "other",
+          "above_official"
+        ],
+        "title": "EurocodeDataEstimateResponse",
+        "type": "object"
+      },
+      "EurocodeDataEurostatFileResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "licence": {
+            "title": "Licence",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset",
+          "url",
+          "licence",
+          "file",
+          "sha256",
+          "updated"
+        ],
+        "title": "EurocodeDataEurostatFileResponse",
         "type": "object"
       },
       "EurocodeDataEvidenceResponse": {
@@ -808,6 +986,16 @@
             },
             "title": "Missing Markets",
             "type": "array"
+          },
+          "registrations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeDataEurostatFileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "sha256": {
             "title": "Sha256",
@@ -1025,6 +1213,41 @@
           "no_data"
         ],
         "title": "EurocodeDataTotalsResponse",
+        "type": "object"
+      },
+      "EurocodeDataUnder20Response": {
+        "additionalProperties": false,
+        "properties": {
+          "estimated": {
+            "$ref": "#/components/schemas/EurocodeDataEstimateResponse"
+          },
+          "modelled": {
+            "title": "Modelled",
+            "type": "integer"
+          },
+          "modelled_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelled Share"
+          },
+          "official": {
+            "title": "Official",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "official",
+          "modelled",
+          "modelled_share",
+          "estimated"
+        ],
+        "title": "EurocodeDataUnder20Response",
         "type": "object"
       },
       "EurocodeGroupResponse": {
