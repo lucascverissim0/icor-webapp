@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import sqlite3
 
+from icor.domain.evidence import STOCK_LOWER_BOUND_REASON
 from icor.evidence.vehicle_identity import VehicleIdentityIndex
+
+_LOWER_BOUND_CODE = f'"{STOCK_LOWER_BOUND_REASON}"'
 
 _RANKABLE_VEHICLES = """FROM canonical_vehicle v
     JOIN (
@@ -49,9 +52,7 @@ def _has_volume(connection: sqlite3.Connection) -> bool:
     out of its own snapshot once already.
     """
 
-    columns = {
-        row[1] for row in connection.execute("PRAGMA table_info(cohort_estimate)")
-    }
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(cohort_estimate)")}
     return columns >= _VOLUME_COLUMNS
 
 
@@ -72,12 +73,57 @@ def load_identity_index(connection: sqlite3.Connection) -> VehicleIdentityIndex:
         )
     else:
         rows = f"SELECT v.vehicle_id, v.make, v.model, 0 {_RANKABLE_VEHICLES}"
-    return VehicleIdentityIndex.from_rows(connection.execute(rows).fetchall())
+    fetched = connection.execute(rows).fetchall()
+    return VehicleIdentityIndex.from_rows(
+        fetched, vocabulary_volume=_vocabulary_volume(connection, fetched)
+    )
 
 
-def materialize_identity_table(
-    connection: sqlite3.Connection, index: VehicleIdentityIndex
-) -> None:
+def _vocabulary_volume(
+    connection: sqlite3.Connection, rows: list[tuple[str, str, str, float]]
+) -> dict[str, float] | None:
+    """Volume that may teach the model vocabulary, without lower-bound stock.
+
+    A register that masks names counts some labels alone (`SERIE` for many old
+    BMWs); counted in, it raised the share a two-word name needs and taught
+    the bare word, merging different cars. A vehicle known only from such a
+    register teaches nothing. Without lower-bound cohorts this is every row's
+    own volume, so other snapshots fold exactly as before.
+    """
+
+    if not _has_reason_codes(connection):
+        return None
+    lower_bound = {
+        vehicle_id: (float(volume or 0.0), only_lower_bound)
+        for vehicle_id, volume, only_lower_bound in connection.execute(
+            """SELECT canonical_vehicle_id,
+                SUM(CASE WHEN instr(reason_codes, ?) THEN 0
+                    ELSE CAST(registrations AS REAL) END),
+                MIN(instr(reason_codes, ?) > 0)
+            FROM cohort_estimate GROUP BY canonical_vehicle_id
+            HAVING MAX(instr(reason_codes, ?) > 0)""",
+            (_LOWER_BOUND_CODE,) * 3,
+        )
+    }
+    if not lower_bound:
+        return None
+    teaching: dict[str, float] = {}
+    for vehicle_id, _make, _model, volume in rows:
+        if vehicle_id not in lower_bound:
+            teaching[vehicle_id] = float(volume or 0.0)
+            continue
+        own, only_lower_bound = lower_bound[vehicle_id]
+        if not only_lower_bound:
+            teaching[vehicle_id] = own
+    return teaching
+
+
+def _has_reason_codes(connection: sqlite3.Connection) -> bool:
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(cohort_estimate)")}
+    return {"canonical_vehicle_id", "registrations", "reason_codes"} <= columns
+
+
+def materialize_identity_table(connection: sqlite3.Connection, index: VehicleIdentityIndex) -> None:
     """Write `temp.canonical_identity` for every vehicle the snapshot can rank."""
 
     connection.execute("DROP TABLE IF EXISTS temp.canonical_identity")
@@ -98,9 +144,7 @@ def materialize_identity_table(
         if identity is None:
             resolved.append((vehicle_id, make, model))
         else:
-            resolved.append(
-                (vehicle_id, identity.display_make, identity.display_model)
-            )
+            resolved.append((vehicle_id, identity.display_make, identity.display_model))
     connection.executemany(
         "INSERT INTO canonical_identity (vehicle_id, brand, model) VALUES (?, ?, ?)",
         resolved,

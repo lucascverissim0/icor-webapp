@@ -25,7 +25,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -241,8 +241,18 @@ class VehicleIdentityIndex:
         }
 
     @classmethod
-    def from_rows(cls, rows: Iterable[tuple[str, str, str, float]]) -> VehicleIdentityIndex:
-        """Build the index from `(vehicle_id, make, model, registrations)` rows."""
+    def from_rows(
+        cls,
+        rows: Iterable[tuple[str, str, str, float]],
+        *,
+        vocabulary_volume: Mapping[str, float] | None = None,
+    ) -> VehicleIdentityIndex:
+        """Build the index from `(vehicle_id, make, model, registrations)` rows.
+
+        ``vocabulary_volume``, when given, names the vehicles that may teach the
+        model vocabulary and the volume they teach with. A label known only from
+        a register that masks names must not decide how other labels fold.
+        """
 
         cleaned: list[tuple[str, str, str, float]] = []
         make_volume: dict[str, float] = {}
@@ -258,10 +268,16 @@ class VehicleIdentityIndex:
             make_volume[make] = make_volume.get(make, 0.0) + amount
 
         label_volume: dict[tuple[str, str], float] = {}
-        for _vehicle_id, make, label, amount in cleaned:
+        teaching_make_volume: dict[str, float] = {}
+        for vehicle_id, make, label, amount in cleaned:
+            if vocabulary_volume is not None:
+                if vehicle_id not in vocabulary_volume:
+                    continue
+                amount = float(vocabulary_volume[vehicle_id] or 0.0)
             label_volume[(make, label)] = label_volume.get((make, label), 0.0) + amount
+            teaching_make_volume[make] = teaching_make_volume.get(make, 0.0) + amount
 
-        vocabulary = _vocabulary(label_volume, make_volume)
+        vocabulary = _vocabulary(label_volume, teaching_make_volume)
         identities: dict[tuple[str, str], VehicleIdentity] = {}
         vehicle_ids: dict[tuple[str, str], list[str]] = {}
         for vehicle_id, make, label, amount in cleaned:

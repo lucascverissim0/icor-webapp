@@ -346,3 +346,40 @@ def test_lynk_and_co_spellings_are_one_make_and_its_numbers_are_models() -> None
     )
     assert len(models) == 1
     assert set(next(iter(models.values()))) == {"a", "b", "c"}
+
+
+def test_labels_known_only_from_a_lower_bound_register_never_refold_other_vehicles() -> None:
+    """A register that masks names writes `SERIE` alone for many old cars. Its
+    count raised the share a two-word name needs, and the bare word became a
+    model name, so the 3 Series and 5 Series folded into one vehicle."""
+
+    rows = [
+        ("x5", "BMW", "X5", 60_000.0),
+        ("s3", "BMW", "SERIE 3", 400.0),
+        ("s5", "BMW", "SERIE 5", 350.0),
+        ("swift", "SUZUKI", "SWIFT SPORT", 9_000.0),
+        ("serie", "BMW", "SERIE", 40_000.0),
+        ("swiftsport", "SUZUKI", "SWIFTSPORT", 20_000.0),
+    ]
+    teaching = {"x5": 60_000.0, "s3": 400.0, "s5": 350.0, "swift": 9_000.0}
+
+    index = VehicleIdentityIndex.from_rows(rows, vocabulary_volume=teaching)
+
+    assert index.identity_for("s3") == ("bmw", "serie 3")
+    assert index.identity_for("s5") == ("bmw", "serie 5")
+    assert index.identity_for("swift") == ("suzuki", "swift sport")
+    # The register's own labels still resolve onto names the others taught.
+    assert index.identity_for("swiftsport") == ("suzuki", "swift sport")
+    assert index.identity_for("serie") == ("bmw", "serie")
+
+
+def test_without_a_vocabulary_volume_every_row_teaches_as_before() -> None:
+    rows = [
+        ("x5", "BMW", "X5", 60_000.0),
+        ("s3", "BMW", "SERIE 3", 400.0),
+        ("serie", "BMW", "SERIE", 40_000.0),
+    ]
+
+    index = VehicleIdentityIndex.from_rows(rows)
+
+    assert index.identity_for("s3") == ("bmw", "serie")
