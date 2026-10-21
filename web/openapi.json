@@ -398,6 +398,54 @@
         "title": "EurocodeCoverageResponse",
         "type": "object"
       },
+      "EurocodeSearchResponse": {
+        "additionalProperties": false,
+        "description": "A search text that is exactly a Eurocode: the code reading beside the name one.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "first_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Year"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "last_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Year"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "EurocodeSearchResponse",
+        "type": "object"
+      },
       "EurocodeShareResponse": {
         "additionalProperties": false,
         "description": "One Eurocode's part of a row: units certainly its own, and units it may share.",
@@ -1335,6 +1383,16 @@
             "default": 0,
             "title": "Demand Population",
             "type": "integer"
+          },
+          "eurocode_search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeSearchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "eurocodes_loaded": {
             "default": false,
@@ -2754,6 +2812,24 @@
               "type": "string"
             },
             "title": "Brands",
+            "type": "array"
+          },
+          "eurocode_search": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeSearchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eurocode_vehicles": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/VehicleOptionResponse"
+            },
+            "title": "Eurocode Vehicles",
             "type": "array"
           },
           "generations": {

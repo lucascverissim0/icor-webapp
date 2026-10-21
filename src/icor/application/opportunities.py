@@ -30,7 +30,13 @@ from icor.domain.planner import (
     PlanningConfiguration,
 )
 from icor.domain.snapshots import SnapshotVersions
-from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.annotation import (
+    EurocodeBreakdown,
+    EurocodeCell,
+    EurocodeSearch,
+    eurocode_breakdown,
+    eurocode_search,
+)
 from icor.eurocodes.runtime import EurocodeMap
 
 _CURRENT_EUROPE_MARKETS = frozenset(
@@ -221,6 +227,9 @@ class OpportunityPage:
     # Whether rows carry Eurocodes at all, so "no codes" is never mistaken for
     # "none assigned".
     eurocodes_loaded: bool = False
+    # The code reading of the search text, when the text is exactly a Eurocode:
+    # rows that may carry it are listed beside rows whose name contains it.
+    eurocode_search: EurocodeSearch | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,9 +274,15 @@ def _demand_population(population: tuple[OpportunityCandidate, ...]) -> int:
 
 
 def _matching_text(
-    rows: tuple[OpportunityRow, ...], text: str
+    rows: tuple[OpportunityRow, ...],
+    text: str,
+    carrying: frozenset[str] = frozenset(),
 ) -> tuple[OpportunityRow, ...]:
-    """Narrow a ranking to the vehicles whose visible labels contain the text."""
+    """Narrow a ranking to the vehicles whose visible labels contain the text.
+
+    ``carrying`` names the groups that may carry the Eurocode the text names;
+    they are kept beside the name matches.
+    """
 
     needle = text.strip().casefold()
     if not needle:
@@ -277,6 +292,7 @@ def _matching_text(
         for row in rows
         if needle in row.brand.casefold()
         or (row.model is not None and needle in row.model.casefold())
+        or row.group_id in carrying
     )
 
 
@@ -358,7 +374,15 @@ class OpportunityService:
             self._row(group_id, group_atoms, query.group_by, scores[group_id])
             for group_id, group_atoms in grouped.items()
         )
-        rows = _matching_text(rows, query.text)
+        reading = eurocode_search(self._eurocodes, query.text)
+        carrying = frozenset(
+            group_id
+            for group_id, group_atoms in grouped.items()
+            if reading is not None
+            and reading.label is not None
+            and any(share.code == reading.code for share in self._breakdown(group_atoms).codes)
+        )
+        rows = _matching_text(rows, query.text, carrying)
         if query.icor_worked is not None:
             rows = tuple(row for row in rows if row.icor_worked is query.icor_worked)
         rows = _sorted_rows(rows, query.sort)
@@ -399,6 +423,7 @@ class OpportunityService:
             ),
             demand_basis=WHOLE_MARKET_BASIS,
             eurocodes_loaded=self._eurocodes is not None,
+            eurocode_search=reading,
         )
 
     def _with_eurocodes(
@@ -415,6 +440,10 @@ class OpportunityService:
 
         if self._eurocodes is None or group_by is OpportunityGroupBy.BRAND:
             return row
+        return replace(row, eurocodes=self._breakdown(atoms))
+
+    def _breakdown(self, atoms: tuple[_DemandAtom, ...]) -> EurocodeBreakdown:
+        assert self._eurocodes is not None, "only a loaded map breaks units down"
         cells = (
             EurocodeCell(
                 identity=" ".join(
@@ -427,7 +456,7 @@ class OpportunityService:
             )
             for atom in atoms
         )
-        return replace(row, eurocodes=eurocode_breakdown(self._eurocodes, cells))
+        return eurocode_breakdown(self._eurocodes, cells)
 
     def _population(
         self, query: OpportunityQuery

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 
 import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
 import { EurocodeCompact } from '../eurocodes/EurocodeBreakdown'
+import { eurocodeReadingText } from '../eurocodes/eurocode-text'
 import type { components } from '../../lib/api/schema'
 
 type VehicleForecast = components['schemas']['VehicleForecastResponse']
@@ -216,9 +217,15 @@ export function VehicleForecastSearch({
     }),
   })
   const brands = useMemo(
-    () => options.data?.brands?.length ? options.data.brands : [...new Set((options.data?.vehicles ?? []).map((item) => item.brand))],
-    [options.data],
+    () => {
+      const listed = options.data?.brands?.length ? options.data.brands : [...new Set((options.data?.vehicles ?? []).map((item) => item.brand))]
+      // A vehicle picked from a Eurocode's carriers may be filed under a make the
+      // default list leaves out; it stays selectable rather than silently blank.
+      return brand && !listed.includes(brand) ? [brand, ...listed] : listed
+    },
+    [options.data, brand],
   )
+  const eurocodeReading = search ? options.data?.eurocode_search : undefined
   const models = useMemo(
     () => [...new Set((modelOptions.data?.vehicles ?? []).map((item) => item.model))],
     [modelOptions.data],
@@ -247,6 +254,29 @@ export function VehicleForecastSearch({
         {options.isError && <p role="alert">Could not load vehicle matches.</p>}
         {modelOptions.isError && <p role="alert">Could not load models for the selected brand.</p>}
         {search && options.data && <p className="vehicle-search-feedback" role="status">{options.data.vehicles.length.toLocaleString('en-US')} forecastable matches{options.data.search_year ? `, registration year ${options.data.search_year}` : ''}. {matchedVehicle ? `Selected ${matchedVehicle.brand} ${matchedVehicle.model}.` : 'Type or choose the exact brand and model below.'}</p>}
+        {eurocodeReading && (
+          <div className="eurocode-notice eurocode-search-notice" role="status">
+            {eurocodeReading.label == null
+              ? <p>“{search}” is {eurocodeReadingText(eurocodeReading)} in ICOR's catalogue, but no reviewed vehicle carries it.</p>
+              : <>
+                  <p>“{search}” is also {eurocodeReadingText(eurocodeReading)}. Vehicles whose registrations may carry it:</p>
+                  <ul className="eurocode-vehicles">
+                    {(options.data?.eurocode_vehicles ?? []).map((item) => (
+                      <li key={`${item.brand}|${item.model}`}>
+                        <button
+                          aria-pressed={brand === item.brand && model === item.model}
+                          className="secondary-action"
+                          onClick={() => { setBrandInput(item.brand); setModelInput(item.model); setYearInput(null); setGeneration(''); setHorizon(''); forecast.reset() }}
+                          type="button"
+                        >
+                          {item.brand} {item.model}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>}
+          </div>
+        )}
         <div className="vehicle-select-grid">
           <label>Brand<select aria-label="Brand" disabled={options.isFetching} value={brand} onChange={(event) => { setBrandInput(event.target.value); setModelInput(''); setYearInput(null); setGeneration(''); setHorizon(''); forecast.reset() }}><option value="">{options.isFetching ? 'Loading brands…' : 'Select brand'}</option>{brands.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
           <label>Model<select aria-label="Model" disabled={!brand || modelOptions.isFetching} value={model} onChange={(event) => { setModelInput(event.target.value); setYearInput(null); setGeneration(''); setHorizon(''); forecast.reset() }}><option value="">{modelOptions.isFetching ? 'Loading models…' : 'Select model'}</option>{models.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>

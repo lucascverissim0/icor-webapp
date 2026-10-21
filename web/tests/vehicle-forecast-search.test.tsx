@@ -157,6 +157,33 @@ describe('VehicleForecastSearch', () => {
     expect(screen.getByText(/registrations of this selection, not replacements/)).toBeVisible()
   })
 
+  it('reads a search that is exactly a Eurocode and offers the vehicles that may carry it', async () => {
+    const user = userEvent.setup()
+    const codeOptions = {
+      ...searchOptions,
+      vehicles: [],
+      eurocode_search: { code: 'Q201', label: 'Aurora Mobility A1 Horizon I', first_year: 2020, last_year: 2025 },
+      eurocode_vehicles: [{ brand: 'Volkswagen', model: 'Golf' }],
+    }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('brand=Volkswagen') && url.includes('model=Golf')) return Promise.resolve(json(selectedOptions))
+      if (url.includes('search=Q201')) return Promise.resolve(json(codeOptions))
+      return Promise.resolve(json(searchOptions))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search brand or model' }), 'Q201')
+    await user.click(screen.getByRole('button', { name: 'Search vehicles' }))
+
+    expect(await screen.findByText('“Q201” is also Eurocode Q201: Aurora Mobility A1 Horizon I, 2020–2025. Vehicles whose registrations may carry it:')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Volkswagen Golf' }))
+    expect(screen.getByRole('combobox', { name: 'Brand' })).toHaveValue('Volkswagen')
+    expect(await screen.findByRole('combobox', { name: 'Model year' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Volkswagen Golf' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('leads with the EU figures and the demand rank', async () => {
     const user = userEvent.setup()
     const ranked = {

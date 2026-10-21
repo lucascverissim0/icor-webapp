@@ -14,10 +14,11 @@ function label(row: OpportunityRow): string {
   return [row.brand, row.model, row.model_year].filter(Boolean).join(' · ')
 }
 
-export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
+export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode = null }: {
   rows: OpportunityRow[]
   selectedGroup: string | null
   onSelect: (groupId: string) => void
+  searchedCode?: string | null
 }) {
   return (
     <section aria-labelledby="ranking-title" className="opportunity-ranking">
@@ -34,7 +35,7 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
               <div className="opportunity-card__body">
                 <div className="opportunity-card__heading">
                   <div>
-                    {row.eurocodes && <EurocodeSummary breakdown={row.eurocodes} />}
+                    {row.eurocodes && <EurocodeSummary breakdown={row.eurocodes} searchedCode={searchedCode} />}
                     <h3>{label(row)}</h3>
                     <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>
                     <p>{row.contributing_configuration_count} contributing configurations</p>

@@ -155,3 +155,21 @@ def test_identity_keys_fold_or_keep_normalised_raw_labels() -> None:
     assert identity_key(_Index(), "raw", " Zephyr  Motors ", "Arrow  GT ") == (
         "raw|zephyr motors|arrow gt"
     )
+
+
+def test_a_search_names_a_code_exactly_whatever_its_case() -> None:
+    eurocodes = EurocodeMap.from_documents(CATALOGUE, _document())
+
+    assert eurocodes.searched_code(" q102 ") == "Q102"
+    assert eurocodes.searched_code("Q99") is None
+    assert eurocodes.searched_code("Q1020") is None
+    assert eurocodes.searched_code("arrow") is None
+
+
+def test_the_identities_that_may_carry_a_code_include_variant_routes() -> None:
+    eurocodes = EurocodeMap.from_documents(CATALOGUE, _document())
+
+    # The Arrow's "alpha" spelling routes to the Alpha family, so it may carry Q301.
+    assert eurocodes.identities_carrying("Q301") == {"zephyr|arrow", "zephyr|alpha", "zephyr|beta"}
+    assert eurocodes.identities_carrying("Q101") == {"zephyr|arrow"}
+    assert eurocodes.identities_carrying("Q999") == frozenset()

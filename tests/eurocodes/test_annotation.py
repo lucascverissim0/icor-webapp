@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from icor.eurocodes.annotation import EurocodeCell, eurocode_breakdown
+from icor.eurocodes.annotation import (
+    EurocodeCell,
+    EurocodeSearch,
+    eurocode_breakdown,
+    eurocode_search,
+)
 from icor.eurocodes.catalog import parse_rows
 from icor.eurocodes.demo import demo_eurocodes
 from icor.eurocodes.runtime import EurocodeMap
@@ -190,3 +195,37 @@ def test_fractional_registrations_round_once_and_still_reconcile() -> None:
     )
     assert sum(share.certain_units for share in breakdown.codes) == breakdown.single_units
     assert all(share.shared_units == 2 for share in breakdown.codes)
+
+
+def test_a_search_reads_a_code_and_says_when_no_reviewed_vehicle_carries_it() -> None:
+    reading = eurocode_search(demo_eurocodes(), "q202")
+    assert reading == EurocodeSearch("Q202", "Aurora Mobility A1 Horizon II", 2025, None)
+
+    assert eurocode_search(demo_eurocodes(), "a1 horizon") is None
+    assert eurocode_search(None, "Q202") is None
+
+    catalogue = parse_rows(
+        (
+            ("Q501", "ZEPHYR", "GALE 2018-", None, 2018),
+            ("Q599", "ZEPHYR", "HAULER VRACHTWAGEN 2001-", None, 2001),
+        ),
+        make_aliases={},
+        source_sha256=SHA,
+    )
+    with_truck = EurocodeMap.from_documents(
+        catalogue,
+        {
+            "format": "icor-eurocode-decisions",
+            "version": 1,
+            "metadata": {"catalogue_sha256": SHA},
+            "families": {
+                "zephyr/gale": {
+                    "label": "Zephyr Gale",
+                    "make": "zephyr",
+                    "codes": [{"code": "Q501", "label": "Gale", "first_year": 2018, "rows": [2]}],
+                }
+            },
+            "identities": {"zephyr|gale": {"family": "zephyr/gale"}},
+        },
+    )
+    assert eurocode_search(with_truck, "Q599") == EurocodeSearch("Q599")

@@ -12,6 +12,7 @@ import {
   type OpportunitySort,
 } from '../../lib/opportunity-search'
 import { EurocodeNotLoaded } from '../eurocodes/EurocodeBreakdown'
+import { eurocodeReadingText, type EurocodeReading } from '../eurocodes/eurocode-text'
 import { CoverageManager } from './CoverageManager'
 import { OpportunityRanking } from './OpportunityRanking'
 
@@ -112,7 +113,7 @@ function RankingFilters({
             id="opportunity-search"
             maxLength={64}
             onChange={(event) => { setDraft(event.target.value) }}
-            placeholder="Brand or model, for example Golf"
+            placeholder="Brand, model or Eurocode, for example Golf"
             type="search"
             value={draft}
           />
@@ -232,6 +233,17 @@ function formatCount(value: string | number): string {
 
 function percent(part: number, whole: number): string {
   return `${(part / whole * 100).toFixed(1)}%`
+}
+
+/** How a search that is exactly a Eurocode was read: never silently one way. */
+function EurocodeSearchNotice({ reading, text }: { reading: EurocodeReading; text: string }) {
+  return (
+    <p className="eurocode-notice eurocode-search-notice" role="status">
+      {reading.label == null
+        ? `“${text}” is ${eurocodeReadingText(reading)} in ICOR's catalogue, but no reviewed vehicle carries it. Only vehicles whose name contains “${text}” are listed.`
+        : `“${text}” is read two ways: as ${eurocodeReadingText(reading)}, and as text in vehicle names. Both are listed; rows that may carry ${reading.code} show it first, marked “Searched code”.`}
+    </p>
+  )
 }
 
 function ProblemState({ error, onRetry }: { error: Error; onRetry: () => void }) {
@@ -388,11 +400,14 @@ export function OpportunitiesWorkbench({
             <div><span aria-hidden="true" className="opportunity-summary__icon"><TriangleAlert size={21} /></span><dt>High-demand gap</dt><dd>{ranking.data.summary.high_demand_uncovered_base_units.toLocaleString('en-US')}</dd></div>
           </dl>
           {ranking.data.integrity_warnings.map((warning) => <p className="integrity-warning" key={warning} role="alert">{warning}</p>)}
+          {ranking.data.eurocode_search && search.q && <EurocodeSearchNotice reading={ranking.data.eurocode_search} text={search.q} />}
           {ranking.data.items.length === 0 ? (
             <section className="opportunity-state">
               <h2>No forecast candidates match this view</h2>
               <p>{search.q
-                ? `No vehicle matches “${search.q}” in this snapshot. It may be spelled differently by the registration source, or it may not be forecastable yet.`
+                ? ranking.data.eurocode_search?.label
+                  ? `No vehicle in this view has “${search.q}” in its name or may carry Eurocode ${ranking.data.eurocode_search.code}. Its registration years may lie outside the forecast, or the market and year filters may exclude it.`
+                  : `No vehicle matches “${search.q}” in this snapshot. It may be spelled differently by the registration source, or it may not be forecastable yet.`
                 : 'Change the market or horizon filters to restore candidates.'}</p>
             </section>
           ) : (
@@ -408,6 +423,7 @@ export function OpportunitiesWorkbench({
                 onOpenDetails(groupId)
               }}
               rows={ranking.data.items}
+              searchedCode={ranking.data.eurocode_search?.label ? ranking.data.eurocode_search.code : null}
               selectedGroup={selectedGroup}
             />
           )}

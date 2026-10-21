@@ -159,3 +159,35 @@ def eurocode_breakdown(eurocodes: EurocodeMap, cells: Iterable[EurocodeCell]) ->
         unassignable_units=unassignable,
         unreviewed_units=unreviewed,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class EurocodeSearch:
+    """A search text that is also a Eurocode, which is then read both ways.
+
+    A four-character code can also be part of a vehicle name, or look like a
+    year, so a search is never narrowed to one reading: vehicles whose name
+    contains the text and vehicles that may carry the code are both listed, and
+    this names the code reading so the interface can say so.
+    """
+
+    code: str
+    #: The code as reviewed vehicles carry it; None when no reviewed vehicle
+    #: does (a commercial vehicle's code, or one not reviewed yet).
+    label: str | None = None
+    first_year: int | None = None
+    last_year: int | None = None
+
+
+def eurocode_search(eurocodes: EurocodeMap | None, text: str) -> EurocodeSearch | None:
+    """The code reading of a search text, if the text is exactly a catalogue code."""
+
+    if eurocodes is None:
+        return None
+    code = eurocodes.searched_code(text)
+    if code is None:
+        return None
+    summary = eurocodes.summary(code)
+    if summary is None or not eurocodes.identities_carrying(code):
+        return EurocodeSearch(code)
+    return EurocodeSearch(code, summary.label, summary.first_year, summary.last_year)

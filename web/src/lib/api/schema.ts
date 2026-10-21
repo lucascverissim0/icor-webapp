@@ -495,6 +495,20 @@ export interface components {
             unreviewed_units: number;
         };
         /**
+         * EurocodeSearchResponse
+         * @description A search text that is exactly a Eurocode: the code reading beside the name one.
+         */
+        EurocodeSearchResponse: {
+            /** Code */
+            code: string;
+            /** First Year */
+            first_year?: number | null;
+            /** Label */
+            label?: string | null;
+            /** Last Year */
+            last_year?: number | null;
+        };
+        /**
          * EurocodeShareResponse
          * @description One Eurocode's part of a row: units certainly its own, and units it may share.
          */
@@ -850,6 +864,7 @@ export interface components {
              * @default 0
              */
             demand_population: number;
+            eurocode_search?: components["schemas"]["EurocodeSearchResponse"] | null;
             /**
              * Eurocodes Loaded
              * @default false
@@ -1327,6 +1342,12 @@ export interface components {
              * @default []
              */
             brands: string[];
+            eurocode_search?: components["schemas"]["EurocodeSearchResponse"] | null;
+            /**
+             * Eurocode Vehicles
+             * @default []
+             */
+            eurocode_vehicles: components["schemas"]["VehicleOptionResponse"][];
             /** Generations */
             generations: components["schemas"]["GenerationOptionResponse"][];
             /** Horizons */

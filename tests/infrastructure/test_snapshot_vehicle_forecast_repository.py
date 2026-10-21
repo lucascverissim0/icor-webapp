@@ -11,6 +11,7 @@ from icor.forecasting.survival import CohortSurvivalModel
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
     SnapshotVehicleForecastRepository,
     VehicleForecastSelectionError,
+    VehicleOption,
 )
 
 
@@ -432,3 +433,25 @@ def test_without_eurocodes_markets_carry_none(
     )
 
     assert all(market.eurocodes is None for market in result.markets)
+
+
+def test_a_eurocode_search_offers_the_vehicles_that_may_carry_the_code(tmp_path: Path) -> None:
+    path = tmp_path / "snapshot.sqlite3"
+    _database(path)
+    repository = SnapshotVehicleForecastRepository(
+        path, "snapshot-test", eurocodes=_golf_eurocodes()
+    )
+
+    options = repository.options(search="q702")
+
+    assert options.eurocode_search is not None
+    assert (options.eurocode_search.code, options.eurocode_search.label) == (
+        "Q702",
+        "Volkswagen Golf B",
+    )
+    assert options.eurocode_vehicles == (VehicleOption("Volkswagen", "Golf"),)
+    assert options.vehicles == ()  # no vehicle is named Q702
+    assert repository.options(search="golf").eurocode_search is None
+    assert SnapshotVehicleForecastRepository(path, "snapshot-test").options(
+        search="q702"
+    ).eurocode_search is None

@@ -7,7 +7,7 @@ import contextlib
 import json
 import sqlite3
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from math import ceil
 from pathlib import Path
@@ -34,7 +34,12 @@ from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
-from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.annotation import (
+    EurocodeBreakdown,
+    EurocodeCell,
+    eurocode_breakdown,
+    eurocode_search,
+)
 from icor.eurocodes.runtime import EurocodeMap, identity_key
 from icor.evidence.normalization import source_vehicle_display_label
 from icor.evidence.vehicle_identity import VehicleIdentityIndex
@@ -118,6 +123,7 @@ class SnapshotOpportunityRepository:
         self._model_year_catalog = model_year_catalog
         self._eurocodes = eurocodes
         self._eurocode_cache: dict[tuple[object, ...], EurocodeBreakdown] = {}
+        self._identity_keys: dict[str, str] | None = None
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
@@ -151,8 +157,18 @@ class SnapshotOpportunityRepository:
         include_coverage = has_manual_coverage or bool(self._worked_models.records)
         universe = self._universe(query.group_by, include_coverage)
         with self._connect(universe) as connection:
+            reading = (
+                None
+                if self._verified_only
+                else eurocode_search(self._eurocodes, query.text)
+            )
+            code_groups = (
+                self._groups_carrying(connection, query, reading.code)
+                if reading is not None and reading.label is not None
+                else ()
+            )
             cte, parameters = self._scored_cte(
-                query, include_coverage=include_coverage
+                query, include_coverage=include_coverage, code_groups=code_groups
             )
             rows = connection.execute(
                 f"""{cte}
@@ -225,6 +241,7 @@ class SnapshotOpportunityRepository:
             demand_population=universe.population,
             demand_basis=universe.basis,
             eurocodes_loaded=self._eurocodes is not None,
+            eurocode_search=reading,
         )
         if not has_manual_coverage:
             if len(self._uncovered_cache) >= 128:
@@ -637,7 +654,9 @@ class SnapshotOpportunityRepository:
         return universe
 
     @staticmethod
-    def _filter(query: OpportunityQuery) -> _Filter:
+    def _filter(
+        query: OpportunityQuery, code_groups: Sequence[tuple[object, ...]] = ()
+    ) -> _Filter:
         """Split a query into what each part of the statement may mention.
 
         The cohort-attribution CTEs join only the estimate, its inputs and their
@@ -646,6 +665,9 @@ class SnapshotOpportunityRepository:
         malformed statement on any snapshot without a materialized attribution
         table. They take the estimate-scoped predicates only; the identity match
         is applied where the identity is in scope.
+
+        ``code_groups`` are the groups that may carry the Eurocode the search
+        text names: they are listed beside the groups whose name contains it.
         """
 
         estimate: list[str] = []
@@ -666,12 +688,24 @@ class SnapshotOpportunityRepository:
         if text:
             # Matched against the canonical labels rather than the raw ones, so
             # searching "volkswagen" finds the rows filed under "vw" too.
-            clauses.append(
-                "(ident.brand LIKE ? ESCAPE '@' "
-                "OR ident.model LIKE ? ESCAPE '@')"
-            )
+            matches = "ident.brand LIKE ? ESCAPE '@' OR ident.model LIKE ? ESCAPE '@'"
             pattern = f"%{_escape_like(text)}%"
             parameters.extend((pattern, pattern))
+            if code_groups:
+                # A group key's columns, in the order _group_key builds them.
+                columns = (
+                    "ident.brand",
+                    "ident.model",
+                    "attribution.registration_cohort_year",
+                )[: len(code_groups[0])]
+                placeholders = ", ".join("?" for _ in columns)
+                matches += (
+                    f" OR ({', '.join(columns)}) IN (VALUES "
+                    + ", ".join(f"({placeholders})" for _ in code_groups)
+                    + ")"
+                )
+                parameters.extend(value for group in code_groups for value in group)
+            clauses.append(f"({matches})")
         return _Filter(
             estimates=" AND ".join(estimate) if estimate else "1 = 1",
             estimate_parameters=tuple(estimate_parameters),
@@ -839,7 +873,11 @@ class SnapshotOpportunityRepository:
         return cte, parameters
 
     def _scored_cte(
-        self, query: OpportunityQuery, *, include_coverage: bool = True
+        self,
+        query: OpportunityQuery,
+        *,
+        include_coverage: bool = True,
+        code_groups: Sequence[tuple[object, ...]] = (),
     ) -> tuple[str, tuple[object, ...]]:
         """Score the filtered rows against the unfiltered market.
 
@@ -854,7 +892,7 @@ class SnapshotOpportunityRepository:
         grouped, parameters = self._grouped_cte(
             group_by=query.group_by,
             include_coverage=include_coverage,
-            predicates=self._filter(query),
+            predicates=self._filter(query, code_groups),
             atoms_name="base_atoms",
         )
         # A whole-group predicate, so it can only run after grouping: a vehicle
@@ -1012,8 +1050,9 @@ class SnapshotOpportunityRepository:
 
         Brand rows span too many codes to list, and the reviewed-only ranking
         groups under other labels, so neither is annotated. Search text names
-        the whole group, so it never changes a shown group's estimates and is
-        not part of the cache key.
+        whole groups (by name or by Eurocode), so it never changes a shown
+        group's estimates: the page's groups are selected here directly, and the
+        text is neither a predicate nor part of the cache key.
         """
 
         if (
@@ -1075,12 +1114,12 @@ class SnapshotOpportunityRepository:
                 JOIN {attribution} attribution
                     ON attribution.opportunity_id = o.opportunity_id
                 WHERE o.canonical_vehicle_id IN (SELECT vehicle_id FROM page_vehicle)
-                    AND {predicates.atoms} {year_filter}
+                    AND {predicates.estimates} {year_filter}
                 GROUP BY 1, 2, 3, 4, 5, 6, 7""",
                 (
                     *parameters,
                     *(value for pair in pairs for value in pair),
-                    *predicates.atom_parameters,
+                    *predicates.estimate_parameters,
                     *year_parameters,
                 ),
             ).fetchall()
@@ -1105,6 +1144,86 @@ class SnapshotOpportunityRepository:
                     self._eurocode_cache.pop(next(iter(self._eurocode_cache)), None)
                 self._eurocode_cache[(scope, key)] = found[key]
         return found
+
+    def _groups_carrying(
+        self, connection: sqlite3.Connection, query: OpportunityQuery, code: str
+    ) -> tuple[tuple[object, ...], ...]:
+        """The groups, under this view's markets and horizons, that may carry the code.
+
+        The map names the reviewed identities that can reach the code; each of
+        their registration cells is then allocated, exactly as a breakdown does,
+        so a group is listed only when its own breakdown would show the code.
+        """
+
+        assert self._eurocodes is not None, "only a loaded map reads a code"
+        identities = self._eurocodes.identities_carrying(code)
+        vehicles = sorted(
+            vehicle_id
+            for vehicle_id, identity in self._vehicle_identities(connection).items()
+            if identity in identities
+        )
+        if not vehicles:
+            return ()
+        predicates = self._filter(replace(query, text=""))
+        if self._materialized_attribution:
+            prefix = "WITH "
+            attribution = "opportunity_cohort_attribution"
+            parameters: tuple[object, ...] = ()
+        else:
+            prefix = f"WITH {_cohort_attribution_ctes(predicates.estimates)}, "
+            attribution = "cohort_attribution"
+            parameters = predicates.estimate_parameters
+        cells = connection.execute(
+            f"""{prefix}code_vehicle(vehicle_id) AS MATERIALIZED (
+                VALUES {", ".join("(?)" for _ in vehicles)}
+            )
+            SELECT ident.brand, ident.model,
+                attribution.registration_cohort_year registration_year,
+                o.canonical_vehicle_id, v.model raw_model, o.geography,
+                SUM(attribution.base_units) base_units
+            FROM opportunity_estimate o
+            JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
+            JOIN temp.canonical_identity ident
+                ON ident.vehicle_id = o.canonical_vehicle_id
+            JOIN {attribution} attribution
+                ON attribution.opportunity_id = o.opportunity_id
+            WHERE o.canonical_vehicle_id IN (SELECT vehicle_id FROM code_vehicle)
+                AND {predicates.estimates}
+            GROUP BY 1, 2, 3, 4, 5, 6""",
+            (*parameters, *vehicles, *predicates.estimate_parameters),
+        ).fetchall()
+        identity_of = self._vehicle_identities(connection)
+        groups: set[tuple[object, ...]] = set()
+        for brand, model, year, vehicle_id, raw_model, geography, units in cells:
+            if not units:
+                continue
+            allocation = self._eurocodes.allocate(
+                identity_of[vehicle_id], int(year), geography, raw_model=raw_model
+            )
+            if code in allocation.codes:
+                groups.add(
+                    (brand,)
+                    if query.group_by is OpportunityGroupBy.BRAND
+                    else (brand, model)
+                    if query.group_by is OpportunityGroupBy.MODEL
+                    else (brand, model, int(year))
+                )
+        return tuple(sorted(groups, key=repr))
+
+    def _vehicle_identities(self, connection: sqlite3.Connection) -> dict[str, str]:
+        """Each forecast vehicle's Eurocode identity key, computed once."""
+
+        if self._identity_keys is None:
+            assert self._identity_index is not None, "set when the connection opened"
+            self._identity_keys = {
+                vehicle_id: identity_key(self._identity_index, vehicle_id, make, model)
+                for vehicle_id, make, model in connection.execute(
+                    "SELECT vehicle_id, make, model FROM canonical_vehicle "
+                    "WHERE vehicle_id IN "
+                    "(SELECT canonical_vehicle_id FROM opportunity_estimate)"
+                )
+            }
+        return self._identity_keys
 
     def _row(
         self,

@@ -160,6 +160,16 @@ class GenerationOptionResponse(ApiModel):
     confidence: str
 
 
+class EurocodeSearchResponse(ApiModel):
+    """A search text that is exactly a Eurocode: the code reading beside the name one."""
+
+    code: str
+    #: The code as reviewed vehicles carry it; null when no reviewed vehicle does.
+    label: str | None = None
+    first_year: int | None = None
+    last_year: int | None = None
+
+
 class VehicleForecastOptionsResponse(ApiModel):
     vehicles: tuple[VehicleOptionResponse, ...]
     years: tuple[int, ...]
@@ -169,6 +179,10 @@ class VehicleForecastOptionsResponse(ApiModel):
     #: A registration year read out of a free-text search, so `VW Golf 2020`
     #: can preselect 2020 rather than matching it as text and finding nothing.
     search_year: int | None = None
+    #: When the search is exactly a Eurocode: that reading, and the vehicles that
+    #: may carry the code, listed apart from the name matches in `vehicles`.
+    eurocode_search: EurocodeSearchResponse | None = None
+    eurocode_vehicles: tuple[VehicleOptionResponse, ...] = ()
 
 
 class EurocodeShareResponse(ApiModel):
@@ -392,6 +406,9 @@ class OpportunityPageResponse(ApiModel):
     demand_population: int = 0
     demand_basis: str = ""
     eurocodes_loaded: bool = False
+    #: When the search text is exactly a Eurocode, rows that may carry it are
+    #: listed beside rows whose name contains the text; this names the code.
+    eurocode_search: EurocodeSearchResponse | None = None
 
 
 class OpportunityDrillDownResponse(ApiModel):

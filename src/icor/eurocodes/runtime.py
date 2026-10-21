@@ -90,6 +90,7 @@ class EurocodeMap:
         self._catalogue_codes = frozenset(catalogue_codes)
         self._family_summaries: dict[tuple[str, str], CodeSummary] = {}
         self._summaries = self._summarise()
+        self._carriers = self._index_carriers()
 
     @classmethod
     def from_directory(cls, directory: Path) -> EurocodeMap:
@@ -157,8 +158,40 @@ class EurocodeMap:
             for code in labels
         }
 
+    def _index_carriers(self) -> dict[str, frozenset[str]]:
+        """Every reviewed identity some route of which reaches a family listing the code.
+
+        A variant routes regardless of the identity's own status (an ambiguous
+        bare name can still send one spelling to a family), so its families count.
+        """
+
+        carriers: dict[str, set[str]] = {}
+        for identity, decision in self.decisions.identities.items():
+            families = set(decision.families if decision.status == "mapped" else ())
+            for variant in decision.variants:
+                families.update(variant.families)
+            for family in families:
+                for fact in self.decisions.families[family].codes:
+                    carriers.setdefault(fact.code, set()).add(identity)
+        return {code: frozenset(identities) for code, identities in carriers.items()}
+
     def is_catalogue_code(self, code: str) -> bool:
         return code in self._catalogue_codes
+
+    def searched_code(self, text: str) -> str | None:
+        """The catalogue code a search text names exactly, whatever its case."""
+
+        candidate = text.strip().upper()
+        return candidate if candidate in self._catalogue_codes else None
+
+    def identities_carrying(self, code: str) -> frozenset[str]:
+        """Reviewed identities whose registrations may carry the code.
+
+        Candidates only: whether one registration does depends on its year,
+        market and spelling, so a caller allocates each registration to know.
+        """
+
+        return self._carriers.get(code, frozenset())
 
     def summary(self, code: str) -> CodeSummary | None:
         return self._summaries.get(code)

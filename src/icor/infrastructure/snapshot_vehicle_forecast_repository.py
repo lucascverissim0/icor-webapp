@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -12,8 +13,14 @@ from pathlib import Path
 from icor.application.ranking import DEMAND_POINTS_MAX, demand_percentile_rank
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.planner import DemandRange
-from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
-from icor.eurocodes.runtime import EurocodeMap, identity_key
+from icor.eurocodes.annotation import (
+    EurocodeBreakdown,
+    EurocodeCell,
+    EurocodeSearch,
+    eurocode_breakdown,
+    eurocode_search,
+)
+from icor.eurocodes.runtime import RAW_IDENTITY_PREFIX, EurocodeMap, identity_key
 from icor.evidence.normalization import (
     normalize_vehicle_label,
     source_vehicle_display_label,
@@ -112,6 +119,10 @@ class VehicleForecastOptions:
     #: The registration year found in a free-text search, so `VW Golf 2020` can
     #: preselect 2020 instead of matching it as text and finding nothing.
     search_year: int | None = None
+    #: The code reading of a search that is exactly a Eurocode, and the vehicles
+    #: that may carry the code, kept apart from the name matches in `vehicles`.
+    eurocode_search: EurocodeSearch | None = None
+    eurocode_vehicles: tuple[VehicleOption, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +239,29 @@ class SnapshotVehicleForecastRepository:
         brand: str | None = None,
         model: str | None = None,
         include_all_brands: bool = False,
+    ) -> VehicleForecastOptions:
+        options = self._options(
+            search=search, brand=brand, model=model, include_all_brands=include_all_brands
+        )
+        reading = eurocode_search(self._eurocodes, search) if search else None
+        if reading is None:
+            return options
+        if reading.label is None:
+            return replace(options, eurocode_search=reading)
+        assert self._eurocodes is not None, "a code is only read from a loaded map"
+        with self._connect() as connection:
+            vehicles = self._carrier_options(
+                connection, self._eurocodes.identities_carrying(reading.code)
+            )
+        return replace(options, eurocode_search=reading, eurocode_vehicles=vehicles)
+
+    def _options(
+        self,
+        *,
+        search: str | None,
+        brand: str | None,
+        model: str | None,
+        include_all_brands: bool,
     ) -> VehicleForecastOptions:
         parsed = parse_vehicle_query(search) if search else None
         found_year = parsed.year if parsed else None
@@ -731,24 +765,9 @@ class SnapshotVehicleForecastRepository:
         identities = (
             index.match(parse_vehicle_query(term)) if term else index.identities()
         )
-        options: list[VehicleOption] = []
-        reviewed: set[tuple[str, str]] = set()
-        for identity in identities:
-            vehicle = CanonicalVehicle(
-                "option", identity.display_make, identity.display_model, None, "Europe"
-            )
-            profile = self._catalog.profile_for(vehicle)
-            if profile is None:
-                if self._verified_only:
-                    continue
-                option = VehicleOption(identity.display_make, identity.display_model)
-            else:
-                option = VehicleOption(*profile.aliases[0])
-                reviewed.add((option.brand, option.model))
-            options.append(option)
-        unique: dict[tuple[str, str], VehicleOption] = {}
-        for option in options:
-            unique.setdefault((option.brand, option.model), option)
+        unique, reviewed = self._offered(
+            (identity.display_make, identity.display_model) for identity in identities
+        )
         if term:
             # `match` already ranks by exactness then volume; keep that order.
             return tuple(unique.values())
@@ -763,6 +782,64 @@ class SnapshotVehicleForecastRepository:
             )
         )
         return ordered if include_all else ordered[:200]
+
+    def _offered(
+        self, labels: Iterable[tuple[str, str]]
+    ) -> tuple[dict[tuple[str, str], VehicleOption], set[tuple[str, str]]]:
+        """The options a picker offers for these labels, and which are reviewed.
+
+        A reviewed vehicle is offered under its catalogue name, so its spellings
+        collapse into one option; the verified-only service offers nothing else.
+        """
+
+        unique: dict[tuple[str, str], VehicleOption] = {}
+        reviewed: set[tuple[str, str]] = set()
+        for make, model in labels:
+            vehicle = CanonicalVehicle("option", make, model, None, "Europe")
+            profile = self._catalog.profile_for(vehicle)
+            if profile is None:
+                if self._verified_only:
+                    continue
+                option = VehicleOption(make, model)
+            else:
+                option = VehicleOption(*profile.aliases[0])
+                reviewed.add((option.brand, option.model))
+            unique.setdefault((option.brand, option.model), option)
+        return unique, reviewed
+
+    def _carrier_options(
+        self, connection: sqlite3.Connection, identities: frozenset[str]
+    ) -> tuple[VehicleOption, ...]:
+        """The vehicles whose registrations may carry a code, largest first.
+
+        A folded identity is offered by its display labels. A vehicle the
+        identity rules leave unfolded is keyed by its raw labels, so it is found
+        among the raw vehicles and offered under its own spelling, which the
+        forecast resolves by label.
+        """
+
+        index = self._identity_index(connection)
+        folded = sorted(
+            (
+                identity
+                for identity in index.identities()
+                if f"{identity.make}|{identity.model}" in identities
+            ),
+            key=lambda identity: (-identity.volume, identity.make, identity.model),
+        )
+        labels = [(identity.display_make, identity.display_model) for identity in folded]
+        if any(key.startswith(f"{RAW_IDENTITY_PREFIX}|") for key in identities):
+            raw = {
+                (" ".join(make.split()), " ".join(model.split()))
+                for vehicle_id, make, model in connection.execute(
+                    "SELECT vehicle_id, make, model FROM canonical_vehicle"
+                )
+                if index.identity_for(vehicle_id) is None
+                and identity_key(index, vehicle_id, make, model) in identities
+            }
+            labels.extend(sorted(raw, key=lambda label: (label[0].casefold(), label[1].casefold())))
+        unique, _reviewed = self._offered(labels)
+        return tuple(unique.values())
 
     def _vehicle_ids(
         self,

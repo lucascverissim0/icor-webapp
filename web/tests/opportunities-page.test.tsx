@@ -269,6 +269,69 @@ describe('OpportunitiesWorkbench', () => {
     expect(screen.queryByText('Q201')).not.toBeInTheDocument()
   })
 
+  it('reads a search that is exactly a Eurocode both ways and leads with the searched chip', async () => {
+    const fetcher = successFetcher()
+    const base = fetcher.getMockImplementation()!
+    const [first] = opportunities.items
+    const carried = {
+      ...opportunities,
+      eurocode_search: { code: 'Q202', label: 'Aurora Mobility A1 Horizon II', first_year: 2025, last_year: null },
+      items: [{
+        ...first,
+        eurocodes: {
+          ...first.eurocodes,
+          codes: [
+            ...first.eurocodes.codes,
+            ...['Q203', 'Q204'].map((code) => ({ ...first.eurocodes.codes[0], code, shared_units: 0, shared_with: [] })),
+            { ...first.eurocodes.codes[0], code: 'Q202', certain_units: 0, shared_with: ['Q201'] },
+          ],
+        },
+      }],
+    }
+    fetcher.mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/opportunities?')) return Promise.resolve(json(carried))
+      return base(input, init)
+    })
+    const client = new PlannerApiClient(fetcher)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders queryClient={queryClient}>
+        <OpportunitiesWorkbench apiClient={client} onOpenDetails={vi.fn()} onSearchChange={vi.fn()} search={{ groupBy: 'model_year', page: 1, q: 'q202' }} />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByText(/“q202” is read two ways: as Eurocode Q202: Aurora Mobility A1 Horizon II, 2025–, and as text in vehicle names/)).toBeVisible()
+    // The searched code is the fourth code, yet it leads the three chips shown.
+    const chips = within(screen.getByRole('group', { name: 'Eurocodes' })).getAllByRole('listitem')
+    expect(chips).toHaveLength(3)
+    expect(chips[0]).toHaveTextContent(/^Q202Searched code/)
+    expect(chips[0]).toHaveClass('eurocode-chip--searched')
+    expect(screen.getByText('+1 more code')).toBeVisible()
+  })
+
+  it('says when a searched Eurocode is carried by no reviewed vehicle', async () => {
+    const fetcher = successFetcher()
+    const base = fetcher.getMockImplementation()!
+    fetcher.mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/opportunities?')) {
+        return Promise.resolve(json({ ...opportunities, eurocode_search: { code: 'Q999', label: null, first_year: null, last_year: null } }))
+      }
+      return base(input, init)
+    })
+    const client = new PlannerApiClient(fetcher)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders queryClient={queryClient}>
+        <OpportunitiesWorkbench apiClient={client} onOpenDetails={vi.fn()} onSearchChange={vi.fn()} search={{ groupBy: 'model_year', page: 1, q: 'Q999' }} />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByText(/“Q999” is Eurocode Q999 in ICOR's catalogue, but no reviewed vehicle carries it/)).toBeVisible()
+    expect(screen.queryByText('Searched code')).not.toBeInTheDocument()
+  })
+
   it('stays quiet when the status endpoint fails', async () => {
     const fetcher = successFetcher()
     const base = fetcher.getMockImplementation()!

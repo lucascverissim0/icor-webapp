@@ -35,9 +35,19 @@ function ShareText({ share }: { share: EurocodeShare }) {
   )
 }
 
-/** Compact chips for a ranking card: the first codes, then the units no code explains. */
-export function EurocodeSummary({ breakdown }: { breakdown: EurocodeBreakdownData }) {
-  const shown = breakdown.codes.slice(0, CHIP_LIMIT)
+/** Compact chips for a ranking card: the first codes, then the units no code explains.
+ *
+ * A searched code leads, so a row listed because it may carry the code always shows it.
+ */
+export function EurocodeSummary({ breakdown, searchedCode = null }: {
+  breakdown: EurocodeBreakdownData
+  searchedCode?: string | null
+}) {
+  const ordered = [
+    ...breakdown.codes.filter((share) => share.code === searchedCode),
+    ...breakdown.codes.filter((share) => share.code !== searchedCode),
+  ]
+  const shown = ordered.slice(0, CHIP_LIMIT)
   const hidden = breakdown.codes.length - shown.length
   return (
     <div aria-label="Eurocodes" className="eurocode-summary" role="group">
@@ -45,8 +55,9 @@ export function EurocodeSummary({ breakdown }: { breakdown: EurocodeBreakdownDat
       {shown.length > 0 && (
         <ul className="eurocode-chips">
           {shown.map((share) => (
-            <li className="eurocode-chip" key={share.code}>
+            <li className={share.code === searchedCode ? 'eurocode-chip eurocode-chip--searched' : 'eurocode-chip'} key={share.code}>
               <code>{share.code}</code>
+              {share.code === searchedCode && <span className="eurocode-chip__badge">Searched code</span>}
               <span className="eurocode-chip__label">{share.label} · {eurocodeYears(share)}</span>
               <ShareText share={share} />
             </li>

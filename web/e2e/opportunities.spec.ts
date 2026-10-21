@@ -85,6 +85,19 @@ test('the ranking leads with Eurocodes and the detail page tabulates them', asyn
   await expect(panel.getByText(/Shared units are never split/)).toBeVisible()
 })
 
+test('a search that is exactly a Eurocode lists the vehicles that may carry it', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await page.goto('/opportunities?groupBy=model_year&q=q202')
+  await expect(page.getByText(/“q202” is read two ways: as Eurocode Q202/)).toBeVisible()
+  const cards = page.locator('.opportunity-card')
+  await expect(cards.first()).toBeVisible()
+  // Every row listed may carry the fictional successor code, and shows it first.
+  for (const card of await cards.all()) {
+    await expect(card.locator('.eurocode-chip').first()).toContainText('Q202')
+    await expect(card.locator('.eurocode-chip--searched')).toHaveCount(1)
+  }
+})
+
 test('next, last, and previous pagination follow requested route state', async ({ page }) => {
   await page.route('**/api/v1/opportunities?**', async (route) => {
     const response = await route.fetch()

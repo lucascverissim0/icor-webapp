@@ -3,6 +3,7 @@ import type { components } from '../../lib/api/schema'
 
 export type EurocodeBreakdownData = components['schemas']['EurocodeBreakdownResponse']
 export type EurocodeShare = components['schemas']['EurocodeShareResponse']
+export type EurocodeReading = components['schemas']['EurocodeSearchResponse']
 
 export const CHIP_LIMIT = 3
 
@@ -35,4 +36,10 @@ export function unassignedParts(breakdown: EurocodeBreakdownData) {
     total: parts.reduce((sum, part) => sum + part.units, 0),
     reasons: parts.filter((part) => part.units > 0),
   }
+}
+
+/** "Eurocode Q201: Aurora Mobility A1 Horizon I, 2020–2025", or the bare code if no vehicle carries it. */
+export function eurocodeReadingText(reading: EurocodeReading): string {
+  if (reading.label == null || reading.first_year == null) return `Eurocode ${reading.code}`
+  return `Eurocode ${reading.code}: ${reading.label}, ${eurocodeYears({ first_year: reading.first_year, last_year: reading.last_year ?? null })}`
 }

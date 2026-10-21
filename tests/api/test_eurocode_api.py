@@ -147,3 +147,29 @@ def test_a_broken_private_folder_is_reported_not_served(
 
     assert loaded is None
     assert warning == "The private Eurocode files could not be loaded (ValueError)."
+
+
+def test_a_eurocode_search_lists_the_rows_that_may_carry_it(client: TestClient) -> None:
+    body = client.get(
+        "/api/v1/opportunities",
+        params={"group_by": "model_year", "q": "q202", "sort": "vehicle", "page_size": 100},
+    ).json()
+
+    assert body["eurocode_search"] == {
+        "code": "Q202",
+        "label": "Aurora Mobility A1 Horizon II",
+        "first_year": 2025,
+        "last_year": None,
+    }
+    # The successor's launch span is 2025-2026; it is current from then on.
+    assert [(row["model"], row["model_year"]) for row in body["items"]] == [
+        ("A1 Horizon", 2025),
+        ("A1 Horizon", 2026),
+        ("A1 Horizon", 2027),
+        ("A1 Horizon", 2028),
+    ]
+    for row in body["items"]:
+        assert "Q202" in {code["code"] for code in row["eurocodes"]["codes"]}
+
+    named = client.get("/api/v1/opportunities", params={"group_by": "model", "q": "horizon"})
+    assert named.json()["eurocode_search"] is None

@@ -23,6 +23,7 @@ from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
 from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
+from icor.eurocodes.annotation import EurocodeSearch
 from icor.eurocodes.catalog import parse_rows
 from icor.eurocodes.runtime import EurocodeMap
 from icor.evidence.vehicle_identity import identity_rules_sha256
@@ -978,13 +979,15 @@ def test_the_universe_percentile_matches_the_single_value_definition(
 def _fictional_eurocodes(*identities: str) -> EurocodeMap:
     """Fictional codes (`Q` prefix, unused by the real catalogue) for the fixture's Golf.
 
-    The second generation launches in 2021, so that year is shared by both.
+    The second generation launches in 2021, so that year is shared by both. The
+    van's code is catalogued but carried by no reviewed vehicle.
     """
 
     catalogue = parse_rows(
         (
             ("Q601", "VOLKSWAGEN", "GOLF 5D HBK 2010-", None, 2010),
             ("Q602", "VOLKSWAGEN", "GOLF 5D HBK 2021-", None, 2021),
+            ("Q699", "VOLKSWAGEN", "CRAFTER BEDRIJFSWAGEN 2017-", None, 2017),
         ),
         make_aliases={},
         source_sha256="c" * 64,
@@ -1165,3 +1168,124 @@ def test_eurocode_status_measures_every_forecast_cell(
     assert status.state.loaded
     assert status.state.orphaned_identities == 1
     assert status.state.warnings == ("1 reviewed identities no longer exist in this snapshot.",)
+
+
+def _with_a_name_that_spells_a_code(sqlite_repository: SnapshotPlannerRepository) -> None:
+    """An unreviewed Zephyr whose model name contains the fictional code Q601: 5 units, 2020."""
+
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "INSERT INTO canonical_vehicle VALUES ('vehicle-gust', 'Zephyr', 'Gust Q601')"
+        )
+        connection.execute(
+            "INSERT INTO generation_entry VALUES ('generation-gust', 'Gust generation', "
+            "'2020-01-01', '2024-12-01', 'estimated', 'Hatchback', NULL, "
+            "'[\"estimated\"]', '[\"obs\"]')"
+        )
+        connection.execute(
+            "INSERT INTO cohort_estimate VALUES "
+            "('cohort-gust', 2020, '80', '90', '95', 'survival-v1')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_estimate VALUES ('opportunity-gust', 'generation-gust', "
+            "'vehicle-gust', 'DE', 2028, '3', '5', '8', '90', 'hazard-v1', 'forecast-v1', "
+            "'uncertainty-v1', 'low', '[\"assumption\"]', '[\"reason\"]')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_input (opportunity_id, cohort_id) "
+            "VALUES ('opportunity-gust', 'cohort-gust')"
+        )
+
+
+def test_a_eurocode_search_lists_the_vehicles_that_may_carry_the_code(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    _with_a_name_that_spells_a_code(sqlite_repository)
+    _with_golf_2021_cohort(sqlite_repository)
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+
+    launch = repository.search(
+        OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, text="q602")
+    )
+    assert launch.eurocode_search == EurocodeSearch("Q602", "Volkswagen Golf B", 2021, None)
+    assert [(row.model, row.model_year) for row in launch.items] == [("Golf", 2021)]
+
+    # Q601 is carried by the Golf and is also part of a name: both readings are listed.
+    both = repository.search(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR, text="Q601", sort=OpportunitySort.VEHICLE
+        )
+    )
+    assert [(row.brand, row.model, row.model_year) for row in both.items] == [
+        ("Volkswagen", "Golf", 2020),
+        ("Volkswagen", "Golf", 2021),
+        ("Zephyr", "Gust Q601", 2020),
+    ]
+    assert both.summary.base_units == 10 + 3 + 5
+    models = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="Q601"))
+    assert {row.model for row in models.items} == {"Golf", "Gust Q601"}
+    brands = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.BRAND, text="Q602"))
+    assert [row.brand for row in brands.items] == ["Volkswagen"]
+
+    # A search chooses rows; it never changes a row's score, units or codes.
+    whole = {
+        row.group_id: row
+        for row in repository.search(
+            OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR, page_size=10)
+        ).items
+    }
+    for row in both.items:
+        assert row == whole[row.group_id]
+
+
+def test_a_catalogued_code_no_reviewed_vehicle_carries_is_still_named(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+
+    page = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="Q699"))
+
+    assert page.eurocode_search == EurocodeSearch("Q699")
+    assert page.items == ()
+    plain = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="golf"))
+    assert plain.eurocode_search is None
+
+
+def test_a_eurocode_search_binds_its_filters_on_inline_attribution(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+    assert repository._materialized_attribution is False
+
+    page = repository.search(
+        OpportunityQuery(
+            group_by=OpportunityGroupBy.MODEL_YEAR,
+            markets=("DE",),
+            horizons=(2028,),
+            text="Q601",
+        )
+    )
+    assert [(row.model, row.model_year) for row in page.items] == [("Golf", 2020)]
+    assert page.items[0].demand.base_units == 13
+    elsewhere = OpportunityQuery(
+        group_by=OpportunityGroupBy.MODEL_YEAR, markets=("FR",), text="Q601"
+    )
+    assert repository.search(elsewhere).items == ()
+    # The fixture's Golf was registered in 2020, before the second code begins.
+    later = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="Q602"))
+    assert later.items == () and later.eurocode_search is not None
