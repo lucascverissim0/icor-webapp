@@ -12,7 +12,13 @@ import {
   type OpportunitySort,
 } from '../../lib/opportunity-search'
 import { EurocodeNotLoaded } from '../eurocodes/EurocodeBreakdown'
-import { eurocodeReadingText, type EurocodeReading } from '../eurocodes/eurocode-text'
+import {
+  eurocodeReadingText,
+  format as formatUnits,
+  unassignedParts,
+  type EurocodeBreakdownData,
+  type EurocodeReading,
+} from '../eurocodes/eurocode-text'
 import { CoverageManager } from './CoverageManager'
 import { OpportunityRanking } from './OpportunityRanking'
 
@@ -113,7 +119,7 @@ function RankingFilters({
             id="opportunity-search"
             maxLength={64}
             onChange={(event) => { setDraft(event.target.value) }}
-            placeholder="Brand, model or Eurocode, for example Golf"
+            placeholder={search.groupBy === 'eurocode' ? 'Eurocode, brand or model, for example Golf' : 'Brand, model or Eurocode, for example Golf'}
             type="search"
             value={draft}
           />
@@ -260,6 +266,33 @@ function ProblemState({ error, onRetry }: { error: Error; onRetry: () => void })
   )
 }
 
+/** The Eurocode view's units by outcome: certain on the rows, shared once, and not assigned. */
+function EurocodeTotals({ totals }: { totals: EurocodeBreakdownData }) {
+  const { total, reasons } = unassignedParts(totals)
+  return (
+    <p aria-label="Eurocode totals" className="eurocode-totals" role="group">
+      <span>Certain on the codes listed: <strong>{formatUnits(totals.single_units)}</strong></span>
+      <span>Shared between codes, counted once: <strong>{formatUnits(totals.shared_units)}</strong></span>
+      <span>
+        Not assigned to a Eurocode: <strong>{formatUnits(total)}</strong>
+        {reasons.length > 0 && ` (${reasons.map((part) => `${part.reason}: ${formatUnits(part.units)}`).join('; ')})`}
+      </span>
+    </p>
+  )
+}
+
+/** Shown instead of the generic error when the service has no Eurocode map. */
+function EurocodesNotLoadedState({ message, onShowModelYears }: { message: string; onShowModelYears: () => void }) {
+  return (
+    <section className="opportunity-state" role="status">
+      <p className="eyebrow">Eurocodes unavailable</p>
+      <h2>Eurocodes are not loaded in this service</h2>
+      <p>{message}</p>
+      <button className="primary-action" onClick={onShowModelYears} type="button">Show model years</button>
+    </section>
+  )
+}
+
 export function OpportunitiesWorkbench({
   apiClient = plannerApi,
   clientRelease = import.meta.env.VITE_ICOR_CLIENT_RELEASE === 'verified',
@@ -270,6 +303,8 @@ export function OpportunitiesWorkbench({
   selectedGroup = null,
 }: OpportunitiesWorkbenchProps) {
   const opportunityQuery = queryFromSearch(search)
+  // What one ranked row is, in the score explanation's words.
+  const rankedItem = search.groupBy === 'eurocode' ? 'Eurocode' : 'vehicle'
   const detailQuery: OpportunitiesQuery = {
     groupBy: search.groupBy,
     markets: search.market,
@@ -326,15 +361,16 @@ export function OpportunitiesWorkbench({
           <p><strong>Score = demand percentile × 100</strong><span>The highest forecast replacement demand scores 100. Whether ICOR has worked on a vehicle is shown beside the score and never changes it.</span></p>
         </div>
         <p className="score-method__scope" role="note">
-          Scores are whole-market. The demand percentile compares each vehicle
+          Scores are whole-market. The demand percentile compares each {rankedItem}{' '}
           with{' '}
           {ranking.data?.demand_population
             ? `all ${formatCount(ranking.data.demand_population)} ranked ${RANKED_NOUN[search.groupBy]}`
             : 'every ranked vehicle'}{' '}
-          in this snapshot — every market and both forecast horizons — so a
-          vehicle scores the same here as it does anywhere else in the app.
+          in this snapshot — every market and both forecast horizons — so a{' '}
+          {rankedItem} scores the same here as it does anywhere else in the app.
           Filtering or searching changes which rows appear and the units they
           carry, never the score.
+          {search.groupBy === 'eurocode' && ' Eurocode rows rank on the units the code certainly carries; units shared between codes are shown beside them and never split.'}
         </p>
       </section>
 
@@ -346,6 +382,7 @@ export function OpportunitiesWorkbench({
         <p className="grouping-label">Summarize ranking by</p>
         <div aria-label="Opportunity grouping" className="grouping-control" role="group">
         {([
+          ['eurocode', 'Eurocodes'],
           ['model_year', 'Model years'],
           ['model', 'Models'],
           ['brand', 'Brands'],
@@ -372,7 +409,12 @@ export function OpportunitiesWorkbench({
       />
 
       {ranking.isPending && <section aria-busy="true" className="opportunity-state"><h2>Loading opportunity ranking…</h2></section>}
-      {ranking.isError && <ProblemState error={ranking.error} onRetry={() => void ranking.refetch()} />}
+      {ranking.isError && (ranking.error instanceof ApiProblem && ranking.error.code === 'eurocodes_not_loaded' && search.groupBy === 'eurocode'
+        ? <EurocodesNotLoadedState
+            message={ranking.error.message}
+            onShowModelYears={() => { onSearchChange({ ...search, groupBy: 'model_year', page: 1 }) }}
+          />
+        : <ProblemState error={ranking.error} onRetry={() => void ranking.refetch()} />)}
       {ranking.data && (
         <>
           <aside className="dataset-coverage" aria-label="Available opportunity data">
@@ -396,10 +438,11 @@ export function OpportunitiesWorkbench({
             </div>
           )}
           <dl aria-label="Opportunity summary" className="opportunity-summary">
-            <div><span aria-hidden="true" className="opportunity-summary__icon"><ChartNoAxesCombined size={21} /></span><dt>Forecast replacements</dt><dd>{ranking.data.summary.base_units.toLocaleString('en-US')}</dd></div>
+            <div><span aria-hidden="true" className="opportunity-summary__icon"><ChartNoAxesCombined size={21} /></span><dt>{search.groupBy === 'eurocode' ? 'Certain replacements' : 'Forecast replacements'}</dt><dd>{ranking.data.summary.base_units.toLocaleString('en-US')}</dd></div>
             <div><span aria-hidden="true" className="opportunity-summary__icon"><BadgeCheck size={21} /></span><dt>Exact ICOR coverage</dt><dd>{ranking.data.summary.exact_covered_base_units.toLocaleString('en-US')}</dd></div>
             <div><span aria-hidden="true" className="opportunity-summary__icon"><TriangleAlert size={21} /></span><dt>High-demand gap</dt><dd>{ranking.data.summary.high_demand_uncovered_base_units.toLocaleString('en-US')}</dd></div>
           </dl>
+          {search.groupBy === 'eurocode' && ranking.data.eurocode_totals && <EurocodeTotals totals={ranking.data.eurocode_totals} />}
           {ranking.data.integrity_warnings.map((warning) => <p className="integrity-warning" key={warning} role="alert">{warning}</p>)}
           {ranking.data.eurocode_search && search.q && <EurocodeSearchNotice reading={ranking.data.eurocode_search} text={search.q} />}
           {ranking.data.items.length === 0 ? (

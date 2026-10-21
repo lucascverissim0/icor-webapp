@@ -20,12 +20,12 @@ async function selectVehicle(page: import('@playwright/test').Page) {
   await page.getByLabel('Model year').selectOption('2025')
 }
 
-test('opens model-year opportunities from the app home', async ({ page }) => {
+test('opens the Eurocode ranking from the app home', async ({ page }) => {
   await page.goto('/')
 
   await expect(page).toHaveURL(/\/opportunities/)
   await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Model years' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Eurocodes', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   )
@@ -85,6 +85,34 @@ test('the ranking leads with Eurocodes and the detail page tabulates them', asyn
   await expect(panel.getByText(/Shared units are never split/)).toBeVisible()
 })
 
+test('the default ranking lists Eurocodes with a totals strip and a vehicles table', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await page.goto('/opportunities')
+  const cards = page.locator('.opportunity-card')
+  await expect(cards.first()).toBeVisible()
+  await expect(cards.first().getByRole('heading', { level: 3 })).toContainText(/Q\d{3}/)
+  await expect(cards.first().locator('h3 code')).toHaveText(/^Q\d{3}$/)
+  await expect(cards.first().getByText(/certain replacements/)).toBeVisible()
+  await expect(cards.first().getByRole('group', { name: 'Vehicles that may carry this Eurocode' })).toBeVisible()
+  const totals = page.getByRole('group', { name: 'Eurocode totals' })
+  await expect(totals).toContainText(/Certain on the codes listed: [\d,]+/)
+  await expect(totals).toContainText(/Shared between codes, counted once: [\d,]+/)
+  await expect(totals).toContainText(/Not assigned to a Eurocode: [\d,]+/)
+
+  await cards.first().getByRole('button', { name: /View Q\d{3} · .* details/ }).click()
+  await expect(page).toHaveURL(/\/opportunities\/eurocode-/)
+  const panel = page.getByLabel('Selected opportunity')
+  await expect(panel.getByRole('heading', { level: 2, name: /^Q\d{3} · .* · \d{4}–/ })).toBeVisible()
+  await expect(panel.getByRole('heading', { name: /^Vehicles that may carry Q\d{3}$/ })).toBeVisible()
+  const table = panel.locator('.eurocode-table')
+  await expect(table.getByRole('columnheader', { name: 'Up to (shared)' })).toBeVisible()
+  await expect(table.locator('tbody tr').first()).toBeVisible()
+  await expect(panel.getByText(/Shared units are never split/)).toBeVisible()
+  await expect(panel.getByText('The surviving fleet is not broken down by Eurocode yet.')).toBeVisible()
+  await expect(panel.getByText('Total estimated fleet')).toHaveCount(0)
+  await expect(panel.getByText(/Certain units of Q\d{3}/).first()).toBeVisible()
+})
+
 test('a search that is exactly a Eurocode lists the vehicles that may carry it', async ({ page }) => {
   await page.setViewportSize({ width: 1800, height: 900 })
   await page.goto('/opportunities?groupBy=model_year&q=q202')
@@ -130,7 +158,9 @@ test('next, last, and previous pagination follow requested route state', async (
 })
 
 test('exact coverage create, edit, and delete refetches committed ranking', async ({ page }) => {
-  await page.goto('/opportunities')
+  // A1 Horizon 2025 is a shared launch year between two codes, so its coverage
+  // lands on no Eurocode row's certain units; read the model-year ranking.
+  await page.goto('/opportunities?groupBy=model_year')
   await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
   await page.getByText('Manage ICOR worked-model coverage').click()
   await selectVehicle(page)

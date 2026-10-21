@@ -8,6 +8,7 @@ import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } fro
 import { serializeOpportunitySearch, type OpportunitySearch } from '../../lib/opportunity-search'
 import type { components } from '../../lib/api/schema'
 import { EurocodeTable } from '../eurocodes/EurocodeBreakdown'
+import { driveText, eurocodeGroupTitle, sharedWithText, type EurocodeGroup } from '../eurocodes/eurocode-text'
 import { OpportunitiesWorkbench } from './OpportunitiesPage'
 
 
@@ -56,6 +57,32 @@ function FleetSummary({ estimates }: { estimates: FleetEstimate[] }) {
   )
 }
 
+function EurocodeVehicleTable({ group }: { group: EurocodeGroup }) {
+  return (
+    <section aria-labelledby="eurocode-vehicles-title" className="detail-section">
+      <div className="detail-section__heading"><p className="eyebrow">Windscreen family</p><h2 id="eurocode-vehicles-title">Vehicles that may carry {group.code}</h2></div>
+      <p className="detail-note">
+        Shared units are never split: they belong to one of the codes sharing them
+        {group.shared_units > 0 ? ` (${sharedWithText(group)})` : ''}, so “up to” figures are not additional to the certain ones.
+      </p>
+      <div aria-label={`Vehicles that may carry ${group.code}`} className="eurocode-table-wrap" role="region" tabIndex={0}>
+        <table className="eurocode-table">
+          <thead><tr><th scope="col">Vehicle</th><th scope="col">Certain</th><th scope="col">Up to (shared)</th></tr></thead>
+          <tbody>
+            {group.vehicles.map((vehicle) => (
+              <tr key={`${vehicle.brand}|${vehicle.model}`}>
+                <th scope="row">{vehicle.brand} {vehicle.model}</th>
+                <td>{format(vehicle.certain_units)}</td>
+                <td>{vehicle.shared_units > 0 ? `+${format(vehicle.shared_units)}` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function ProblemState({ error, retry, back }: { error: Error; retry: () => void; back: string }) {
   return (
     <section className="opportunity-state" role="alert">
@@ -96,16 +123,19 @@ export function OpportunityDetailView({
   if (opportunity.isError) return <ProblemState back={back} error={opportunity.error} retry={() => void opportunity.refetch()} />
 
   const row = opportunity.data
-  const title = [row.brand, row.model, row.model_year].filter(Boolean).join(' · ')
+  const group = row.eurocode
+  const title = group ? eurocodeGroupTitle(group) : [row.brand, row.model, row.model_year].filter(Boolean).join(' · ')
   return (
     <div className="opportunity-detail-page">
       <a className="back-link" href={back}>← Back to opportunity ranking</a>
       <header className="opportunity-detail-hero">
-        <div><p className="eyebrow">Ranking detail</p><h2>{title}</h2><p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>{row.generation_source_url && <><a className="generation-source" href={row.generation_source_url} rel="noreferrer" target="_blank">Manufacturer generation source ↗</a><p className="detail-note">Mapped from the manufacturer production window. A registration-year cohort can include transition-year stock.</p></>}</div>
+        <div><p className="eyebrow">Ranking detail</p><h2>{title}</h2>{group
+          ? <p className="generation-name">{group.make} · {driveText(group.drive)}</p>
+          : <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>}{!group && row.generation_source_url && <><a className="generation-source" href={row.generation_source_url} rel="noreferrer" target="_blank">Manufacturer generation source ↗</a><p className="detail-note">Mapped from the manufacturer production window. A registration-year cohort can include transition-year stock.</p></>}</div>
         <div className="detail-score"><span>Opportunity score</span><strong>{row.score.total_points.toFixed(1)}</strong><small>out of 100</small></div>
       </header>
       <p className="detail-note" role="note">
-        The score compares this vehicle with the whole market and does not move
+        The score compares this {group ? 'Eurocode' : 'vehicle'} with the whole market and does not move
         when the ranking is filtered. The demand figures below do follow the
         markets and horizons the ranking was filtered to.
       </p>
@@ -114,14 +144,16 @@ export function OpportunityDetailView({
         <div className="detail-section__heading"><p className="eyebrow">Forecast outcome</p><h2 id="demand-title">Replacement demand behind the rank</h2></div>
         <dl className="detail-metrics">
           <div><dt>Downside</dt><dd>{format(row.demand.downside_units)}</dd></div>
-          <div className="detail-metrics__primary"><dt>Base forecast</dt><dd>{format(row.demand.base_units)}</dd></div>
+          <div className="detail-metrics__primary"><dt>{group ? 'Certain units (base forecast)' : 'Base forecast'}</dt><dd>{format(row.demand.base_units)}</dd></div>
           <div><dt>Upside</dt><dd>{format(row.demand.upside_units)}</dd></div>
           <div><dt>Contributing forecasts</dt><dd>{format(row.contributing_configuration_count)}</dd></div>
         </dl>
         <p className="detail-note">Replacement estimates use the validated snapshot and remain planning estimates, not observed future claims.</p>
       </section>
 
-      {row.eurocodes && (
+      {group && <EurocodeVehicleTable group={group} />}
+
+      {row.eurocodes && !group && (
         <section aria-labelledby="eurocodes-title" className="detail-section">
           <div className="detail-section__heading"><p className="eyebrow">Windscreen families</p><h2 id="eurocodes-title">Eurocodes</h2></div>
           <p className="detail-note">Shared units are never split: they belong to one of the listed codes, so “up to” figures are not additional to the certain ones.</p>
@@ -134,13 +166,14 @@ export function OpportunityDetailView({
         <div className="score-bars">
           <div><div><strong>Demand</strong><span>{row.score.demand_points.toFixed(1)} / 100</span></div><progress aria-label="Demand score" max="100" value={row.score.demand_points} /><p>{row.score.demand_rank === null || row.score.demand_population === 0
             ? 'No forecast demand to rank against the market.'
-            : `${Math.round(row.score.demand_percentile * 100)}th percentile of all ${format(row.score.demand_population)} ranked vehicles in the market — rank #${format(row.score.demand_rank)}.`}</p></div>
+            : `${Math.round(row.score.demand_percentile * 100)}th percentile of all ${format(row.score.demand_population)} ranked ${group ? 'Eurocodes' : 'vehicles'} in the market — rank #${format(row.score.demand_rank)}.`}</p></div>
         </div>
       </section>
 
-      {fleet.isPending && <section aria-busy="true" className="detail-section"><h2>Loading estimated fleet...</h2></section>}
-      {fleet.isError && <section className="detail-section" role="alert"><h2>Estimated fleet unavailable</h2><p>{fleet.error.message}</p><button onClick={() => void fleet.refetch()} type="button">Retry fleet estimate</button></section>}
-      {fleet.data && <FleetSummary estimates={fleet.data} />}
+      {group && <p className="detail-note" role="note">The surviving fleet is not broken down by Eurocode yet.</p>}
+      {!group && fleet.isPending && <section aria-busy="true" className="detail-section"><h2>Loading estimated fleet...</h2></section>}
+      {!group && fleet.isError && <section className="detail-section" role="alert"><h2>Estimated fleet unavailable</h2><p>{fleet.error.message}</p><button onClick={() => void fleet.refetch()} type="button">Retry fleet estimate</button></section>}
+      {!group && fleet.data && <FleetSummary estimates={fleet.data} />}
 
       <section aria-labelledby="coverage-title" className="detail-section">
         <div className="detail-section__heading"><p className="eyebrow">Production position</p><h2 id="coverage-title">ICOR {row.icor_worked ? 'has worked on this vehicle' : 'has not worked on this vehicle'}</h2></div>
@@ -157,7 +190,7 @@ export function OpportunityDetailView({
         {contributions.isError && <div role="alert"><p>{contributions.error.message}</p><button onClick={() => void contributions.refetch()} type="button">Retry contributions</button></div>}
         {contributions.data && <div className="detail-contribution-list">{contributions.data.map((item) => (
           <article className="detail-contribution" key={item.configuration_id}>
-            <div><h3>{item.market} · {item.forecast_horizon}</h3><p>{item.generation} · {item.body_style}</p></div>
+            <div><h3>{item.market} · {item.forecast_horizon}</h3><p>{group ? `Certain units of ${group.code}` : `${item.generation} · ${item.body_style}`}</p></div>
             <dl><div><dt>Base demand</dt><dd>{format(item.demand.base_units)}</dd></div><div><dt>Range</dt><dd>{format(item.demand.downside_units)}–{format(item.demand.upside_units)}</dd></div></dl>
           </article>
         ))}</div>}

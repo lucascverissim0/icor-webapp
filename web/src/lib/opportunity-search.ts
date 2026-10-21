@@ -30,7 +30,14 @@ export interface ParsedOpportunitySearch {
   invalidKeys: string[]
 }
 
-const GROUPINGS: readonly OpportunityGroupBy[] = ['brand', 'model', 'model_year']
+const GROUPINGS: readonly OpportunityGroupBy[] = ['eurocode', 'model_year', 'model', 'brand']
+
+/** Eurocodes lead the ranking; the verified client release serves model years only. */
+export function defaultGrouping(clientRelease: boolean): OpportunityGroupBy {
+  return clientRelease ? 'model_year' : 'eurocode'
+}
+
+const DEFAULT_GROUPING = defaultGrouping(import.meta.env.VITE_ICOR_CLIENT_RELEASE === 'verified')
 
 function rawValues(value: unknown): unknown[] {
   if (value === undefined || value === null) return []
@@ -39,11 +46,12 @@ function rawValues(value: unknown): unknown[] {
 
 export function parseOpportunitySearch(
   raw: Record<string, unknown>,
+  fallbackGroupBy: OpportunityGroupBy = DEFAULT_GROUPING,
 ): ParsedOpportunitySearch {
   const invalid = new Set<string>()
   const groupBy = GROUPINGS.includes(raw.groupBy as OpportunityGroupBy)
     ? (raw.groupBy as OpportunityGroupBy)
-    : 'model_year'
+    : fallbackGroupBy
   if (raw.groupBy !== undefined && groupBy !== raw.groupBy) invalid.add('groupBy')
 
   const rawMarkets = rawValues(raw.market)

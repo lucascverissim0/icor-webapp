@@ -3322,3 +3322,53 @@ button:hover:not(:disabled) {
   padding: 0;
   list-style: none;
 }
+
+.opportunity-card h3 code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--brand-navy);
+}
+
+.eurocode-row-vehicles {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  min-width: 0;
+  font-size: 0.86rem;
+}
+
+.eurocode-row-vehicles ul {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.eurocode-row-vehicles p {
+  margin: 0;
+}
+
+.eurocode-row-vehicles li {
+  overflow-wrap: anywhere;
+}
+
+.eurocode-row-vehicles li span {
+  color: var(--ink-muted);
+}
+
+.eurocode-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0;
+  padding: 0.6rem 0.85rem;
+  border-left: 3px solid var(--brand-cyan);
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.eurocode-totals strong {
+  color: var(--ink);
+}

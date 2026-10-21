@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  defaultGrouping,
   parseOpportunitySearch,
   serializeOpportunitySearch,
 } from '../src/lib/opportunity-search'
@@ -8,10 +9,24 @@ import {
 
 describe('opportunity URL state', () => {
   it('normalizes an invalid grouping and reports the rejected key', () => {
-    const parsed = parseOpportunitySearch({ groupBy: 'profit' })
+    const parsed = parseOpportunitySearch({ groupBy: 'profit' }, 'model_year')
 
     expect(parsed.value.groupBy).toBe('model_year')
     expect(parsed.invalidKeys).toEqual(['groupBy'])
+  })
+
+  it('defaults to Eurocodes, and to model years in the verified client release', () => {
+    expect(defaultGrouping(false)).toBe('eurocode')
+    expect(defaultGrouping(true)).toBe('model_year')
+    const plain = parseOpportunitySearch({})
+    expect(plain.value.groupBy).toBe('eurocode')
+    expect(plain.invalidKeys).toEqual([])
+    expect(parseOpportunitySearch({}, defaultGrouping(true)).value.groupBy).toBe('model_year')
+  })
+
+  it('accepts eurocode as a grouping and keeps an explicit model-year one', () => {
+    expect(parseOpportunitySearch({ groupBy: 'eurocode' }, 'model_year').value.groupBy).toBe('eurocode')
+    expect(parseOpportunitySearch({ groupBy: 'model_year' }).value.groupBy).toBe('model_year')
   })
 
   it('deduplicates canonical market and horizon filters', () => {

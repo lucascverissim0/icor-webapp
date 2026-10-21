@@ -1,6 +1,7 @@
 import { ArrowUpRight } from 'lucide-react'
 
 import { EurocodeSummary } from '../eurocodes/EurocodeBreakdown'
+import { eurocodeGroupTitle, eurocodeYears, sharedWithText, VEHICLE_LIMIT, type EurocodeGroup } from '../eurocodes/eurocode-text'
 import type { components } from '../../lib/api/schema'
 
 
@@ -11,7 +12,38 @@ function format(value: number): string {
 }
 
 function label(row: OpportunityRow): string {
+  if (row.eurocode) return eurocodeGroupTitle(row.eurocode)
   return [row.brand, row.model, row.model_year].filter(Boolean).join(' · ')
+}
+
+/** What a Eurocode row's units are: certain ones, and the ones shared with other codes. */
+function EurocodeDemand({ group, baseUnits }: { group: EurocodeGroup; baseUnits: number }) {
+  return (
+    <>
+      <strong className="opportunity-demand__base">{format(baseUnits)} certain replacements</strong>
+      {group.shared_units > 0 && (
+        <span>up to +{format(group.shared_units)} shared with {sharedWithText(group)}</span>
+      )}
+    </>
+  )
+}
+
+function EurocodeVehicles({ group }: { group: EurocodeGroup }) {
+  const shown = group.vehicles.slice(0, VEHICLE_LIMIT)
+  const hidden = group.vehicles.length - shown.length
+  return (
+    <div aria-label="Vehicles that may carry this Eurocode" className="eurocode-row-vehicles" role="group">
+      <ul>
+        {shown.map((vehicle) => (
+          <li key={`${vehicle.brand}|${vehicle.model}`}>
+            <strong>{vehicle.brand} {vehicle.model}</strong>
+            <span> · certain {format(vehicle.certain_units)}{vehicle.shared_units > 0 && ` · +${format(vehicle.shared_units)} shared`}</span>
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && <p className="eurocode-more">+{hidden} more {hidden === 1 ? 'vehicle' : 'vehicles'}</p>}
+    </div>
+  )
 }
 
 export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode = null }: {
@@ -35,17 +67,22 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode
               <div className="opportunity-card__body">
                 <div className="opportunity-card__heading">
                   <div>
-                    {row.eurocodes && <EurocodeSummary breakdown={row.eurocodes} searchedCode={searchedCode} />}
-                    <h3>{label(row)}</h3>
-                    <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>
+                    {row.eurocodes && !row.eurocode && <EurocodeSummary breakdown={row.eurocodes} searchedCode={searchedCode} />}
+                    {row.eurocode
+                      ? <h3><code>{row.eurocode.code}</code> · {row.eurocode.label} · {eurocodeYears(row.eurocode)}</h3>
+                      : <h3>{label(row)}</h3>}
+                    {!row.eurocode && <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>}
                     <p>{row.contributing_configuration_count} contributing configurations</p>
                   </div>
                   <span className={`coverage-status coverage-status--${row.coverage_status}`}>{row.coverage_status.replaceAll('_', ' ')}</span>
                 </div>
                 <div className="opportunity-demand">
-                  <strong className="opportunity-demand__base">{format(row.demand.base_units)} replacements</strong>
+                  {row.eurocode
+                    ? <EurocodeDemand baseUnits={row.demand.base_units} group={row.eurocode} />
+                    : <strong className="opportunity-demand__base">{format(row.demand.base_units)} replacements</strong>}
                   <span>{format(row.demand.downside_units)}–{format(row.demand.upside_units)} range</span>
                 </div>
+                {row.eurocode && <EurocodeVehicles group={row.eurocode} />}
                 <div className="coverage-composition" aria-label="Base demand coverage composition">
                   <span>Exact {format(row.exact_covered_base_units)}</span>
                   <span>Fallback {format(row.fallback_covered_base_units)}</span>
