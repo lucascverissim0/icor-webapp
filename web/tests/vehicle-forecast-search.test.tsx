@@ -115,6 +115,48 @@ describe('VehicleForecastSearch', () => {
     expect(screen.getByText(/Future sales cohorts 2026, 2027, 2028 are not added/i)).toBeVisible()
   })
 
+  it('lists each market\'s registrations by Eurocode', async () => {
+    const user = userEvent.setup()
+    const breakdown = {
+      codes: [{
+        code: 'Q201', label: 'Aurora Mobility A1 Horizon I', first_year: 2020, last_year: 2025,
+        drive: 'LHD', certain_units: 800, shared_units: 100, shared_with: ['Q202'], shared_with_uncoded: false,
+      }],
+      single_units: 800, shared_units: 100, outside_units: 0, unassignable_units: 0, unreviewed_units: 100,
+    }
+    const coded = {
+      ...forecast,
+      markets: [
+        { ...forecast.markets[0], eurocodes: breakdown },
+        { ...forecast.markets[0], code: 'FR', name: 'France', eurocodes: breakdown },
+        forecast.markets[1],
+      ],
+    }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/vehicle-forecasts?')) return Promise.resolve(json(coded))
+      if (url.includes('brand=Volkswagen') && url.includes('model=Golf')) return Promise.resolve(json(selectedOptions))
+      return Promise.resolve(json(searchOptions))
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<AppProviders queryClient={queryClient}><VehicleForecastSearch apiClient={new PlannerApiClient(fetcher)} /></AppProviders>)
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search brand or model' }), 'Golf')
+    await user.click(screen.getByRole('button', { name: 'Search vehicles' }))
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Model year' }), '2020')
+    await user.click(screen.getByRole('button', { name: 'Calculate forecast' }))
+    await screen.findByRole('heading', { name: /Volkswagen Golf · Golf Mk8/i })
+    await user.click(screen.getByText(/Per-market breakdown/i))
+
+    expect(screen.getByRole('columnheader', { name: 'Registrations by Eurocode' })).toBeVisible()
+    // The EU27 headline and the France row each list the selection's registrations.
+    expect(screen.getByText(/EU27 registrations of this selection by Eurocode/)).toBeVisible()
+    expect(screen.getAllByText('Q201')).toHaveLength(2)
+    expect(screen.getAllByText(/up to \+100 shared with Q202/)).toHaveLength(2)
+    expect(screen.getAllByText('Not assigned to a Eurocode: 100')).toHaveLength(2)
+    expect(screen.getByText(/registrations of this selection, not replacements/)).toBeVisible()
+  })
+
   it('leads with the EU figures and the demand rank', async () => {
     const user = userEvent.setup()
     const ranked = {

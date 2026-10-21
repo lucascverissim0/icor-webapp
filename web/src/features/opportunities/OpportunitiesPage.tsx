@@ -11,6 +11,7 @@ import {
   type OpportunitySearch,
   type OpportunitySort,
 } from '../../lib/opportunity-search'
+import { EurocodeNotLoaded } from '../eurocodes/EurocodeBreakdown'
 import { CoverageManager } from './CoverageManager'
 import { OpportunityRanking } from './OpportunityRanking'
 
@@ -229,6 +230,10 @@ function formatCount(value: string | number): string {
   return Number(value).toLocaleString('en-US')
 }
 
+function percent(part: number, whole: number): string {
+  return `${(part / whole * 100).toFixed(1)}%`
+}
+
 function ProblemState({ error, onRetry }: { error: Error; onRetry: () => void }) {
   const correlation = error instanceof ApiProblem ? error.correlationId : null
   return (
@@ -266,6 +271,16 @@ export function OpportunitiesWorkbench({
     queryKey: ['registrations', 'summary'],
     queryFn: () => apiClient.registrationSummary(),
   })
+
+  // The status is a quiet extra: if it cannot be read, the page shows nothing for it.
+  const eurocodeStatus = useQuery({
+    queryKey: queryKeys.eurocodeStatus,
+    queryFn: () => apiClient.eurocodeStatus(),
+    retry: false,
+  })
+  const eurocodeCoverage = eurocodeStatus.data?.loaded
+    ? [...eurocodeStatus.data.coverage].sort((left, right) => right.horizon - left.horizon)[0]
+    : undefined
 
   return (
     <div className="opportunities-page">
@@ -351,7 +366,22 @@ export function OpportunitiesWorkbench({
             <div><strong>{formatCount(ranking.data.total)}</strong>{' '}<span>ranked records available</span></div>
             {registrationSummary.data && <div><strong>{formatCount(registrationSummary.data.model_count)}</strong>{' '}<span>official model labels</span></div>}
             {registrationSummary.data && <div><strong>{formatCount(registrationSummary.data.total_registrations)}</strong>{' '}<span>registrations represented</span></div>}
+            {eurocodeCoverage && eurocodeCoverage.total_units > 0 && (
+              <div>
+                <strong>Eurocodes:</strong>{' '}
+                <span>
+                  {percent(eurocodeCoverage.single_units + eurocodeCoverage.shared_units, eurocodeCoverage.total_units)} of forecast demand assigned
+                  ({percent(eurocodeCoverage.single_units, eurocodeCoverage.total_units)} to a single code) · {eurocodeCoverage.horizon}
+                </span>
+              </div>
+            )}
           </aside>
+          {!ranking.data.eurocodes_loaded && <EurocodeNotLoaded warnings={eurocodeStatus.data?.warnings} />}
+          {ranking.data.eurocodes_loaded && eurocodeStatus.data && eurocodeStatus.data.warnings.length > 0 && (
+            <div className="eurocode-notice" role="note">
+              {eurocodeStatus.data.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+            </div>
+          )}
           <dl aria-label="Opportunity summary" className="opportunity-summary">
             <div><span aria-hidden="true" className="opportunity-summary__icon"><ChartNoAxesCombined size={21} /></span><dt>Forecast replacements</dt><dd>{ranking.data.summary.base_units.toLocaleString('en-US')}</dd></div>
             <div><span aria-hidden="true" className="opportunity-summary__icon"><BadgeCheck size={21} /></span><dt>Exact ICOR coverage</dt><dd>{ranking.data.summary.exact_covered_base_units.toLocaleString('en-US')}</dd></div>

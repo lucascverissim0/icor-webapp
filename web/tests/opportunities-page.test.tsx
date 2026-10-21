@@ -67,6 +67,15 @@ export const opportunities = {
     },
     evidence_status: 'demonstration',
     data_version: 'demo-planner-v1',
+    eurocodes: {
+      codes: [{
+        code: 'Q201', label: 'Aurora Mobility A1 Horizon I', first_year: 2020, last_year: 2025,
+        drive: 'LHD', certain_units: 1500, shared_units: 400, shared_with: ['Q202'],
+        shared_with_uncoded: false,
+      }],
+      single_units: 1500, shared_units: 400, outside_units: 100, unassignable_units: 0,
+      unreviewed_units: 150,
+    },
   }],
   summary: {
     base_units: 2150,
@@ -84,6 +93,7 @@ export const opportunities = {
   available_horizons: [2028, 2031],
   demand_population: 4872,
   demand_basis: 'whole_market_base_units_all_markets_all_horizons',
+  eurocodes_loaded: true,
 } as const
 
 const registrationSummary = {
@@ -158,11 +168,21 @@ export function renderOpportunities(fetcher: typeof fetch) {
   return { ...rendered, onSearchChange, queryClient }
 }
 
+export const eurocodeStatus = {
+  loaded: true, catalogue_sha256: null, decisions_snapshot_id: 'demo',
+  reviewed_identities: 3, orphaned_identities: 0, warnings: [],
+  coverage: [
+    { horizon: 2028, total_units: 1000, single_units: 500, shared_units: 100, outside_units: 0, unassignable_units: 0, unreviewed_units: 400, shared_with_uncoded_units: 0 },
+    { horizon: 2031, total_units: 2000, single_units: 1500, shared_units: 400, outside_units: 50, unassignable_units: 0, unreviewed_units: 50, shared_with_uncoded_units: 0 },
+  ],
+}
+
 export function successFetcher() {
   return vi.fn<typeof fetch>().mockImplementation((input) => {
     const url = typeof input === 'string'
       ? input
       : input instanceof URL ? input.href : input.url
+    if (url.includes('/eurocodes/status')) return Promise.resolve(json(eurocodeStatus))
     if (url.includes('/planner/configurations')) return Promise.resolve(json(configurationPage))
     if (url.includes('/registrations/summary')) return Promise.resolve(json(registrationSummary))
     if (url.includes('/opportunities/') && url.includes('/contributions')) return Promise.resolve(json(contributions))
@@ -218,6 +238,50 @@ describe('OpportunitiesWorkbench', () => {
     expect(availableData).toHaveTextContent('2 ranked records available')
     expect(availableData).toHaveTextContent('100 official model labels')
     expect(availableData).toHaveTextContent('10,800,000 registrations represented')
+  })
+
+  it('leads each card with its Eurocode and reports the status coverage', async () => {
+    renderOpportunities(successFetcher())
+
+    expect(await screen.findByText('Q201')).toBeVisible()
+    expect(screen.getByText(/up to \+400 shared with Q202/)).toBeVisible()
+    expect(screen.getByText('Not assigned to a Eurocode: 250')).toBeVisible()
+    expect(await screen.findByText(/95\.0% of forecast demand assigned/)).toHaveTextContent('(75.0% to a single code)')
+    expect(screen.queryByText(/Eurocodes are not loaded/)).not.toBeInTheDocument()
+  })
+
+  it('shows one calm notice and no Eurocode lines when Eurocodes are not loaded', async () => {
+    const fetcher = successFetcher()
+    const base = fetcher.getMockImplementation()!
+    fetcher.mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/eurocodes/status')) return Promise.resolve(json({ ...eurocodeStatus, loaded: false, coverage: [], warnings: ['Map missing.'] }))
+      if (url.includes('/opportunities?')) {
+        return Promise.resolve(json({ ...opportunities, eurocodes_loaded: false, items: [{ ...opportunities.items[0], eurocodes: null }] }))
+      }
+      return base(input, init)
+    })
+    renderOpportunities(fetcher)
+
+    expect(await screen.findByText('2,150 replacements')).toBeVisible()
+    expect(await screen.findByText('Map missing.')).toBeVisible()
+    expect(screen.getAllByText(/Eurocodes are not loaded/)).toHaveLength(1)
+    expect(screen.queryByText('Q201')).not.toBeInTheDocument()
+  })
+
+  it('stays quiet when the status endpoint fails', async () => {
+    const fetcher = successFetcher()
+    const base = fetcher.getMockImplementation()!
+    fetcher.mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/eurocodes/status')) return Promise.resolve(json({ detail: 'boom' }, 500))
+      return base(input, init)
+    })
+    renderOpportunities(fetcher)
+
+    expect(await screen.findByText('2,150 replacements')).toBeVisible()
+    expect(screen.queryByText(/of forecast demand assigned/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('switches grouping without discarding market intent', async () => {
@@ -312,6 +376,31 @@ describe('OpportunityDetailView', () => {
       'href',
       expect.stringContaining('market=FR'),
     )
+    expect(screen.getByRole('heading', { name: 'Eurocodes' })).toBeVisible()
+    expect(screen.getByText(/Shared units are never split/)).toBeVisible()
+    expect(screen.getByRole('row', { name: /Q201.*2020–2025.*1,500.*\+400.*Q202/ })).toBeVisible()
+    expect(screen.getByRole('row', { name: /Not assigned: not reviewed yet.*150/ })).toBeVisible()
+  })
+
+  it('omits the Eurocodes section when none are loaded', async () => {
+    const fetcher = successFetcher()
+    const base = fetcher.getMockImplementation()!
+    fetcher.mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/opportunities/brand-aurora') && !url.includes('/fleet') && !url.includes('/contributions')) {
+        return Promise.resolve(json({ ...opportunities.items[0], eurocodes: null }))
+      }
+      return base(input, init)
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <AppProviders queryClient={queryClient}>
+        <OpportunityDetailView apiClient={new PlannerApiClient(fetcher)} groupId="brand-aurora" search={{ groupBy: 'model_year', page: 1 }} />
+      </AppProviders>,
+    )
+
+    expect(await screen.findByRole('heading', { name: /Aurora Mobility.*A1 Horizon.*2025/i })).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Eurocodes' })).not.toBeInTheDocument()
   })
 })
 

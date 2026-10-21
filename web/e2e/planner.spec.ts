@@ -20,6 +20,11 @@ test('searches a model year and forecasts every requested market', async ({ page
     await expect(page.getByRole('rowheader', { name: market })).toBeVisible()
   }
   await expect(page.getByText(/Future sales cohorts 2026, 2027, 2028 are not added/i)).toBeVisible()
+
+  // Fictional Q codes: each market lists its registrations of the selection by Eurocode.
+  await expect(page.getByText('EU27 registrations of this selection by Eurocode')).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Registrations by Eurocode' })).toBeVisible()
+  await expect(page.getByRole('row', { name: /^Belgium/ }).locator('code').first()).toHaveText('Q201')
 })
 
 test('supports selecting a generation directly', async ({ page }) => {

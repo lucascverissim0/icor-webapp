@@ -7,6 +7,7 @@ import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
 import { serializeOpportunitySearch, type OpportunitySearch } from '../../lib/opportunity-search'
 import type { components } from '../../lib/api/schema'
+import { EurocodeTable } from '../eurocodes/EurocodeBreakdown'
 import { OpportunitiesWorkbench } from './OpportunitiesPage'
 
 
@@ -119,6 +120,14 @@ export function OpportunityDetailView({
         </dl>
         <p className="detail-note">Replacement estimates use the validated snapshot and remain planning estimates, not observed future claims.</p>
       </section>
+
+      {row.eurocodes && (
+        <section aria-labelledby="eurocodes-title" className="detail-section">
+          <div className="detail-section__heading"><p className="eyebrow">Windscreen families</p><h2 id="eurocodes-title">Eurocodes</h2></div>
+          <p className="detail-note">Shared units are never split: they belong to one of the listed codes, so “up to” figures are not additional to the certain ones.</p>
+          <EurocodeTable breakdown={row.eurocodes} />
+        </section>
+      )}
 
       <section aria-labelledby="score-title" className="detail-section detail-score-breakdown">
         <div className="detail-section__heading"><p className="eyebrow">Transparent calculation</p><h2 id="score-title">Why this opportunity ranks here</h2></div>

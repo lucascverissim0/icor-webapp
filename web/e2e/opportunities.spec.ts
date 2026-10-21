@@ -69,6 +69,22 @@ test('opens a reloadable explanation for an individual ranking', async ({ page }
   await expect(page.getByRole('link', { name: /Back to opportunity ranking/i })).toBeVisible()
 })
 
+test('the ranking leads with Eurocodes and the detail page tabulates them', async ({ page }) => {
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await page.goto('/opportunities?groupBy=model_year')
+  const card = page.locator('.opportunity-card').filter({ hasText: 'A1 Horizon' }).first()
+  await expect(card.locator('.eurocode-chip code').first()).toHaveText(/^Q\d{3}$/)
+  await expect(card.getByText(/certain [\d,]+/).first()).toBeVisible()
+
+  await page.getByRole('button', { name: /View Aurora Mobility.*2025 details/i }).click()
+  const panel = page.getByLabel('Selected opportunity')
+  await expect(panel.getByRole('heading', { name: 'Eurocodes' })).toBeVisible()
+  const table = panel.getByRole('table', { name: /Eurocodes/ }).or(panel.locator('.eurocode-table'))
+  await expect(table.getByRole('columnheader', { name: 'Shared with' })).toBeVisible()
+  await expect(table.locator('tbody th code').first()).toHaveText(/^Q\d{3}$/)
+  await expect(panel.getByText(/Shared units are never split/)).toBeVisible()
+})
+
 test('next, last, and previous pagination follow requested route state', async ({ page }) => {
   await page.route('**/api/v1/opportunities?**', async (route) => {
     const response = await route.fetch()

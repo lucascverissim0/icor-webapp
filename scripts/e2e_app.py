@@ -10,6 +10,8 @@ from icor.application.completeness import CompletenessQueryService
 from icor.application.evidence_review import EvidenceReviewService
 from icor.application.registrations import RegistrationService
 from icor.domain.planner import DemandRange
+from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.demo import demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
     GenerationOption,
@@ -21,6 +23,28 @@ from icor.infrastructure.snapshot_vehicle_forecast_repository import (
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _fictional_eurocodes() -> EurocodeBreakdown:
+    """1,000 registrations allocated through the demo map: single, shared, outside, unreviewed.
+
+    Built by the application's own annotation so the fixture cannot drift from
+    what the real repository serves.
+    """
+
+    cells = (
+        ("aurora mobility|a1 horizon", 2024, 500),
+        ("aurora mobility|a1 horizon", 2025, 200),
+        ("aurora mobility|a1 horizon", 2019, 100),
+        ("northstar automotive|n7 atlas", 2024, 200),
+    )
+    return eurocode_breakdown(
+        demo_eurocodes(),
+        tuple(
+            EurocodeCell(identity, year, "BE", identity.split("|")[1], units)
+            for identity, year, units in cells
+        ),
+    )
 
 
 class E2EVehicleForecasts:
@@ -66,6 +90,7 @@ class E2EVehicleForecasts:
                 6,
                 DemandRange(700, 800, 900),
                 DemandRange(24, 32, 41),
+                _fictional_eurocodes(),
             )
             for code, name in names
         )
@@ -108,6 +133,7 @@ def create_e2e_app():  # type: ignore[no-untyped-def]
             generation_repository, generation_service.manifest
         ),
         vehicle_forecast_service=E2EVehicleForecasts(),
+        eurocodes=demo_eurocodes(),
     )
 
 

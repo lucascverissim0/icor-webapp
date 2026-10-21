@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 
 import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
+import { EurocodeCompact } from '../eurocodes/EurocodeBreakdown'
 import type { components } from '../../lib/api/schema'
 
 type VehicleForecast = components['schemas']['VehicleForecastResponse']
@@ -68,6 +69,12 @@ function EuropeanHeadline({ result }: { result: VehicleForecast }) {
           </p>
         </div>
       )}
+      {europe.eurocodes && (
+        <div className="eu-headline__eurocodes">
+          <p className="eyebrow">EU27 registrations of this selection by Eurocode</p>
+          <EurocodeCompact breakdown={europe.eurocodes} />
+        </div>
+      )}
       {coverage && coverage.missing_markets.length > 0 && (
         <p className="eu-headline__coverage" role="status">
           <strong>Partial EU27 coverage.</strong> This figure is the sum of{' '}
@@ -84,6 +91,7 @@ function EuropeanHeadline({ result }: { result: VehicleForecast }) {
 function MarketRows({ markets }: { markets: MarketForecast[] }) {
   const withData = markets.filter((row) => row.availability === 'available')
   const withoutData = markets.filter((row) => row.availability !== 'available')
+  const hasEurocodes = withData.some((row) => row.eurocodes)
   return (
     <>
       <div aria-label="Forecast results by market" className="vehicle-forecast-table-wrap" role="region" tabIndex={0}>
@@ -92,6 +100,7 @@ function MarketRows({ markets }: { markets: MarketForecast[] }) {
             <tr>
               <th>Market</th><th>Registration cohorts</th><th>Surviving fleet P50</th>
               <th>Replacements P50</th><th>Replacement range P10–P90</th>
+              {hasEurocodes && <th>Registrations by Eurocode</th>}
             </tr>
           </thead>
           <tbody>
@@ -102,11 +111,15 @@ function MarketRows({ markets }: { markets: MarketForecast[] }) {
                 <td>{units(row.active_fleet!.base_units)}</td>
                 <td><strong>{units(row.replacements!.base_units)}</strong></td>
                 <td>{units(row.replacements!.downside_units)}–{units(row.replacements!.upside_units)}</td>
+                {hasEurocodes && <td>{row.eurocodes ? <EurocodeCompact breakdown={row.eurocodes} /> : '—'}</td>}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {hasEurocodes && (
+        <p className="detail-note">Eurocode figures count each market's registrations of this selection, not replacements. Shared units are never split between codes.</p>
+      )}
       {withoutData.length > 0 && (
         <p className="market-gap" role="status">
           <strong>No official registration data yet</strong> for{' '}

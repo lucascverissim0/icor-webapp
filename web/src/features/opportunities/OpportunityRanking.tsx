@@ -1,5 +1,6 @@
 import { ArrowUpRight } from 'lucide-react'
 
+import { EurocodeSummary } from '../eurocodes/EurocodeBreakdown'
 import type { components } from '../../lib/api/schema'
 
 
@@ -33,6 +34,7 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect }: {
               <div className="opportunity-card__body">
                 <div className="opportunity-card__heading">
                   <div>
+                    {row.eurocodes && <EurocodeSummary breakdown={row.eurocodes} />}
                     <h3>{label(row)}</h3>
                     <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>
                     <p>{row.contributing_configuration_count} contributing configurations</p>
