@@ -112,7 +112,7 @@ describe('DataCoverageWorkbench', () => {
     expect(codeColumn()).toEqual(['Q301', 'Q201', 'Q202', 'Q401', 'Q501'])
 
     const sharedOnly = screen.getByRole('row', { name: /Q202/ })
-    expect(within(sharedOnly).getByText('New, Only shared, One market, Before 2010')).toBeVisible()
+    expect(within(sharedOnly).getByText('New, Only shared, One market, Before 2010, At least')).toBeVisible()
     expect(within(screen.getByRole('row', { name: /Q401/ })).getByText('Reviewed, no cars')).toBeVisible()
     expect(within(screen.getByRole('row', { name: /Q501/ })).getByText('Not reviewed')).toBeVisible()
     // Years are open-ended with a dash; the unlabelled code falls back to the catalogue text.

@@ -30,6 +30,7 @@ export function code(overrides: Partial<Code> & Pick<Code, 'code'>): Code {
     label: 'Aurora Mobility A1 Horizon I',
     last_year: 2025,
     life_years: 6,
+    lower_bound_p50: 0,
     markets: 2,
     observed_life_years: 6,
     observed_markets: ['DE', 'FR'],
@@ -52,7 +53,7 @@ export const report: Report = {
       first_year: 2025,
       last_year: null,
       tier: 'C',
-      flags: ['new', 'shared-only', 'one-market', 'pre-2010'],
+      flags: ['new', 'shared-only', 'one-market', 'pre-2010', 'lower-bound'],
       fleet: {
         certain_2028: 0, certain_p10: 0, certain_p50: 0, certain_p90: 0,
         shared_2028: 70, shared_p50: 70,

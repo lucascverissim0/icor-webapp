@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
+from icor.domain.evidence import STOCK_LOWER_BOUND_REASON
 from icor.eurocodes.data_coverage import FleetCell, FleetRange
 from icor.eurocodes.runtime import identity_key
 from icor.forecasting.survival import CalibratedCohortSurvivalModel
@@ -154,6 +155,7 @@ def read_fleet(
     fleet: dict[tuple[str, str, int, str], list[Decimal]] = {}
     fleet_2028: dict[tuple[str, str, int, str], Decimal] = defaultdict(Decimal)
     cell_sources: dict[tuple[str, str, int, str], set[str]] = defaultdict(set)
+    lower_bound: set[tuple[str, str, int, str]] = set()
     comparison: dict[str, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     verified = 0
     for (
@@ -173,7 +175,8 @@ def read_fleet(
         FROM cohort_estimate WHERE as_of_year = ?""",
         (STORED_HORIZON,),
     ):
-        first_code = json.loads(reason_codes)[0]
+        codes = json.loads(reason_codes)
+        first_code = codes[0]
         evidence = _EVIDENCE.get(first_code)
         if evidence is None:
             raise ValueError(f"unknown cohort evidence {first_code!r}")
@@ -199,6 +202,8 @@ def read_fleet(
         key = (vehicle_id, geography, cohort_year, evidence)
         fleet_2028[key] += Decimal(p50)
         cell_sources[key].update(sources.get(cohort_id, ()))
+        if STOCK_LOWER_BOUND_REASON in codes:
+            lower_bound.add(key)
         at_year = _fleet(
             survival, stored_value, cohort_year=cohort_year, year=year, stock_year=stock_year
         )
@@ -229,6 +234,7 @@ def read_fleet(
             fleet=FleetRange(*fleet[key]) if key in fleet else None,
             fleet_2028=units,
             sources=frozenset(cell_sources[key]),
+            lower_bound=key in lower_bound,
         )
         for key, units in sorted(fleet_2028.items())
         for vehicle_id, geography, cohort_year, evidence in (key,)

@@ -548,6 +548,8 @@ export interface components {
             last_year: number | null;
             /** Life Years */
             life_years: number;
+            /** Lower Bound P50 */
+            lower_bound_p50: number;
             /** Markets */
             markets: number;
             /** Observed Life Years */
@@ -640,6 +642,8 @@ export interface components {
             geography: string;
             /** Has Pre 2010 Cohorts */
             has_pre_2010_cohorts: boolean;
+            /** Lower Bound */
+            lower_bound: number;
         };
         /** EurocodeDataNoDataTotalsResponse */
         EurocodeDataNoDataTotalsResponse: {

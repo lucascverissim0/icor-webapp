@@ -294,6 +294,8 @@ class EurocodeDataCodeResponse(ApiModel):
     evidence: EurocodeDataEvidenceResponse
     # Share of the code's cars (certain and shared) from registrations or a register.
     observed_share: float | None
+    # Cars from a register that masks rare model names: they are at least this many.
+    lower_bound_p50: int
     markets: int
     observed_markets: tuple[str, ...]
     sources: tuple[str, ...]
@@ -331,6 +333,8 @@ class EurocodeDataMarketResponse(ApiModel):
     by_outcome: EurocodeDataOutcomeResponse
     by_evidence: EurocodeDataEvidenceResponse
     has_pre_2010_cohorts: bool
+    # Of ``fleet``, the cars from a register that counts only part of them.
+    lower_bound: int
 
 
 class EurocodeDataBandResponse(ApiModel):

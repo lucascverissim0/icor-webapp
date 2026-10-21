@@ -31,6 +31,7 @@ const FLAG_TEXT: Record<string, string> = {
   'pre-2010': 'Before 2010',
   'shared-only': 'Only shared',
   'one-market': 'One market',
+  'lower-bound': 'At least',
   new: 'New',
 }
 

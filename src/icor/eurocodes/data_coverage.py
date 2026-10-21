@@ -87,6 +87,9 @@ class FleetCell:
     fleet_2028: Decimal
     #: Publishers whose observations this cell rests on (none for a forecast).
     sources: frozenset[str] = frozenset()
+    #: The register counts only part of these cars (it masks rare model names),
+    #: so they are at least this many.
+    lower_bound: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +118,7 @@ class _CodeTally:
     observed_markets: set[str] = field(default_factory=set)
     observed_years: set[int] = field(default_factory=set)
     sources: set[str] = field(default_factory=set)
+    lower_bound: Decimal = _ZERO
     families: tuple[str, ...] = ()
 
 
@@ -192,6 +196,7 @@ def build_report(
     market_status: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     market_evidence: dict[str, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     market_total: dict[str, Decimal] = defaultdict(Decimal)
+    market_lower_bound: dict[str, Decimal] = defaultdict(Decimal)
     pre_2010_markets: set[str] = set()
 
     for cell in cells:
@@ -210,6 +215,8 @@ def build_report(
         market_total[cell.geography] += units
         market_status[cell.geography][allocation.status] += units
         market_evidence[cell.geography][cell.evidence] += units
+        if cell.lower_bound:
+            market_lower_bound[cell.geography] += units
         observed = cell.evidence in OBSERVED_KINDS
         for code in allocation.codes:
             tally = tallies[code]
@@ -227,6 +234,8 @@ def build_report(
                 tally.shared_with_uncoded |= allocation.uncoded
             tally.evidence[cell.evidence] += units
             tally.markets[cell.geography] += units
+            if cell.lower_bound:
+                tally.lower_bound += units
             if observed:
                 tally.observed_markets.add(cell.geography)
                 tally.observed_years.add(cell.cohort_year)
@@ -263,6 +272,8 @@ def build_report(
             flags.append("shared-only")
         if len(tally.observed_markets) == 1:
             flags.append("one-market")
+        if tally.lower_bound:
+            flags.append("lower-bound")
         codes.append(
             {
                 "code": code,
@@ -283,6 +294,7 @@ def build_report(
                 "shared_with_uncoded": tally.shared_with_uncoded,
                 "evidence": {kind: _whole(tally.evidence[kind]) for kind in EVIDENCE_KINDS},
                 "observed_share": _share(observed, whole),
+                "lower_bound_p50": _whole(tally.lower_bound),
                 "markets": len(tally.markets),
                 "observed_markets": sorted(tally.observed_markets),
                 "sources": sorted(tally.sources),
@@ -332,6 +344,7 @@ def build_report(
                 kind: _whole(market_evidence[geography][kind]) for kind in EVIDENCE_KINDS
             },
             "has_pre_2010_cohorts": geography in pre_2010_markets,
+            "lower_bound": _whole(market_lower_bound[geography]),
         }
         for geography, total in sorted(market_total.items())
     ]

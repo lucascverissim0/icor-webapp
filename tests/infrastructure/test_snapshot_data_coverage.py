@@ -116,3 +116,18 @@ def test_a_snapshot_built_with_another_curve_is_refused():
 def test_years_past_the_stored_horizon_are_refused():
     with pytest.raises(ValueError, match="2028"):
         read_fleet(_snapshot(), SURVIVAL, year=2030, comparison_years={})
+
+
+def test_a_lower_bound_register_cohort_is_marked_at_least():
+    connection = _snapshot()
+    connection.execute(
+        "UPDATE cohort_estimate SET reason_codes = ? WHERE cohort_id = 'c2'",
+        (json.dumps(["observed-stock-anchored-cohort", "survival", "observed-stock-lower-bound"]),),
+    )
+
+    read = read_fleet(connection, SURVIVAL, year=2026, comparison_years={})
+
+    cells = {(cell.geography, cell.cohort_year): cell for cell in read.cells}
+    assert cells["NL", 2005].lower_bound is True
+    assert cells["NL", 2005].evidence == "stock"
+    assert cells["DE", 2020].lower_bound is False

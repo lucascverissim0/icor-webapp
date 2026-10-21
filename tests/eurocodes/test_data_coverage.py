@@ -24,7 +24,9 @@ AURORA = "aurora mobility|a1 horizon"
 MERIDIAN = "meridian motors|m5 vector"
 
 
-def _cell(identity, year, geography, evidence, cars, *, raw="A1 HORIZON", sources=()):
+def _cell(
+    identity, year, geography, evidence, cars, *, raw="A1 HORIZON", sources=(), lower_bound=False
+):
     units = Decimal(cars)
     return FleetCell(
         identity=identity,
@@ -35,6 +37,7 @@ def _cell(identity, year, geography, evidence, cars, *, raw="A1 HORIZON", source
         fleet=FleetRange(units * Decimal("0.9"), units, units * Decimal("1.1")),
         fleet_2028=units * Decimal("0.8"),
         sources=frozenset(sources),
+        lower_bound=lower_bound,
     )
 
 
@@ -96,6 +99,25 @@ def test_every_car_is_accounted_for_by_outcome_and_by_evidence():
     }
     markets = {item["geography"]: item for item in report["markets"]}
     assert markets["NL"]["fleet"] == 57
+
+
+def test_a_register_that_counts_only_part_of_its_cars_is_labelled_at_least():
+    report = _report(
+        [
+            _cell(MERIDIAN, 2024, "NL", "stock", 50, raw="M5 VECTOR", lower_bound=True),
+            _cell(MERIDIAN, 2024, "DE", "registrations", 30, raw="M5 VECTOR"),
+            _cell(AURORA, 2024, "DE", "registrations", 10),
+        ]
+    )
+
+    meridian, aurora = _code(report, "Q301"), _code(report, "Q201")
+    assert meridian["lower_bound_p50"] == 50
+    assert "lower-bound" in meridian["flags"]
+    assert aurora["lower_bound_p50"] == 0
+    assert "lower-bound" not in aurora["flags"]
+    markets = {item["geography"]: item for item in report["markets"]}
+    assert markets["NL"]["lower_bound"] == 50
+    assert markets["DE"]["lower_bound"] == 0
 
 
 def test_cars_registered_after_the_report_year_are_not_on_the_road_yet():

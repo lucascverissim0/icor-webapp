@@ -120,6 +120,9 @@ uv run python scripts/acquire_rdw_fleet.py --destination $evidenceRoot/downloads
 uv run python scripts/acquire_official_evidence.py --source rdw-nl-fleet --root $evidenceRoot `
   --artifact $evidenceRoot/downloads/rdw-nl-fleet.csv
 uv run python scripts/acquire_official_evidence.py --source traficom-fi-fleet --root $evidenceRoot
+uv run python scripts/acquire_dgt_fleet.py --destination $evidenceRoot/downloads/dgt-es-fleet.csv
+uv run python scripts/acquire_official_evidence.py --source dgt-es-fleet --root $evidenceRoot `
+  --artifact $evidenceRoot/downloads/dgt-es-fleet.csv
 
 uv run python scripts/build_evidence_snapshot.py build --root $evidenceRoot `
   --release eea-co2cars-2024-final-v30-r1 `
@@ -146,7 +149,18 @@ cars (`ajoneuvoluokka` M1 and M1G) as observed active fleet by make, commercial 
 (`kaupallinenNimi`; rows without one are rejected) and the year of the
 first-use date `kayttoonottopvm`. The file has no status column; Traficom describes it as
 all vehicles in traffic use. Traficom replaces the ZIP in place each quarter, so a later
-edition fails the pinned-checksum check until the pin is reviewed. EEA and KBA are placed in the same dependency group so
+edition fails the pinned-checksum check until the pin is reviewed. The Spain DGT annual
+vehicle stock (Microdatos Parque de vehículos Anual, datos.gob.es dataset
+`e00003801-microdatos-parque-de-vehiculos-anual`) is licensed CC BY 4.0; attribute it as
+"Source: Dirección General de Tráfico (DGT)". `scripts/acquire_dgt_fleet.py` downloads the
+pinned 2025 ZIP (1,645,095,393 bytes, sha256 checked), keeps passenger cars (`CAT_EURO` M1
+or M1G, plus `TIPO_DGT` TURISMOS without a category, which together match Eurostat's
+Spanish total), writes only counts by `MARCA`, `MODELO` and the year of `FEC_PRIM_MATR`
+(first registration anywhere), and deletes the ZIP. DGT masks rare make and model names
+with `¡` (27% of passenger cars, whole models at a time), so the
+`dgt_parque_cohorts_csv_v1` loader rejects masked groups, keeps cohorts before 2010 only
+(EEA registrations cover Spain from 2010) and flags every observation `stock-lower-bound`;
+the cohorts built from it carry the reason code `observed-stock-lower-bound`. EEA and KBA are placed in the same dependency group so
 their overlap is not treated as independent confirmation.
 
 Dependency groups alone are not enough, and relying on them was a defect. Two

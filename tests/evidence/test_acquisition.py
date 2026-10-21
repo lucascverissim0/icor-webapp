@@ -17,6 +17,7 @@ def test_catalog_contains_only_reviewed_https_sources():
         "uk-veh0124-nz",
         "rdw-nl-fleet",
         "traficom-fi-fleet",
+        "dgt-es-fleet",
     }
     expected.update(f"eea-{year}-final" for year in range(2010, 2024))
     assert set(OFFICIAL_SOURCES) == expected

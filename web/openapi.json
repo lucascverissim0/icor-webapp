@@ -483,6 +483,10 @@
             "title": "Life Years",
             "type": "integer"
           },
+          "lower_bound_p50": {
+            "title": "Lower Bound P50",
+            "type": "integer"
+          },
           "markets": {
             "title": "Markets",
             "type": "integer"
@@ -548,6 +552,7 @@
           "shared_with_uncoded",
           "evidence",
           "observed_share",
+          "lower_bound_p50",
           "markets",
           "observed_markets",
           "sources",
@@ -741,6 +746,10 @@
           "has_pre_2010_cohorts": {
             "title": "Has Pre 2010 Cohorts",
             "type": "boolean"
+          },
+          "lower_bound": {
+            "title": "Lower Bound",
+            "type": "integer"
           }
         },
         "required": [
@@ -748,7 +757,8 @@
           "fleet",
           "by_outcome",
           "by_evidence",
-          "has_pre_2010_cohorts"
+          "has_pre_2010_cohorts",
+          "lower_bound"
         ],
         "title": "EurocodeDataMarketResponse",
         "type": "object"

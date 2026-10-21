@@ -296,6 +296,40 @@ OFFICIAL_SOURCES = {
         accepted_count=2_693_484,
         rejected_count=2_603_265,
     ),
+    "dgt-es-fleet": OfficialSource(
+        key="dgt-es-fleet",
+        # Aggregated by scripts/acquire_dgt_fleet.py from the pinned 2025 ZIP
+        # (1,645,095,393 bytes, Last-Modified 2026-04-10); only counts are kept.
+        release_id="dgt-es-parque-2025",
+        source_id="dgt-parque-vehiculos-anual",
+        publisher="Dirección General de Tráfico (DGT), Ministerio del Interior",
+        url="https://www.dgt.es/microdatos/Parque/2025/parque_consolidado_2025.zip",
+        published_at=datetime(2026, 4, 10, 9, 10, 55, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2025, 12, 31),
+        geography="ES",
+        geography_version="Spain DGT parque de vehículos 2025-12-31",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="es-dgt-vehicle-register",
+        terms_url="https://datos.gob.es/en/catalogo/e00003801-microdatos-parque-de-vehiculos-anual",
+        permitted_local_use=(
+            "Reuse permitted under Creative Commons Attribution 4.0 International "
+            "with attribution to the Dirección General de Tráfico."
+        ),
+        parser_name="dgt_parque_cohorts_csv_v1",
+        expected_schema=(
+            "DGT parque_consolidado_2025 passenger cars (CAT_EURO M1 or M1G, or TIPO_DGT "
+            "TURISMOS without a category) aggregated by MARCA, MODELO, and the year of "
+            "FEC_PRIM_MATR"
+        ),
+        suffix=".csv",
+        artifact_bytes=2_006_272,
+        sha256="595678b5539f32254dc105c5729255eb899e785157232a3ab572a69be4e550a5",
+        raw_count=75_749,
+        accepted_count=47_137,
+        rejected_count=28_612,
+        direct_download=False,
+    ),
 }
 
 _EEA_HISTORY_ARTIFACTS = {

@@ -30,6 +30,7 @@ SOURCE_KEYS = (
     "uk-veh0124-nz",
     "rdw-nl-fleet",
     "traficom-fi-fleet",
+    "dgt-es-fleet",
 )
 
 
@@ -90,6 +91,8 @@ def _acquisition_adapter(
         return "acquire_eea_2025_provisional.py", (), "official EEA history acquisition"
     if source_key == "rdw-nl-fleet":
         return "acquire_rdw_fleet.py", (), "official RDW fleet acquisition"
+    if source_key == "dgt-es-fleet":
+        return "acquire_dgt_fleet.py", (), "official DGT fleet acquisition"
     return (
         "acquire_eea_history.py",
         ("--year", str(official.coverage_start.year)),
