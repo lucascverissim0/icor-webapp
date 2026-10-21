@@ -7448,3 +7448,61 @@ Verification this session:
 - Playwright: 31 passed.
 
 The local service is still running (web :5173, API :8000) on the **active** snapshot `b05d…`.
+
+## 2026-10-21 (evening) — Mission 3: over-100% markets explained; fill plan approved
+
+Lucas asked: explain every market above 100% of Eurostat stock, then use every free source so
+cars first registered 2006–2025 appear in the app. Approved plan (outside the repo):
+`~/.claude/plans/ok-i-want-you-eventual-beaver.md`. Lucas's binding decisions:
+- countries without free make × model × age data get **estimates as country totals only**
+  (report and `/data-coverage`), never spread over models or Eurocodes;
+- registers allowed: PL CEPiK (portal CC BY 4.0 although the API metadata says rights "brak"),
+  EE (CC BY-SA 4.0), LV CSDD, SI (frozen at 2023-06-30), DK Motorstyrelsen (if its terms page
+  allows reuse), plus CZ (CC0-equivalent), LT (CC BY 4.0) and LU SNCA (CC0);
+- over-counts are fixed by a per-country net retention calibrated on Eurostat, **downward only**;
+- a candidate that passes every gate may be promoted locally without asking. No push or deploy.
+
+### Root causes (read-only measurements, 2026-10-21)
+1. **NL 111%.** `snapshot_data_coverage._fleet` back-projects the RDW count (dated 2026-10-06) to
+   2025 by dividing by UK survival: +0.90M (FI +0.29M). Raw RDW cohorts ≤2025 are 101.5% of
+   Eurostat. RDW also counts about 386k uninsured cars: `wam_verzekerd='Ja'` cohorts ≤2025 total
+   9,471,657, which is 100.6% of Eurostat's 9,415,540. Export-flagged cars are already excluded by
+   `tenaamstellen_mogelijk='Ja'`.
+2. **BE 105%, LU 137%.** One UK curve (`uk_licensed_stock.json`) is used for every country and
+   nothing leaves a country. EEA registrations match Eurostat `road_eqr_carmot` within ±3%; there
+   is no double count. Lease and company cars are exported young. LU's 2010–2025 cohorts sum to
+   165% of its fleet. BE 5–10 y: model 2.33M against official 1.83M. DK (registration-tax refund
+   on export) and DE (about −7% at 5–10 y) also show real net export.
+3. **Band edges.** Eurostat `road_eqs_carage` "Y_LT2" means two registration years in some
+   countries and years (BE, LU, DK, FI, IT, RO, CY, LV, EE, GB, SI, ES ≥2014, DE ≤2016, FR ≥2017,
+   PT ≤2020) and three in others (AT, CZ, MT, PL ≤2023, PT ≥2021, FR ≤2016, DE ≥2017, NL). It is
+   unclear for SE, HU, HR, IE, LT ≥2022 and NO. For IT and CZ, "Y10-20" is open-ended (no Y_GT20).
+   The parser drops the status flags (i, p, b). These came from a design agent's measurements and
+   are to be re-verified by `scripts/measure_eurostat_age_conventions.py`.
+4. **EEA rows with a blank commercial name are rejected** (`sources/eea.py:135,178,420`), about
+   553k cars: DK 2022 −57% (143,747 → 61,456), MT 2011 −92%, IT 2010 −209k, BG 2010 −9.3%,
+   ES 2020 −3%. Only about 60–80k can be recovered by type approval (mostly DK 2022). IT 2010 has no
+   TAN/T/Va/Ve, and the DE rows lack a make.
+5. **EEA 2025 provisional is incomplete:** PL 441k against carmot 601k, FI 49k against 72k, with
+   whole makes missing (PL Cupra 11,520 → 22). `_end_year` may end those series early.
+6. **No pre-2010 make × model data exists at EU level** (Decision 1753/2000 required manufacturer
+   totals only). Eurostat `road_eqr_carmot` has national new-car totals from 1970, but before 2013
+   they include used imports in BG, LT, LV, PL, RO, SK and CY.
+
+### Free register sources (verified 2026-10-21 by research agents)
+- PL CEPiK: bulk CSVs at `api.cepik.gov.pl/pliki` (snapshot 2022-04-17; Wielkopolskie and "no
+  voivodeship" are broken) and a paged API (first registration anywhere, deregistration date).
+  Plan: crawl the API at the current date and do not use the 2022 bulk.
+- CZ `download.dataovozidlech.cz` register plus import file; LT Regitra data.gov.lt/datasets/1211
+  (168 MB, current, masks rare private combinations); EE Transpordiamet monthly CSV
+  (andmed.eesti.ee); SI podatki.gov.si snapshots to 2023-06-30 (contain owner age and sex, to be
+  discarded); LU SNCA on data.public.lu (CC0, per vehicle); DK Motorstyrelsen (7 GB, VINs).
+- LV CSDD gives production year only. **It will not be integrated at model level**, because a
+  production year can place a car in a predecessor's exclusive window.
+- Nothing free with make × model × age for FR, IT, DE, BE, PT, GR, RO, HU, SK, HR, AT, SE, NO, IE,
+  MT, IS, BG or CY.
+
+### Next actions
+Follow the approved plan: Phase 0 (PL API pilot and crawl, terms checks), Phase 1 (report
+fixes), Phase 2 (recovery, RDW re-pin, net retention), Phase 3 (registers), Phase 4 (review gate),
+then promote locally.
