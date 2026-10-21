@@ -28,7 +28,11 @@ _QUERY = {
         "merk, handelsbenaming, date_extract_y(datum_eerste_toelating_dt) as cohort, "
         "count(*) as vehicles"
     ),
-    "$where": "voertuigsoort='Personenauto' AND tenaamstellen_mogelijk='Ja'",
+    # Insured cars only, as CBS counts the Dutch fleet since 2019 (an uninsured car
+    # is suspended or off the road); without it RDW holds ~0.4M more than CBS.
+    "$where": (
+        "voertuigsoort='Personenauto' AND tenaamstellen_mogelijk='Ja' AND wam_verzekerd='Ja'"
+    ),
     "$group": "merk, handelsbenaming, cohort",
     "$order": "merk, handelsbenaming, cohort",
 }

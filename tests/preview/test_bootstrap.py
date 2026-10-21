@@ -306,7 +306,7 @@ def test_all_historical_sources_use_the_reviewed_adapter(tmp_path: Path) -> None
 
 def test_rdw_fleet_uses_its_own_acquisition_script(tmp_path: Path) -> None:
     plan = default_plan()
-    release_id = "rdw-nl-registered-cars-20261006"
+    release_id = "rdw-nl-registered-cars-20261021"
     assert release_id in plan.release_ids
     runner = RecordingRunner()
     coordinator = BootstrapCoordinator(

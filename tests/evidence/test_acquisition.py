@@ -72,7 +72,7 @@ def test_eea_2025_uses_replay_verified_provisional_aggregate() -> None:
 def test_rdw_fleet_is_a_dated_final_nl_active_fleet_snapshot() -> None:
     source = OFFICIAL_SOURCES["rdw-nl-fleet"]
 
-    assert source.release_id == "rdw-nl-registered-cars-20261006"
+    assert source.release_id == "rdw-nl-registered-cars-20261021"
     assert source.source_id == "rdw-gekentekende-voertuigen"
     assert source.geography == "NL"
     assert source.measure.value == "active_fleet"

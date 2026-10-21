@@ -60,6 +60,7 @@ def test_pages_until_short_page_and_writes_sorted_canonical_csv(tmp_path: Path) 
     assert [query["$offset"] for query in seen] == [["0"], ["2"]]
     assert all(query["$limit"] == ["2"] for query in seen)
     assert "tenaamstellen_mogelijk='Ja'" in seen[0]["$where"][0]
+    assert "wam_verzekerd='Ja'" in seen[0]["$where"][0]
     assert "voertuigsoort='Personenauto'" in seen[0]["$where"][0]
     assert destination.read_text(encoding="utf-8") == (
         HEADER + "AUDI,A3,2020,7\nVOLKSWAGEN,GOLF,2012,5\nVOLKSWAGEN,GOLF,2015,10\n"

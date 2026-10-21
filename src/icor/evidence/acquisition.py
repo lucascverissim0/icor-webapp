@@ -234,16 +234,17 @@ OFFICIAL_SOURCES = {
     "rdw-nl-fleet": OfficialSource(
         key="rdw-nl-fleet",
         # The RDW register changes daily, so this pin is a dated snapshot taken on
-        # 2026-10-06; re-acquisition will not reproduce these bytes or counts.
-        release_id="rdw-nl-registered-cars-20261006",
+        # 2026-10-21; re-acquisition will not reproduce these bytes or counts. It
+        # keeps insured cars only, as CBS has counted the Dutch fleet since 2019.
+        release_id="rdw-nl-registered-cars-20261021",
         source_id="rdw-gekentekende-voertuigen",
         publisher="RDW (Netherlands Vehicle Authority)",
         url="https://opendata.rdw.nl/resource/m9d7-ebf2.csv",
-        published_at=datetime(2026, 10, 6, tzinfo=UTC),
+        published_at=datetime(2026, 10, 21, tzinfo=UTC),
         coverage_start=date(1900, 1, 1),
-        coverage_end=date(2026, 10, 6),
+        coverage_end=date(2026, 10, 21),
         geography="NL",
-        geography_version="Netherlands RDW register of registered vehicles 2026-10-06",
+        geography_version="Netherlands RDW register of registered vehicles 2026-10-21",
         measure=Measure.ACTIVE_FLEET,
         dependency_group="nl-rdw-vehicle-register",
         terms_url="https://opendata.rdw.nl",
@@ -252,15 +253,15 @@ OFFICIAL_SOURCES = {
         ),
         parser_name="rdw_registered_cars_csv_v1",
         expected_schema=(
-            "RDW Gekentekende_voertuigen Personenauto with tenaamstellen_mogelijk=Ja "
-            "aggregated by merk, handelsbenaming, and first-admission year"
+            "RDW Gekentekende_voertuigen Personenauto with tenaamstellen_mogelijk=Ja and "
+            "wam_verzekerd=Ja aggregated by merk, handelsbenaming, and first-admission year"
         ),
         suffix=".csv",
-        artifact_bytes=5_535_649,
-        sha256="4b83b77fc9f20fed37289342e805e2d8a2111ef0ac23a2d6d083fa910d59c54e",
-        raw_count=195_582,
-        accepted_count=194_352,
-        rejected_count=1_230,
+        artifact_bytes=4_714_226,
+        sha256="65108c1e3a87cbee76ea0ebc9c449e50cc4b8462de4e2476bd6e05c4b2fab9e4",
+        raw_count=167_923,
+        accepted_count=167_186,
+        rejected_count=737,
         direct_download=False,
     ),
     "traficom-fi-fleet": OfficialSource(
