@@ -6993,13 +6993,54 @@ without printing codes):
 - CI ruff list: clean;
 - `npm run openapi:generate`, then `typecheck`, `lint` and `npm test -- --run`: 94 passed.
 
-**Next:** plan step 5 (UI).
-1. Ranking rows show the Eurocode chip(s) first: "certain X · up to +Y shared with …",
-   unassigned units marked.
-2. A detail-page breakdown, a vehicle-forecast market breakdown, and a status KPI or "Eurocodes
-   not loaded" state.
-3. Extend `scripts/e2e_app.py` (in-memory demo repository) with
-   `eurocodes=demo_eurocodes()` and `E2EVehicleForecasts` with fictional breakdowns.
-4. Vitest and Playwright coverage.
+**Next:** plan step 5 (done; see the next section).
+
+### Steps 5–6 complete: Eurocodes in the UI, search by Eurocode (2026-10-21, `f35dd44`, `edd6ecd`)
+
+**Step 5: UI.** Shared components are in `web/src/features/eurocodes/` (`EurocodeBreakdown.tsx`,
+`eurocode-text.ts`).
+- **Ranking cards:** up to three chips sit above the unchanged vehicle heading. Each shows the
+  code, its vehicle and years, and "certain X · up to +Y shared with …". A code with no certain
+  units reads "up to Y, shared with …". After the chips come "+N more codes" and "Not assigned
+  to a Eurocode: Z (reasons)".
+- **Detail page:** a table of the codes, plus one "Not assigned" row per reason.
+- **Vehicle forecast:** a "Registrations by Eurocode" column and an EU27 block.
+- **Opportunities page:** the KPI "P% of forecast demand assigned (S% to a single code)" for the
+  latest horizon, any status warnings, and one calm notice when no map is loaded.
+- **Fixture:** the browser fixture serves `demo_eurocodes()`, and its forecast breakdown comes
+  from the real annotation.
+- **Gap:** the status KPI appears only against a real snapshot, so Vitest covers it and
+  Playwright does not.
+
+**Step 6: search by Eurocode.**
+- **Matching:** `EurocodeMap.searched_code()` takes an exact 4-character catalogue code in any
+  case. `identities_carrying(code)` lists the candidates, variant routes included.
+- **Ranking:** the repository allocates every candidate cell under the view's markets and
+  horizons, so a group is listed only when its own breakdown shows the code. The code groups are
+  OR-ed with the name `LIKE`.
+- **Collisions are read both ways:** name matches stay, and the page carries `eurocode_search`
+  `{code, label, first_year, last_year}`. A null label means the code is catalogued but no
+  reviewed vehicle carries it.
+- **Breakdown queries** now take the estimate predicates only, since the page's groups are
+  named directly.
+- **In the app:** the in-memory service matches through the same breakdowns. Vehicle-forecast
+  options carry `eurocode_search` and `eurocode_vehicles` (kept apart from the name matches),
+  shown as one-click picks. The ranking leads with the searched chip, marked "Searched code".
+- **Verified on the real snapshot:**
+  - Searching a Golf VII code returns 44 model-year rows (2012–2021, every one carrying it), 6
+    model rows and 2 brand rows.
+  - Times: 4.7 s by model year, 9.5 s by model; vehicle options 2.6 s.
+  - Of the 9 year-like reviewed codes, 7 have code rows and 1 also matches a vehicle name;
+    both readings are shown.
+  - Two year-like codes have no forecast rows, and the empty state explains why.
+
+**Gates (after `edd6ecd`):**
+- pytest: 1075 passed, 7 skipped, 4 xfailed;
+- CI ruff list: clean;
+- `uv lock --check`: ok;
+- web `typecheck`, `lint`, `build`, `openapi:check`: ok;
+- Vitest: 107 passed; Playwright: 28 passed.
+
+**Next:** plan step 7 (`group_by=eurocode` as the default ranking), then step 8 (close-out).
 
 No server or long-running process is active.
