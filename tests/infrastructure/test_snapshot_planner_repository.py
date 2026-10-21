@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from icor.application.opportunities import (
+    EurocodeGroupingUnavailable,
     OpportunityFleetEstimate,
     OpportunityGroupBy,
     OpportunityQuery,
@@ -23,8 +24,9 @@ from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
 from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
-from icor.eurocodes.annotation import EurocodeSearch
+from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeSearch
 from icor.eurocodes.catalog import parse_rows
+from icor.eurocodes.grouping import EurocodeVehicle
 from icor.eurocodes.runtime import EurocodeMap
 from icor.evidence.vehicle_identity import identity_rules_sha256
 from icor.infrastructure.snapshot_eurocodes import measure
@@ -1107,7 +1109,12 @@ def test_eurocodes_never_move_a_score_or_a_unit(
     )
     assert annotated._materialized_attribution is False
 
-    for group_by in OpportunityGroupBy:
+    # The Eurocode ranking exists only with the map; these are the rankings it must not move.
+    for group_by in (
+        OpportunityGroupBy.BRAND,
+        OpportunityGroupBy.MODEL,
+        OpportunityGroupBy.MODEL_YEAR,
+    ):
         for query in (
             OpportunityQuery(group_by=group_by),
             OpportunityQuery(group_by=group_by, markets=("DE",), text="golf"),
@@ -1289,3 +1296,75 @@ def test_a_eurocode_search_binds_its_filters_on_inline_attribution(
     # The fixture's Golf was registered in 2020, before the second code begins.
     later = repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL, text="Q602"))
     assert later.items == () and later.eurocode_search is not None
+
+
+def test_the_eurocode_ranking_ranks_each_codes_certain_units(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    """Golf: 10 units in 2020 (first code alone) and 3 in 2021 (both codes); Polo: 8, unreviewed."""
+
+    _with_golf_2021_cohort(sqlite_repository)
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+    query = OpportunityQuery(group_by=OpportunityGroupBy.EUROCODE)
+
+    page = repository.search(query)
+
+    rows = {row.eurocode.code: row for row in page.items if row.eurocode is not None}
+    assert [row.eurocode.code for row in page.items if row.eurocode] == ["Q601", "Q602"]
+    first, second = rows["Q601"], rows["Q602"]
+    assert (first.brand, first.model, first.model_year) == (
+        "Volkswagen",
+        "Volkswagen Golf A",
+        None,
+    )
+    assert (first.demand.base_units, first.eurocode.shared_units) == (10, 3)
+    assert first.eurocode.shared_with == ("Q602",)
+    assert first.eurocode.vehicles == (EurocodeVehicle("Volkswagen", "Golf", 10, 3),)
+    assert (second.demand.base_units, second.eurocode.shared_units) == (0, 3)
+    assert page.eurocode_totals == EurocodeBreakdown((), 10, 3, 0, 0, 8)
+    assert page.summary.base_units == 10
+    # Scored on certain units against the market's codes: a code with none is unranked.
+    assert (first.score.total_points, first.score.demand_population) == (100.0, 1)
+    assert second.score.demand_rank is None
+
+    assert repository.get(first.group_id, query) == first
+    contributions = repository.contributions(first.group_id, query)
+    assert [(c.market, c.forecast_horizon, c.demand.base_units) for c in contributions] == [
+        ("DE", 2028, 10)
+    ]
+    assert repository.fleet_estimates(first.group_id, query) == ()
+    assert repository.drill_down(first.group_id, query, 1, 10) == ()
+
+    elsewhere = repository.search(replace(query, markets=("FR",)))
+    assert elsewhere.items == ()
+    assert elsewhere.eurocode_totals == EurocodeBreakdown((), 0, 0, 0, 0, 0)
+    searched = repository.search(replace(query, text="q602")).items
+    assert [row.eurocode.code for row in searched if row.eurocode] == ["Q602"]
+    assert len(repository.search(replace(query, text="golf")).items) == 2
+
+
+def test_the_eurocode_ranking_reads_inline_attribution_and_needs_the_map(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+    assert repository._materialized_attribution is False
+    query = OpportunityQuery(
+        group_by=OpportunityGroupBy.EUROCODE, markets=("DE",), horizons=(2028,)
+    )
+
+    (row,) = repository.search(query).items
+
+    assert row.eurocode is not None and row.eurocode.code == "Q601"
+    assert (row.demand.base_units, row.eurocode.shared_units) == (13, 0)
+    with pytest.raises(EurocodeGroupingUnavailable):
+        _opportunity_repository(sqlite_repository, tmp_path).search(query)

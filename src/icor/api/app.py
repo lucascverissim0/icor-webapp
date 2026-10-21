@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -26,7 +27,11 @@ from icor.application.completeness import CompletenessQueryService
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
 from icor.application.evidence_review import EvidenceReviewService
 from icor.application.ml_export import MLExportService
-from icor.application.opportunities import OpportunityGroupBy, OpportunityService
+from icor.application.opportunities import (
+    EurocodeGroupingUnavailable,
+    OpportunityGroupBy,
+    OpportunityService,
+)
 from icor.application.planner import PlannerRepository, PlannerService
 from icor.application.ranking import DemandScoreV2
 from icor.application.registrations import RegistrationService
@@ -197,6 +202,15 @@ def create_app(
             LOGGER.info(
                 "Ranked market population ready group_by=%s", OpportunityGroupBy.MODEL_YEAR
             )
+        elif eurocodes is not None:
+            # The Eurocode ranking is the interface's first view, and allocating
+            # every forecast cell takes seconds; build it while the app starts.
+            threading.Thread(
+                target=opportunity_repository.warm,
+                args=(OpportunityGroupBy.EUROCODE,),
+                name="eurocode-ranking",
+                daemon=True,
+            ).start()
         app.state.opportunity_service = OpportunityService(
             repository=opportunity_repository
         )
@@ -299,6 +313,20 @@ def create_app(
             field_errors=field_errors,
         )
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
+
+    @app.exception_handler(EurocodeGroupingUnavailable)
+    async def eurocodes_not_loaded(
+        request: Request, error: EurocodeGroupingUnavailable
+    ) -> JSONResponse:
+        return _problem(
+            request,
+            code="eurocodes_not_loaded",
+            message=(
+                "Eurocodes are not loaded in this service, so the ranking cannot be "
+                "read by Eurocode. Choose another grouping."
+            ),
+            status_code=422,
+        )
 
     @app.exception_handler(Exception)
     async def internal_error(request: Request, error: Exception) -> JSONResponse:

@@ -212,6 +212,30 @@ class EurocodeBreakdownResponse(ApiModel):
     unreviewed_units: int
 
 
+class EurocodeVehicleResponse(ApiModel):
+    """One vehicle label whose registrations may carry a code."""
+
+    brand: str
+    model: str
+    certain_units: int
+    shared_units: int
+
+
+class EurocodeGroupResponse(ApiModel):
+    """A Eurocode row's code, vehicles, and the units it may share beyond its certain ones."""
+
+    code: str
+    label: str
+    make: str
+    first_year: int
+    last_year: int | None
+    drive: str
+    shared_units: int
+    shared_with: tuple[str, ...]
+    shared_with_uncoded: bool
+    vehicles: tuple[EurocodeVehicleResponse, ...]
+
+
 class EurocodeCoverageResponse(ApiModel):
     horizon: int
     total_units: int
@@ -363,6 +387,9 @@ class OpportunityRowResponse(ApiModel):
     data_version: str
     # None when Eurocodes are not loaded, and for brand rows.
     eurocodes: EurocodeBreakdownResponse | None = None
+    # On a Eurocode row (group_by=eurocode): the code it ranks. Its demand is the
+    # code's certain units; `shared_units` may belong to it or to `shared_with`.
+    eurocode: EurocodeGroupResponse | None = None
 
 
 class OpportunitySummaryResponse(ApiModel):
@@ -409,6 +436,9 @@ class OpportunityPageResponse(ApiModel):
     #: When the search text is exactly a Eurocode, rows that may carry it are
     #: listed beside rows whose name contains the text; this names the code.
     eurocode_search: EurocodeSearchResponse | None = None
+    #: On a Eurocode ranking: the view's units by outcome (codes empty), shared
+    #: units counted once, so the rows' certain units and these cover the view.
+    eurocode_totals: EurocodeBreakdownResponse | None = None
 
 
 class OpportunityDrillDownResponse(ApiModel):

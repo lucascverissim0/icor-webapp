@@ -173,3 +173,36 @@ def test_a_eurocode_search_lists_the_rows_that_may_carry_it(client: TestClient) 
 
     named = client.get("/api/v1/opportunities", params={"group_by": "model", "q": "horizon"})
     assert named.json()["eurocode_search"] is None
+
+
+def test_the_ranking_reads_by_eurocode(client: TestClient) -> None:
+    body = client.get(
+        "/api/v1/opportunities", params={"group_by": "eurocode", "page_size": 100}
+    ).json()
+
+    rows = {row["eurocode"]["code"]: row for row in body["items"]}
+    assert set(rows) == {"Q201", "Q202", "Q301", "Q401"}
+    launch = rows["Q202"]["eurocode"]
+    assert launch["shared_with"] == ["Q201"]
+    assert launch["vehicles"][0]["brand"] == "Aurora Mobility"
+    totals = body["eurocode_totals"]
+    assert totals["single_units"] == sum(row["demand"]["base_units"] for row in body["items"])
+    assert totals["outside_units"] > 0 and totals["unreviewed_units"] > 0
+
+    group_id = rows["Q301"]["group_id"]
+    detail = client.get(f"/api/v1/opportunities/{group_id}", params={"group_by": "eurocode"})
+    assert detail.json() == rows["Q301"]
+    contributions = client.get(
+        f"/api/v1/opportunities/{group_id}/contributions", params={"group_by": "eurocode"}
+    ).json()
+    assert sum(item["demand"]["base_units"] for item in contributions) == (
+        rows["Q301"]["demand"]["base_units"]
+    )
+
+
+def test_without_a_map_the_eurocode_ranking_is_a_clear_problem(tmp_path: Path) -> None:
+    with _client(tmp_path) as plain:
+        response = plain.get("/api/v1/opportunities", params={"group_by": "eurocode"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "eurocodes_not_loaded"

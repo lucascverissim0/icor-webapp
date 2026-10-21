@@ -4,12 +4,14 @@ from pathlib import Path
 import pytest
 
 from icor.application.opportunities import (
+    EurocodeGroupingUnavailable,
     OpportunityGroupBy,
     OpportunityQuery,
     OpportunityService,
 )
 from icor.application.ranking import DemandScoreV2
 from icor.domain.opportunities import CoverageMatchType, CoverageStatus, ProductionCoverage
+from icor.eurocodes.demo import demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,7 +59,15 @@ def service(rows: tuple[ProductionCoverage, ...] = ()) -> OpportunityService:
     )
 
 
-@pytest.mark.parametrize("group_by", list(OpportunityGroupBy))
+#: The groupings whose rows partition the demand; a Eurocode row holds certain units only.
+VEHICLE_GROUPINGS = (
+    OpportunityGroupBy.BRAND,
+    OpportunityGroupBy.MODEL,
+    OpportunityGroupBy.MODEL_YEAR,
+)
+
+
+@pytest.mark.parametrize("group_by", VEHICLE_GROUPINGS)
 def test_every_grouping_reconciles_to_filtered_configuration_demand(
     group_by: OpportunityGroupBy,
 ) -> None:
@@ -67,6 +77,34 @@ def test_every_grouping_reconciles_to_filtered_configuration_demand(
     assert result.summary.base_units == 6_560
     assert result.summary.exact_covered_base_units == 0
     assert all(row.coverage_status is CoverageStatus.UNCOVERED for row in result.items)
+
+
+def test_eurocode_rows_and_the_views_totals_account_for_all_demand() -> None:
+    result = OpportunityService(
+        DemoPlannerRepository.from_path(FIXTURE),
+        StaticCoverageRepository(),
+        DemandScoreV2(),
+        eurocodes=demo_eurocodes(),
+    ).list(OpportunityQuery(group_by=OpportunityGroupBy.EUROCODE))
+
+    totals = result.eurocode_totals
+    assert totals is not None and totals.codes == ()
+    certain = sum(row.demand.base_units for row in result.items)
+    assert certain == result.summary.base_units == totals.single_units
+    assert certain + totals.shared_units + totals.outside_units + totals.unassignable_units + (
+        totals.unreviewed_units
+    ) == 6_560
+    assert {row.eurocode.code for row in result.items if row.eurocode} == {
+        "Q201",
+        "Q202",
+        "Q301",
+        "Q401",
+    }
+
+
+def test_the_eurocode_ranking_needs_a_loaded_map() -> None:
+    with pytest.raises(EurocodeGroupingUnavailable):
+        service().list(OpportunityQuery(group_by=OpportunityGroupBy.EUROCODE))
 
 
 def test_exact_match_precedes_fallback_without_double_counting() -> None:

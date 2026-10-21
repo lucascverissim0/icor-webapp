@@ -495,6 +495,32 @@ export interface components {
             unreviewed_units: number;
         };
         /**
+         * EurocodeGroupResponse
+         * @description A Eurocode row's code, vehicles, and the units it may share beyond its certain ones.
+         */
+        EurocodeGroupResponse: {
+            /** Code */
+            code: string;
+            /** Drive */
+            drive: string;
+            /** First Year */
+            first_year: number;
+            /** Label */
+            label: string;
+            /** Last Year */
+            last_year: number | null;
+            /** Make */
+            make: string;
+            /** Shared Units */
+            shared_units: number;
+            /** Shared With */
+            shared_with: string[];
+            /** Shared With Uncoded */
+            shared_with_uncoded: boolean;
+            /** Vehicles */
+            vehicles: components["schemas"]["EurocodeVehicleResponse"][];
+        };
+        /**
          * EurocodeSearchResponse
          * @description A search text that is exactly a Eurocode: the code reading beside the name one.
          */
@@ -551,6 +577,20 @@ export interface components {
             reviewed_identities: number;
             /** Warnings */
             warnings: string[];
+        };
+        /**
+         * EurocodeVehicleResponse
+         * @description One vehicle label whose registrations may carry a code.
+         */
+        EurocodeVehicleResponse: {
+            /** Brand */
+            brand: string;
+            /** Certain Units */
+            certain_units: number;
+            /** Model */
+            model: string;
+            /** Shared Units */
+            shared_units: number;
         };
         /** EuropeanCoverageResponse */
         EuropeanCoverageResponse: {
@@ -841,7 +881,7 @@ export interface components {
          * OpportunityGroupBy
          * @enum {string}
          */
-        OpportunityGroupBy: "brand" | "model" | "model_year";
+        OpportunityGroupBy: "brand" | "model" | "model_year" | "eurocode";
         /** OpportunityPageResponse */
         OpportunityPageResponse: {
             /**
@@ -865,6 +905,7 @@ export interface components {
              */
             demand_population: number;
             eurocode_search?: components["schemas"]["EurocodeSearchResponse"] | null;
+            eurocode_totals?: components["schemas"]["EurocodeBreakdownResponse"] | null;
             /**
              * Eurocodes Loaded
              * @default false
@@ -901,6 +942,7 @@ export interface components {
             /** Data Version */
             data_version: string;
             demand: components["schemas"]["DemandRangeResponse"];
+            eurocode?: components["schemas"]["EurocodeGroupResponse"] | null;
             eurocodes?: components["schemas"]["EurocodeBreakdownResponse"] | null;
             evidence_status: components["schemas"]["EvidenceStatus"];
             /** Exact Covered Base Units */

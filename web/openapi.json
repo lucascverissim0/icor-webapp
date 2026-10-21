@@ -398,6 +398,79 @@
         "title": "EurocodeCoverageResponse",
         "type": "object"
       },
+      "EurocodeGroupResponse": {
+        "additionalProperties": false,
+        "description": "A Eurocode row's code, vehicles, and the units it may share beyond its certain ones.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "drive": {
+            "title": "Drive",
+            "type": "string"
+          },
+          "first_year": {
+            "title": "First Year",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Year"
+          },
+          "make": {
+            "title": "Make",
+            "type": "string"
+          },
+          "shared_units": {
+            "title": "Shared Units",
+            "type": "integer"
+          },
+          "shared_with": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared With",
+            "type": "array"
+          },
+          "shared_with_uncoded": {
+            "title": "Shared With Uncoded",
+            "type": "boolean"
+          },
+          "vehicles": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeVehicleResponse"
+            },
+            "title": "Vehicles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "make",
+          "first_year",
+          "last_year",
+          "drive",
+          "shared_units",
+          "shared_with",
+          "shared_with_uncoded",
+          "vehicles"
+        ],
+        "title": "EurocodeGroupResponse",
+        "type": "object"
+      },
       "EurocodeSearchResponse": {
         "additionalProperties": false,
         "description": "A search text that is exactly a Eurocode: the code reading beside the name one.",
@@ -574,6 +647,36 @@
           "coverage"
         ],
         "title": "EurocodeStatusResponse",
+        "type": "object"
+      },
+      "EurocodeVehicleResponse": {
+        "additionalProperties": false,
+        "description": "One vehicle label whose registrations may carry a code.",
+        "properties": {
+          "brand": {
+            "title": "Brand",
+            "type": "string"
+          },
+          "certain_units": {
+            "title": "Certain Units",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "shared_units": {
+            "title": "Shared Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "brand",
+          "model",
+          "certain_units",
+          "shared_units"
+        ],
+        "title": "EurocodeVehicleResponse",
         "type": "object"
       },
       "EuropeanCoverageResponse": {
@@ -1350,7 +1453,8 @@
         "enum": [
           "brand",
           "model",
-          "model_year"
+          "model_year",
+          "eurocode"
         ],
         "title": "OpportunityGroupBy",
         "type": "string"
@@ -1388,6 +1492,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/EurocodeSearchResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "eurocode_totals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeBreakdownResponse"
               },
               {
                 "type": "null"
@@ -1496,6 +1610,16 @@
           },
           "demand": {
             "$ref": "#/components/schemas/DemandRangeResponse"
+          },
+          "eurocode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeGroupResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "eurocodes": {
             "anyOf": [

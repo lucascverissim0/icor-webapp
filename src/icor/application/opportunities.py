@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from math import ceil
@@ -36,6 +37,13 @@ from icor.eurocodes.annotation import (
     EurocodeSearch,
     eurocode_breakdown,
     eurocode_search,
+)
+from icor.eurocodes.grouping import (
+    EurocodeGroup,
+    EurocodeRanking,
+    EurocodeTotals,
+    RankedCell,
+    rank_by_eurocode,
 )
 from icor.eurocodes.runtime import EurocodeMap
 
@@ -108,6 +116,12 @@ class OpportunityGroupBy(StrEnum):
     BRAND = "brand"
     MODEL = "model"
     MODEL_YEAR = "model_year"
+    #: One row per Eurocode, ranked on the units it certainly carries.
+    EUROCODE = "eurocode"
+
+
+class EurocodeGroupingUnavailable(ValueError):
+    """The ranking cannot be read by Eurocode: no reviewed map is loaded."""
 
 
 class OpportunitySort(StrEnum):
@@ -192,6 +206,9 @@ class OpportunityRow:
     # Which Eurocodes the row's registrations may carry. None when Eurocodes
     # are not loaded, and for brand rows, which span too many codes to list.
     eurocodes: EurocodeBreakdown | None = None
+    # On a Eurocode row: the code, its vehicles and the units it may share. The
+    # row's demand is the code's certain units alone.
+    eurocode: EurocodeGroup | None = None
 
     @property
     def icor_worked(self) -> bool:
@@ -230,6 +247,9 @@ class OpportunityPage:
     # The code reading of the search text, when the text is exactly a Eurocode:
     # rows that may carry it are listed beside rows whose name contains it.
     eurocode_search: EurocodeSearch | None = None
+    # On a Eurocode ranking: the view's units by outcome, shared units counted
+    # once, so the rows' certain units and these account for the whole view.
+    eurocode_totals: EurocodeBreakdown | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +360,150 @@ def _sorted_rows(
     )
 
 
+def eurocode_rows(
+    ranking: EurocodeRanking,
+    population: EurocodeRanking,
+    strategy: RankingStrategy,
+    *,
+    group_id: Callable[[str], str],
+    evidence_status: EvidenceStatus,
+    data_version: str,
+) -> tuple[OpportunityRow, ...]:
+    """Score each code's certain units against the whole market's codes.
+
+    ``population`` is the same ranking with no market or horizon filter, so a
+    filter changes which units a row shows, never what its score means. The
+    score is the ranking strategy's own, as for every other grouping.
+    """
+
+    def candidate(code: str, totals: EurocodeTotals) -> OpportunityCandidate:
+        return OpportunityCandidate(
+            group_id=group_id(code),
+            demand=totals.demand,
+            exact_covered_base_units=totals.exact_units,
+            fallback_covered_base_units=totals.fallback_units,
+            uncovered_base_units=totals.uncovered_units,
+        )
+
+    scores = {
+        score.group_id: score
+        for score in strategy.score(
+            tuple(candidate(code, totals) for code, totals in ranking.groups.items()),
+            population=tuple(
+                candidate(code, totals) for code, totals in population.groups.items()
+            ),
+        )
+    }
+    return tuple(
+        OpportunityRow(
+            group_id=group_id(code),
+            group_by=OpportunityGroupBy.EUROCODE,
+            brand=totals.group.make,
+            model=totals.group.label,
+            model_year=None,
+            generation_name=None,
+            generation_basis=None,
+            generation_source_url=None,
+            icor_worked_base_units=totals.icor_worked_units,
+            demand=totals.demand,
+            contributing_configuration_count=totals.configuration_count,
+            exact_covered_base_units=totals.exact_units,
+            fallback_covered_base_units=totals.fallback_units,
+            uncovered_base_units=totals.uncovered_units,
+            coverage_status=_coverage_status(
+                totals.demand.base_units,
+                totals.exact_units,
+                totals.fallback_units,
+                totals.uncovered_units,
+            ),
+            score=scores[group_id(code)],
+            evidence_status=evidence_status,
+            data_version=data_version,
+            eurocode=totals.group,
+        )
+        for code, totals in ranking.groups.items()
+    )
+
+
+def matching_eurocode_text(
+    rows: tuple[OpportunityRow, ...], text: str
+) -> tuple[OpportunityRow, ...]:
+    """Narrow Eurocode rows to those whose code, name or vehicles contain the text."""
+
+    needle = text.strip().casefold()
+    if not needle:
+        return rows
+    return tuple(
+        row
+        for row in rows
+        if row.eurocode is not None
+        and (
+            needle in row.eurocode.code.casefold()
+            or needle in row.eurocode.label.casefold()
+            or needle in row.eurocode.make.casefold()
+            or any(
+                needle in f"{vehicle.brand} {vehicle.model}".casefold()
+                for vehicle in row.eurocode.vehicles
+            )
+        )
+    )
+
+
+def eurocode_contributions(totals: EurocodeTotals) -> tuple[OpportunityContribution, ...]:
+    """A code's certain units by market and horizon."""
+
+    return tuple(
+        OpportunityContribution(
+            configuration_id=f"{totals.group.code}|{market}|{horizon}",
+            market=market,
+            forecast_horizon=horizon,
+            generation=totals.group.label,
+            body_style="Every body the code fits",
+            demand=demand,
+        )
+        for market, horizon, demand in totals.contributions
+    )
+
+
+def eurocode_page(
+    rows: tuple[OpportunityRow, ...],
+    query: OpportunityQuery,
+    ranking: EurocodeRanking,
+    population: EurocodeRanking,
+    **page: object,
+) -> OpportunityPage:
+    """Filter, order and paginate Eurocode rows into a page, as the other groupings are."""
+
+    rows = matching_eurocode_text(rows, query.text)
+    if query.icor_worked is not None:
+        rows = tuple(row for row in rows if row.icor_worked is query.icor_worked)
+    rows = _sorted_rows(rows, query.sort)
+    start = (query.page - 1) * query.page_size
+    return OpportunityPage(
+        items=rows[start : start + query.page_size],
+        summary=OpportunitySummary(
+            base_units=sum(row.demand.base_units for row in rows),
+            exact_covered_base_units=sum(row.exact_covered_base_units for row in rows),
+            high_demand_uncovered_base_units=sum(
+                row.uncovered_base_units
+                for row in rows
+                if row.score.demand_percentile >= 0.75
+            ),
+        ),
+        total=len(rows),
+        page=query.page,
+        page_size=query.page_size,
+        pages=ceil(len(rows) / query.page_size),
+        demand_population=DemandPopulation.of(
+            totals.demand.base_units for totals in population.groups.values()
+        ).size,
+        demand_basis=WHOLE_MARKET_BASIS,
+        eurocodes_loaded=True,
+        eurocode_totals=ranking.totals,
+        **page,  # type: ignore[arg-type]
+    )
+
+
 class OpportunityService:
     def __init__(
         self,
@@ -360,6 +524,22 @@ class OpportunityService:
         if self._repository is not None:
             return self._repository.search(query)
         assert self._ranking_strategy is not None
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            ranking, population, warnings, atoms = self._eurocode_rankings(query)
+            markets, horizons = self._available_facets()
+            return eurocode_page(
+                self._eurocode_rows(ranking, population, atoms),
+                query,
+                ranking,
+                population,
+                strategy_name=self._ranking_strategy.name,
+                strategy_version=self._ranking_strategy.version,
+                integrity_warnings=warnings,
+                snapshot_id=getattr(self._planner_repository, "snapshot_id", None),
+                versions=getattr(self._planner_repository, "versions", None),
+                available_markets=markets,
+                available_horizons=horizons,
+            )
         atoms, warnings = self._resolved_atoms(query)
         grouped = self._group(atoms, query.group_by)
         candidates = _candidates(grouped)
@@ -458,6 +638,68 @@ class OpportunityService:
         )
         return eurocode_breakdown(self._eurocodes, cells)
 
+    def _eurocode_rankings(
+        self, query: OpportunityQuery
+    ) -> tuple[
+        EurocodeRanking, EurocodeRanking, tuple[str, ...], tuple[_DemandAtom, ...]
+    ]:
+        """This view's Eurocode ranking, the whole market's, the warnings and the atoms."""
+
+        if self._eurocodes is None:
+            raise EurocodeGroupingUnavailable("Eurocodes are not loaded")
+        atoms, warnings = self._resolved_atoms(query)
+        whole_market, _warnings = self._resolved_atoms(replace(query, markets=(), horizons=()))
+        return (
+            rank_by_eurocode(self._eurocodes, self._ranked_cells(atoms)),
+            rank_by_eurocode(self._eurocodes, self._ranked_cells(whole_market)),
+            warnings,
+            atoms,
+        )
+
+    @staticmethod
+    def _ranked_cells(atoms: tuple[_DemandAtom, ...]) -> tuple[RankedCell, ...]:
+        return tuple(
+            RankedCell(
+                identity=" ".join(
+                    f"{atom.configuration.brand}|{atom.configuration.model}".split()
+                ).casefold(),
+                year=atom.model_year_demand.model_year,
+                geography=atom.configuration.market,
+                raw_model=atom.configuration.model,
+                brand=atom.configuration.brand,
+                model=atom.configuration.model,
+                horizon=atom.configuration.forecast_horizon,
+                configuration=atom.configuration.configuration_id,
+                demand=atom.model_year_demand.demand,
+                coverage_status=atom.coverage_status,
+                icor_worked=False,
+            )
+            for atom in atoms
+        )
+
+    def _eurocode_rows(
+        self,
+        ranking: EurocodeRanking,
+        population: EurocodeRanking,
+        atoms: tuple[_DemandAtom, ...],
+    ) -> tuple[OpportunityRow, ...]:
+        """Rows carrying the weakest evidence status in the view, as no row is stronger."""
+
+        assert self._ranking_strategy is not None
+        statuses = list(EvidenceStatus)
+        return eurocode_rows(
+            ranking,
+            population,
+            self._ranking_strategy,
+            group_id=lambda code: _group_id(OpportunityGroupBy.EUROCODE, (code,)),
+            evidence_status=min(
+                (atom.model_year_demand.evidence_status for atom in atoms),
+                key=statuses.index,
+                default=EvidenceStatus.DEMONSTRATION,
+            ),
+            data_version=atoms[0].model_year_demand.data_version if atoms else "",
+        )
+
     def _population(
         self, query: OpportunityQuery
     ) -> tuple[OpportunityCandidate, ...]:
@@ -486,6 +728,16 @@ class OpportunityService:
         if self._repository is not None:
             return self._repository.get(group_id, query)
         assert self._ranking_strategy is not None
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            ranking, population, _warnings, atoms = self._eurocode_rankings(query)
+            return next(
+                (
+                    row
+                    for row in self._eurocode_rows(ranking, population, atoms)
+                    if row.group_id == group_id
+                ),
+                None,
+            )
         atoms, _warnings = self._resolved_atoms(query)
         grouped = self._group(atoms, query.group_by)
         selected = grouped.get(group_id)
@@ -515,6 +767,9 @@ class OpportunityService:
             return self._repository.drill_down(
                 group_id, query, page, page_size
             )
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            # A code's units are allocated per registration, not per configuration.
+            return ()
         atoms, _warnings = self._resolved_atoms(query)
         grouped = self._group(atoms, query.group_by)
         return tuple(
@@ -531,6 +786,9 @@ class OpportunityService:
     ) -> tuple[OpportunityFleetEstimate, ...]:
         if self._repository is not None:
             return self._repository.fleet_estimates(group_id, query)
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            # A surviving fleet is not allocated to codes yet.
+            return ()
         atoms, _warnings = self._resolved_atoms(query)
         selected = self._group(atoms, query.group_by).get(group_id, ())
         by_configuration: dict[str, list[_DemandAtom]] = {}
@@ -571,6 +829,16 @@ class OpportunityService:
     ) -> tuple[OpportunityContribution, ...]:
         if self._repository is not None:
             return self._repository.contributions(group_id, query)
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            ranking, _population, _warnings, _atoms = self._eurocode_rankings(query)
+            return next(
+                (
+                    eurocode_contributions(totals)
+                    for code, totals in ranking.groups.items()
+                    if _group_id(OpportunityGroupBy.EUROCODE, (code,)) == group_id
+                ),
+                (),
+            )
         atoms, _warnings = self._resolved_atoms(query)
         selected = self._group(atoms, query.group_by).get(group_id, ())
         by_configuration: dict[str, list[_DemandAtom]] = {}

@@ -6,6 +6,7 @@ import base64
 import contextlib
 import json
 import sqlite3
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
@@ -13,6 +14,7 @@ from math import ceil
 from pathlib import Path
 
 from icor.application.opportunities import (
+    EurocodeGroupingUnavailable,
     OpportunityContribution,
     OpportunityDrillDownRow,
     OpportunityFleetEstimate,
@@ -23,6 +25,9 @@ from icor.application.opportunities import (
     OpportunitySort,
     OpportunitySummary,
     _coverage_status,
+    eurocode_contributions,
+    eurocode_page,
+    eurocode_rows,
     world_region_for_market,
 )
 from icor.application.ranking import (
@@ -40,6 +45,7 @@ from icor.eurocodes.annotation import (
     eurocode_breakdown,
     eurocode_search,
 )
+from icor.eurocodes.grouping import EurocodeRanking, RankedCell, rank_by_eurocode
 from icor.eurocodes.runtime import EurocodeMap, identity_key
 from icor.evidence.normalization import source_vehicle_display_label
 from icor.evidence.vehicle_identity import VehicleIdentityIndex
@@ -63,6 +69,8 @@ from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageReposit
 _GENERATION_REGISTRY = "public-generation-registry-v2"
 #: Row breakdowns kept per grouping and market/horizon filter; a page holds 100 at most.
 _EUROCODE_CACHE_SIZE = 4096
+#: Eurocode rankings kept, one per market/horizon view; each takes seconds to build.
+_EUROCODE_VIEW_CACHE_SIZE = 16
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +132,11 @@ class SnapshotOpportunityRepository:
         self._eurocodes = eurocodes
         self._eurocode_cache: dict[tuple[object, ...], EurocodeBreakdown] = {}
         self._identity_keys: dict[str, str] | None = None
+        self._eurocode_views: dict[
+            tuple[object, ...],
+            tuple[EurocodeRanking, tuple[str, ...]],
+        ] = {}
+        self._eurocode_lock = threading.Lock()
         self.snapshot_id = planner.snapshot_id
         self.versions = planner.versions
         self._uncovered_cache: dict[OpportunityQuery, OpportunityPage] = {}
@@ -148,6 +161,8 @@ class SnapshotOpportunityRepository:
             )
 
     def search(self, query: OpportunityQuery) -> OpportunityPage:
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            return self._search_by_eurocode(query)
         offset = (query.page - 1) * query.page_size
         has_manual_coverage = self._refresh_for_coverage()
         if not has_manual_coverage:
@@ -253,6 +268,16 @@ class SnapshotOpportunityRepository:
         identity = _decode_group_id(group_id, query.group_by)
         if identity is None:
             return None
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            ranking, population, _warnings = self._eurocode_view(query)
+            return next(
+                (
+                    row
+                    for row in self._eurocode_rows(ranking, population)
+                    if row.group_id == group_id
+                ),
+                None,
+            )
         has_coverage = self._refresh_for_coverage()
         if not has_coverage:
             for cached_query, cached_page in reversed(
@@ -302,6 +327,10 @@ class SnapshotOpportunityRepository:
         identity = _decode_group_id(group_id, query.group_by)
         if identity is None:
             return ()
+        if query.group_by is OpportunityGroupBy.EUROCODE:
+            ranking, _population, _warnings = self._eurocode_view(query)
+            totals = ranking.groups.get(identity[0])
+            return () if totals is None else eurocode_contributions(totals)
         clauses = ["ident.brand = ?"]
         parameters: list[object] = [identity[0]]
         if query.group_by is not OpportunityGroupBy.BRAND:
@@ -371,7 +400,8 @@ class SnapshotOpportunityRepository:
         if page < 1 or not 1 <= page_size <= 100:
             raise ValueError("opportunity drill-down pagination is invalid")
         identity = _decode_group_id(group_id, query.group_by)
-        if identity is None:
+        if identity is None or query.group_by is OpportunityGroupBy.EUROCODE:
+            # A code's units are allocated per registration, not per configuration.
             return ()
         clauses: list[str] = []
         parameters: list[object] = []
@@ -457,7 +487,8 @@ class SnapshotOpportunityRepository:
         self, group_id: str, query: OpportunityQuery
     ) -> tuple[OpportunityFleetEstimate, ...]:
         identity = _decode_group_id(group_id, query.group_by)
-        if identity is None:
+        if identity is None or query.group_by is OpportunityGroupBy.EUROCODE:
+            # A surviving fleet is not allocated to codes yet.
             return ()
         clauses: list[str] = []
         parameters: list[object] = []
@@ -584,6 +615,9 @@ class SnapshotOpportunityRepository:
         """
 
         has_manual_coverage = self._refresh_for_coverage()
+        if group_by is OpportunityGroupBy.EUROCODE:
+            self._eurocode_view(OpportunityQuery(group_by=group_by))
+            return
         self._universe(
             group_by, has_manual_coverage or bool(self._worked_models.records)
         )
@@ -614,6 +648,7 @@ class SnapshotOpportunityRepository:
         fingerprint = (int(count), str(updated), str(newest), str(oldest))
         if fingerprint != self._coverage_fingerprint:
             self._uncovered_cache.clear()
+            self._eurocode_views.clear()
             self._coverage_fingerprint = fingerprint
         return int(count) > 0
 
@@ -719,6 +754,7 @@ class SnapshotOpportunityRepository:
         return (
             include_coverage
             or group_by is OpportunityGroupBy.MODEL_YEAR
+            or group_by is OpportunityGroupBy.EUROCODE
             or self._verified_only
             or self._model_year_catalog
         )
@@ -730,6 +766,7 @@ class SnapshotOpportunityRepository:
         include_coverage: bool,
         predicates: _Filter,
         atoms_name: str,
+        cells: bool = False,
     ) -> tuple[str, tuple[object, ...]]:
         """The atoms-to-groups chain, and the values its placeholders need.
 
@@ -743,6 +780,10 @@ class SnapshotOpportunityRepository:
         attribution inline, which binds the estimate-scoped predicates a second
         time; the parameters are returned beside the text so that no caller can
         get that count wrong.
+
+        ``cells`` adds what a Eurocode allocation reads to each atom (the raw
+        vehicle and its label, the market, the horizon); the default statement
+        is left exactly as it was.
         """
 
         model = "model" if group_by is not OpportunityGroupBy.BRAND else "NULL"
@@ -837,13 +878,19 @@ class SnapshotOpportunityRepository:
                     attribution.registration_cohort_year"""
             brand_expression = "reviewed.canonical_brand"
             model_expression = "reviewed.canonical_model"
+        cell_columns = (
+            ", o.canonical_vehicle_id vehicle_id, v.model raw_model, "
+            "o.geography geography, o.horizon_year horizon, o.rowid estimate_key"
+            if cells
+            else ""
+        )
         cte = f"""{cte_prefix}{atoms_name} AS MATERIALIZED (
             SELECT o.opportunity_id, {brand_expression} brand,
                 {model_expression} model,
                 {model_year} model_year,
                 {downside_units} downside_units,
                 {base_units} base_units,
-                {upside_units} upside_units
+                {upside_units} upside_units{cell_columns}
             FROM opportunity_estimate o
             JOIN canonical_vehicle v ON v.vehicle_id = o.canonical_vehicle_id
             JOIN temp.canonical_identity ident
@@ -1058,7 +1105,7 @@ class SnapshotOpportunityRepository:
         if (
             self._eurocodes is None
             or self._verified_only
-            or query.group_by is OpportunityGroupBy.BRAND
+            or query.group_by in {OpportunityGroupBy.BRAND, OpportunityGroupBy.EUROCODE}
             or not rows
         ):
             return {}
@@ -1144,6 +1191,132 @@ class SnapshotOpportunityRepository:
                     self._eurocode_cache.pop(next(iter(self._eurocode_cache)), None)
                 self._eurocode_cache[(scope, key)] = found[key]
         return found
+
+    def _search_by_eurocode(self, query: OpportunityQuery) -> OpportunityPage:
+        ranking, population, warnings = self._eurocode_view(query)
+        assert self._facets is not None, "read when the view was built"
+        markets, horizons = self._facets
+        return eurocode_page(
+            self._eurocode_rows(ranking, population),
+            query,
+            ranking,
+            population,
+            strategy_name=self._strategy.name,
+            strategy_version=self._strategy.version,
+            integrity_warnings=warnings,
+            snapshot_id=self.snapshot_id,
+            versions=self.versions,
+            available_markets=markets,
+            available_horizons=horizons,
+        )
+
+    def _eurocode_rows(
+        self, ranking: EurocodeRanking, population: EurocodeRanking
+    ) -> tuple[OpportunityRow, ...]:
+        return eurocode_rows(
+            ranking,
+            population,
+            self._strategy,
+            group_id=lambda code: _encode_group_id(
+                OpportunityGroupBy.EUROCODE, (code, None, None)
+            ),
+            evidence_status=EvidenceStatus.VALIDATED,
+            data_version=self.snapshot_id,
+        )
+
+    def _eurocode_view(
+        self, query: OpportunityQuery
+    ) -> tuple[EurocodeRanking, EurocodeRanking, tuple[str, ...]]:
+        """This view's Eurocode ranking, the whole market's, and the integrity warnings."""
+
+        if self._eurocodes is None or self._verified_only:
+            raise EurocodeGroupingUnavailable("Eurocodes are not loaded")
+        include_coverage = self._refresh_for_coverage() or bool(self._worked_models.records)
+        ranking, warnings = self._eurocode_ranking(
+            query.markets, query.horizons, include_coverage
+        )
+        population, _warnings = self._eurocode_ranking((), (), include_coverage)
+        return ranking, population, warnings
+
+    def _eurocode_ranking(
+        self,
+        markets: tuple[str, ...],
+        horizons: tuple[int, ...],
+        include_coverage: bool,
+    ) -> tuple[EurocodeRanking, tuple[str, ...]]:
+        """Allocate every forecast cell of a market/horizon view and fold it by code.
+
+        Reads each estimate's cohort attribution once, through the same atoms the
+        other groupings sum, so the codes' certain units and the view's outcome
+        totals add up to the units those groupings show. Seconds on a full
+        snapshot, so each view is kept until production coverage changes.
+        """
+
+        assert self._eurocodes is not None, "checked by the caller"
+        key = (markets, horizons, include_coverage)
+        cached = self._eurocode_views.get(key)
+        if cached is not None:
+            return cached
+        # One build at a time: a request arriving during the boot-time build
+        # waits for it rather than reading every cell a second time.
+        with self._eurocode_lock:
+            cached = self._eurocode_views.get(key)
+            if cached is None:
+                cached = self._build_eurocode_ranking(markets, horizons, include_coverage)
+                if len(self._eurocode_views) >= _EUROCODE_VIEW_CACHE_SIZE:
+                    self._eurocode_views.pop(next(iter(self._eurocode_views)), None)
+                self._eurocode_views[key] = cached
+        return cached
+
+    def _build_eurocode_ranking(
+        self,
+        markets: tuple[str, ...],
+        horizons: tuple[int, ...],
+        include_coverage: bool,
+    ) -> tuple[EurocodeRanking, tuple[str, ...]]:
+        assert self._eurocodes is not None, "checked by the caller"
+        query = OpportunityQuery(
+            group_by=OpportunityGroupBy.EUROCODE, markets=markets, horizons=horizons
+        )
+        cte, parameters = self._grouped_cte(
+            group_by=OpportunityGroupBy.EUROCODE,
+            include_coverage=include_coverage,
+            predicates=self._filter(query),
+            atoms_name="eurocode_atoms",
+            cells=True,
+        )
+        with self._connect() as connection:
+            identity_of = self._vehicle_identities(connection)
+            cursor = connection.execute(
+                f"""{cte}
+                SELECT vehicle_id, model_year, geography, raw_model, brand, model,
+                    horizon, estimate_key, downside_units, base_units, upside_units,
+                    coverage_status, icor_worked
+                FROM atoms""",
+                parameters,
+            )
+            ranking = rank_by_eurocode(
+                self._eurocodes,
+                (
+                    RankedCell(
+                        identity=identity_of[row[0]],
+                        year=int(row[1]),
+                        geography=row[2],
+                        raw_model=row[3],
+                        brand=row[4],
+                        model=row[5],
+                        horizon=int(row[6]),
+                        configuration=row[7],
+                        demand=DemandRange(int(row[8]), int(row[9]), int(row[10])),
+                        coverage_status=row[11],
+                        icor_worked=bool(row[12]),
+                    )
+                    for row in cursor
+                ),
+            )
+            warnings = self._integrity_warnings(connection)
+            self._available_facets(connection)
+        return ranking, warnings
 
     def _groups_carrying(
         self, connection: sqlite3.Connection, query: OpportunityQuery, code: str

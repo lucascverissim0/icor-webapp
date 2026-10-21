@@ -225,6 +225,7 @@ const RANKED_NOUN: Record<OpportunitySearch['groupBy'], string> = {
   brand: 'brands',
   model: 'models',
   model_year: 'model years',
+  eurocode: 'Eurocodes',
 }
 
 function formatCount(value: string | number): string {
