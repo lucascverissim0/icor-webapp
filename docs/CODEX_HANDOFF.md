@@ -7445,6 +7445,6 @@ Verification this session:
 - `uv run pytest -q`: 1130 passed, 7 skipped, 4 xfailed.
 - Ruff: new files clean; no modified file gained a warning.
 - Web: typecheck and lint clean; Vitest 131 passed; `openapi:generate` diff committed.
-- Playwright was not rerun.
+- Playwright: 31 passed.
 
 The local service is still running (web :5173, API :8000) on the **active** snapshot `b05d…`.
