@@ -7249,7 +7249,7 @@ measured before anything relies on it.
 | Source | What it gives | Licence | Access |
 |---|---|---|---|
 | ES DGT "parque anual" | Per-vehicle stock with MARCA/MODELO/FEC_PRIM_MATR, 2014–2025 | datos.gob.es legal notice, commercial reuse with attribution | 1.65 GB ZIP per year |
-| PL CEPiK API | Per vehicle: marka/model, first registration anywhere and in PL, deregistration | CC BY 4.0 | API is 1 voivodeship × 2-year window × 500 per page, with a concurrency limit |
+| PL CEPiK API | Per vehicle: marka/model, first registration anywhere and in PL, deregistration | CC BY 4.0 on dane.gov.pl, but the API's own metadata says `dc:rights` "brak" (none); re-check before relying on it | API is 1 voivodeship × 2-year window × 500 per page, with a concurrency limit |
 | CZ vehicle register | Per vehicle, make + commercial name + first registration | data.gov.cz terms, equivalent to CC0 | Monthly CSV, contains VINs |
 | IT MIT "Parco circolante" | Per vehicle, make + registration date, **no model**, end-2019 only | CC BY 4.0 | 20 regional zips |
 | IT ACI Autoritratto | Make/model/series, no age | CC BY 4.0 | |
