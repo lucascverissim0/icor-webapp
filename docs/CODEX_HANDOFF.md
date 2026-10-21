@@ -7155,3 +7155,142 @@ untouched.
   - break the fleet down by code;
   - attribute coverage of shared units on the Eurocode view;
   - add a sidecar for the client release once item 2 is decided.
+
+## 2026-10-21 — Mission 2, part 1: data coverage per Eurocode (Claude Code, Mac)
+
+Lucas asked: show, per Eurocode, how much data we have and how many cars are on the road;
+find the weakest codes together and fill them with free data; plan a continuous feed
+(OmniRoute + AI searches were floated). Approved plan (outside the repo):
+`~/.claude/plans/ok-we-are-getting-resilient-thacker.md`. Lucas chose: a private report
+**and** an in-app page; for the feed, a deterministic watcher first and OmniRoute later,
+measured before anything relies on it.
+
+### Built this session (commits `9e401be`..`2d4af2d`, not pushed)
+
+- `src/icor/eurocodes/data_coverage.py` (`build_report`): allocates every fleet cell (vehicle
+  spelling × market × registration year) as the ranking allocates demand. Per code: certain and
+  shared cars (never split), P10–P90, 2028 cars, evidence mix (`stock` = national register
+  count, `registrations`, `interpolated`, `forecast`), observed markets, sources, life years,
+  years before 2010, a depth tier and flags. Also lists codes with no car (`no_data`), totals
+  per market, and the gap to the official stock per country and Eurostat age band. The totals
+  are reconciled before rounding, and a mismatch raises.
+- **Tiers.**
+  - A: at least 80% of cars observed, in at least 5 markets.
+  - B: at least 50% observed.
+  - C: less.
+  - D: no car in the model.
+  - Cap: production before 2010 limits a code to B, and to C when at least half of its life
+    is before 2010, because most markets cannot see those years.
+  - Flag `new`: launched within 2 years of the report year (mostly forecast cars by nature).
+- `src/icor/infrastructure/snapshot_data_coverage.py` (`read_fleet`): derives cars at any year
+  ≤ 2028 from the promoted survival curve, and for register cohorts from the register's own
+  date, mirroring `_conditional_fleet`. It first recomputes **every stored 2028 value and
+  requires an exact match** (real snapshot: 648,150 of 648,150 matched), so a snapshot built
+  with another curve is refused.
+- `src/icor/evidence/eurostat_car_stock.py`: parses `road_eqs_carage` (JSON-stat) and maps EL to
+  GR and UK to GB (UK includes NI; labelled). Each market is compared at its newest reported
+  year (2025 for member states, 2024 for UK).
+- `scripts/report_eurocode_data.py` (+ `.html` template): writes `data-coverage-<snapshot>.{json,csv,html}`
+  only under `.local/private/eurocode/reports/` and prints counts. `--fetch-eurostat` pins the
+  Eurostat file in `.local/external-data/eurostat/` with a `.sha256`. Runtime about 34 s.
+- API `GET /api/v1/eurocodes/data-coverage` (`src/icor/api/eurocodes.py`) serves the report
+  written for the active snapshot and catalogue. Otherwise it says how to measure, and it
+  returns 422 without a map. `create_app` gained `eurocode_report_dir` and
+  `eurocode_report_snapshot_id` (for fixtures). The client release never loads the map, and its
+  middleware already blocks `/api/v1/eurocodes/*`.
+- Web page `/data-coverage` (Sonnet agent, reviewed by me): KPIs, tier legend, a countries table
+  (largest gap first) and a paged, sortable, searchable code table with URL state. Hidden in the
+  verified client release. The e2e fixture serves a fictional report.
+
+### Measured on `snapshot-b05d20c2d34a9b0a340d` (counts only)
+
+- **Cars on the road at the end of 2026, in the model:** 189.15M.
+  - By evidence: registrations 163.5M, register stock 12.2M, forecast 13.4M, interpolated 0.
+    That is 92.9% observed.
+  - By outcome: single 149.5M, shared 35.8M, outside 0.09M, unassignable 1.39M,
+    unreviewed 2.35M.
+- **Tiers:**
+
+  | Tier | Codes | Certain cars |
+  |---|---:|---:|
+  | A | 482 | 111.6M |
+  | B | 295 | 30.4M |
+  | C | 579 | 7.5M |
+  | D | 2,914 | – |
+
+  - Tier C: 555 of the 579 are not `new`, and 522 of those are capped by production before
+    2010 (examples by model name: Touran I, Aygo I, C1 I, 206, A3 8P, B-Class W245, Panda II,
+    Focus Mk2). The others are 2024 launches whose cars are mostly forecast (EV3, Seal U,
+    Terramar).
+  - Tier D: 2,899 not reviewed and 15 reviewed. Of the not-reviewed, about 1,480 start before
+    1990.
+- **Official stock against the model, 30 markets:** 300.0M official, 184.8M in the model,
+  so about 115M missing.
+  - Missing by market: IT −20.5M, PL −17.8M, FR −13.7M, ES −13.7M, DE −10.2M, RO −7.3M,
+    GR −4.9M, CZ −4.0M, PT −4.0M, HU −3.1M, BG −2.9M, NO −2.0M.
+  - The model exceeds the official count in NL (+1.04M), BE (+0.29M) and LU (+0.17M). Likely
+    causes: RDW counts registered cars, which is wider than CBS "in use"; BE/LU fleet cars are
+    exported. Not yet investigated.
+- **The model is right where it has data.** In the 20 markets with full age bands:
+
+  | Age | Official | Model |
+  |---|---:|---:|
+  | 2–4 y | 19.5M | 19.6M |
+  | 5–9 y | 42.3M | 41.4M |
+  | 10–19 y | 57.0M | 36.0M |
+  | 20+ y | 26.4M | 1.8M |
+
+  The missing cars are old ones (registered before 2010) and used imports. <2 y: 18.5M
+  official against 15.4M in the model, which deserves a later look (used imports, or an
+  age-definition difference).
+
+### Free sources, verified on official pages 2026-10-21 (two research agents)
+
+| Source | What it gives | Licence | Access |
+|---|---|---|---|
+| ES DGT "parque anual" | Per-vehicle stock with MARCA/MODELO/FEC_PRIM_MATR, 2014–2025 | datos.gob.es legal notice, commercial reuse with attribution | 1.65 GB ZIP per year |
+| PL CEPiK API | Per vehicle: marka/model, first registration anywhere and in PL, deregistration | CC BY 4.0 | API is 1 voivodeship × 2-year window × 500 per page, with a concurrency limit |
+| CZ vehicle register | Per vehicle, make + commercial name + first registration | data.gov.cz terms, equivalent to CC0 | Monthly CSV, contains VINs |
+| IT MIT "Parco circolante" | Per vehicle, make + registration date, **no model**, end-2019 only | CC BY 4.0 | 20 regional zips |
+| IT ACI Autoritratto | Make/model/series, no age | CC BY 4.0 | |
+| RO DRPCIV | Make × commercial name, no age, 2012–2025 | OGL-ROU-1.0; commercial terms unverified | |
+| DE KBA FZ2 | Make/model, no age | DL-DE/BY-2.0 | KBA publishes no age × make/model table |
+| DK Motorstyrelsen | Full register | Free, licence not named | 7 GB, contains VINs and plates |
+| IE CSO TEA28 | New cars by model | CC BY 4.0 | |
+| EE | First registrations by model | CC BY 4.0 | |
+
+**Nothing with make × model × age** exists for FR, PT, HR, GR, HU, SK or BG; IE has stock by
+taxation class only. NO's free bulk download is discontinued (paid ordering only). SI suspended
+its data for GDPR; LT is stale; LV gives production year only.
+
+### Next actions
+
+1. Lucas reviews `/data-coverage` (local service) and picks the pilot source. My
+   recommendation: ES DGT first (13.7M missing, a simple annual bulk file, also yearly
+   vintages), then PL CEPiK (17.8M, a long-running adapter), then CZ (4.0M).
+2. Pilot through the 7-step source path, keeping the two rules for per-vehicle registers:
+   - cohort year = first registration anywhere;
+   - aggregate at acquisition, never storing VINs or plates.
+   Then build a candidate, run the gates, show the before/after report, and promote only on
+   Lucas's OK.
+3. Phase C: `scripts/check_source_updates.py` watcher (launchd, weekly) and
+   `scripts/refresh_evidence.py`. After that, OmniRoute on the quarterly research client,
+   public names only.
+4. IT and RO need a new, separately designed method: a model-level stock constraint, or the
+   MIT 2019 make × age file combined with ACI's make/model.
+
+### Verification (fresh, this session)
+
+- `uv run pytest -q`: 1107 passed, 7 skipped, 4 xfailed.
+- Web: `typecheck` and `lint` clean; Vitest 131 passed; `build` and the
+  `VITE_ICOR_CLIENT_RELEASE=verified` build ok; `openapi:check` exit 0; Playwright 31 passed.
+- Live page on the real snapshot at 1440 and 390 px: no console errors, no horizontal
+  overflow. The screenshot (KPIs only, no codes) was deleted.
+- Ruff clean on all new files. Pre-existing unformatted lines in `src/icor/api/app.py` were
+  left as they were.
+
+**Local service:** running detached (`scripts/planner_service.py`), with web on
+http://127.0.0.1:5173 (page `/data-coverage`) and the API on :8000, against the active snapshot
+with the private map. Stop it with `uv run python scripts/planner_service.py stop`.
+Unrelated `POST /rnd/split-workers` and `/workers/list-headers` requests appear in the API
+log, coming from some other local process probing port 8000. They are harmless 404s.
