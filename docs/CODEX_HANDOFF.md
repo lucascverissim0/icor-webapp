@@ -7294,3 +7294,77 @@ http://127.0.0.1:5173 (page `/data-coverage`) and the API on :8000, against the 
 with the private map. Stop it with `uv run python scripts/planner_service.py stop`.
 Unrelated `POST /rnd/split-workers` and `/workers/list-headers` requests appear in the API
 log, coming from some other local process probing port 8000. They are harmless 404s.
+
+## 2026-10-21 (afternoon) — Mission 2, part 2: Spain DGT checked; integration paused
+
+Lucas asked to keep working on filling the worst Eurocodes ("make no mistakes"). Approved plan
+(outside the repo): `~/.claude/plans/ok-keep-working-are-delightful-fox.md`, with Spain's DGT
+as the pilot and a stop rule. Its step 1 (check the source before writing code) **tripped the
+stop rule**. No code changed; nothing was promoted, pushed or deployed.
+
+### Source facts (verified on the official pages and on the file itself)
+- **Dataset:** datos.gob.es `e00003801-microdatos-parque-de-vehiculos-anual`, terms CC BY 4.0,
+  publisher Ministerio del Interior / DGT. The record layout is DGT's
+  `Interfaz-de-Salida-Fichero-Parque-Anual.pdf`.
+- **Files:** `https://www.dgt.es/microdatos/Parque/<yyyy>/parque_consolidado_<yyyy>.zip`, for
+  2014–2025.
+  - The 2025 file is 1,645,095,393 bytes, sha256 `12959c31…ad1c65`, Last-Modified 2026-04-10.
+  - It holds one Latin-1, pipe-delimited TXT (`parque_vehiculos_202512.txt`, 7.85 GB,
+    38,641,165 rows, 45 columns).
+- **Content:**
+  - Vehicles registered and not deregistered, as at year end.
+  - No VIN and no plate.
+  - Municipality is suppressed below 10k inhabitants.
+- **`FEC_PRIM_MATR` is the first registration anywhere,** as the method needs. It is never
+  later than `FECHA_MATR`. 1.63M of 1.77M used imports have an earlier first registration.
+- **Passenger car = `CAT_EURO` M1/M1G (26,101,132) plus `TIPO_DGT`=TURISMOS with a blank
+  category (1,168,435; mostly 1965–1994).** Together that is 27.27M, against Eurostat
+  `road_eqs_carage` ES 2025 TOTAL of 27,281,373. Excluding the blank-category rows would drop
+  the old cars.
+- **Masking.** DGT replaces `MODELO` (and the type, variant and version) with `¡` for rare
+  combinations:
+  - **27% of passenger cars overall**; 1990–94 about 63%, 2000–04 31%, 2020–24 15%;
+  - Peugeot 44%, Mercedes 48%, BMW 50%, Dacia 5%;
+  - the make itself is masked for 419,741 cars;
+  - the 2019, 2022, 2023 and 2024 files show the same 29–31%, so an older edition does not
+    help.
+
+### Measured against `snapshot-b05d20c2d34a9b0a340d` (scratch scripts, app folding via `VehicleIdentityIndex.from_rows`)
+- **Name match is good.**
+  - Of the 19.44M unmasked dated cars, 96.0% fold onto an identity that already has ES
+    registrations: 98.8% for cohorts from 2010, 91.7% before 2010.
+  - 92.3% of EEA ES 2019 registration volume has DGT new-2019 stock.
+- **Masking is model-specific, not uniform within a make.** The ratio of DGT unmasked new cars
+  to EEA ES registrations for the same year, per identity with ≥2,000 registrations:
+  - Opel 2019: median 0.00 (p90 0.81). Audi 2016: median 0.08 (p90 0.93).
+  - Kia 2019: about 0.95. Dacia: about 0.94.
+  - Whole models are masked while others are clean.
+- **Consequence:** through the existing stock anchoring (`generation_planning.py:262-353`, where
+  stock replaces registration cohorts up to the anchor year), DGT would **cut** those models'
+  Spanish fleet for 2010+ cohorts. Scaling up by make would misattribute cars. **Do not
+  integrate DGT through the current path.**
+- **Technical-signature recovery** (make + wheelbase + track widths + 4-year band → the model
+  of unmasked rows; share ≥95%, support ≥20):
+  - recovers 1.40M of the 3.19M masked 2010+ cars;
+  - is nearly useless before 2010, where wheelbase is filled for only 59k of 7.75M clear rows
+    and 219k of 3.94M masked rows.
+- The MATRABA monthly registration files (`/microdatos/salida/<y>/<m>/vehiculos/matriculaciones/export_mensual_mat_<yyyymm>.zip`,
+  2014-12 to 2026-09) are **not** model-masked: 0 `¡` in 2025-09. They are events, though, not
+  stock, and they carry partial VINs.
+
+### Options put to Lucas
+1. Spain, add-only and pre-2010:
+   - DGT anchors only cohorts EEA does not cover (ES < 2010), labelled a lower bound with the
+     masked share per make × year;
+   - the 2010+ cohorts stay on EEA;
+   - this needs a per-source cohort cutoff in the planner and a lower-bound flag in the tier
+     logic;
+   - it adds about 7.7M unmasked old cars (91.7% name match), but fully masked old models stay
+     invisible.
+2. Switch the pilot to the Czech register: per vehicle, with VINs, so presumably unmasked; terms
+   equivalent to CC0; 4.0M missing. Masking and deregistration semantics are not yet checked.
+3. Both: Spain option 1, then CZ.
+
+Scratch files (session scratchpad, not kept): the aggregate CSV and the profiling JSON. The
+1.65 GB ZIP and the MATRABA sample were deleted after measuring; the ZIP can be fetched again
+and checked against the sha256 above. The local service is still running (web :5173, API :8000).
