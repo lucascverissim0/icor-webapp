@@ -35,11 +35,23 @@ def main() -> int:
         help="use the newest M1+M1G snapshot the portal lists instead of the pinned one",
     )
     parser.add_argument("--max-bytes", type=int, default=MAX_SOURCE_BYTES)
+    parser.add_argument(
+        "--with-suspended",
+        action="store_true",
+        help=(
+            "write the aggregate that also counts PEATATUD, as Eurostat counts Estonia's "
+            "fleet, to --destination (the pinned release) and the strict one beside it"
+        ),
+    )
     args = parser.parse_args()
     url = latest_distribution().url if args.latest else SOURCE_URL
+    strict, variant = args.destination, args.variant_destination
+    if args.with_suspended:
+        strict = args.destination.with_name(f"{args.destination.stem}-strict.csv")
+        variant = args.destination
     result = acquire_fleet(
-        args.destination,
-        variant_destination=args.variant_destination,
+        strict,
+        variant_destination=variant,
         url=url,
         max_bytes=args.max_bytes,
     )

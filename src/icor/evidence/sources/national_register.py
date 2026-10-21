@@ -53,8 +53,48 @@ class RegisterProfile:
 
 
 #: Reviewed registers. A profile is added only after its register passed the
-#: reconciliation, identity and completeness gates recorded in the handoff.
-PROFILES: dict[str, RegisterProfile] = {}
+#: reconciliation, identity and completeness gates recorded in the handoff
+#: (scripts/measure_register_gates.py).
+PROFILES: dict[str, RegisterProfile] = {
+    profile.source_id: profile
+    for profile in (
+        RegisterProfile(
+            source_id="snca-parc-automobile",
+            geography="LU",
+            publisher="SNCA Luxembourg",
+            definition=(
+                "the year of DATCIRPRM, the first registration anywhere (CATEU M1 or M1G; "
+                "every vehicle in circulation)"
+            ),
+            # Placeholders the register writes for a missing name.
+            masks=frozenset({"*", "--", "§"}),
+        ),
+        RegisterProfile(
+            source_id="regitra-tp-parko-duomenys",
+            geography="LT",
+            publisher="Regitra Lithuania",
+            definition=(
+                "the year of PIRM_REG_DATA, the first registration anywhere "
+                "(KATEGORIJA_KLASE M1, in public traffic or not, as Eurostat counts "
+                "Lithuania's fleet)"
+            ),
+            # A private car unique by make, model and municipality is depersonalised.
+            # Masked cars are 1.5% of 2010+ cohorts and rare by construction; counting
+            # the register only as a lower bound would instead keep new cars registered
+            # in Lithuania for export (45,288 Fiat 500s registered, 562 on the road).
+            masks=frozenset({"nuasmeninta"}),
+        ),
+        RegisterProfile(
+            source_id="transpordiamet-soidukite-staatused",
+            geography="EE",
+            publisher="Transpordiamet Estonia",
+            definition=(
+                "the year of ESMANE_REG, the first registration anywhere (KATEGOORIA M1 or "
+                "M1G, registered or suspended, as Eurostat counts Estonia's fleet)"
+            ),
+        ),
+    )
+}
 
 
 @dataclass(frozen=True, slots=True)

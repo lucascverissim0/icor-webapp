@@ -31,6 +31,9 @@ SOURCE_KEYS = (
     "rdw-nl-fleet",
     "traficom-fi-fleet",
     "dgt-es-fleet",
+    "lu-fleet",
+    "lt-fleet",
+    "ee-fleet",
 )
 
 
@@ -93,6 +96,20 @@ def _acquisition_adapter(
         return "acquire_rdw_fleet.py", (), "official RDW fleet acquisition"
     if source_key == "dgt-es-fleet":
         return "acquire_dgt_fleet.py", (), "official DGT fleet acquisition"
+    if source_key == "lu-fleet":
+        return "acquire_lu_fleet.py", (), "official SNCA fleet acquisition"
+    if source_key == "lt-fleet":
+        return (
+            "acquire_lt_fleet.py",
+            ("--with-not-in-traffic",),
+            "official Regitra fleet acquisition",
+        )
+    if source_key == "ee-fleet":
+        return (
+            "acquire_ee_fleet.py",
+            ("--with-suspended",),
+            "official Transpordiamet fleet acquisition",
+        )
     return (
         "acquire_eea_history.py",
         ("--year", str(official.coverage_start.year)),

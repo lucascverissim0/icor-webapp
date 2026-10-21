@@ -47,19 +47,34 @@ def main() -> int:
         default=DEFAULT_ARCHIVE,
         help="where the ZIP is downloaded; it is deleted after aggregation",
     )
+    parser.add_argument(
+        "--with-not-in-traffic",
+        action="store_true",
+        help=(
+            "also place the aggregate that counts DAE_STATUSAS N, as Eurostat counts "
+            "Lithuania's fleet, at --destination (the pinned release)"
+        ),
+    )
     args = parser.parse_args()
     archive: Path = args.archive
     download = download_archive(archive)
     try:
         destination = destination_for(args.destination, snapshot_date(archive))
-        result = acquire_fleet(destination, archive, download=download)
+        if args.with_not_in_traffic:
+            strict = destination.with_name(f"{destination.stem}-strict.csv")
+            result = acquire_fleet(strict, archive, download=download)
+            Path(result.variant.path).replace(destination)
+        else:
+            result = acquire_fleet(destination, archive, download=download)
     finally:
         if archive.exists():
             archive.unlink()
     payload = asdict(result)
     payload["path"] = str(payload["path"])
     payload["profile_path"] = str(payload["profile_path"])
-    payload["variant"]["path"] = str(payload["variant"]["path"])
+    payload["variant"]["path"] = str(
+        destination if args.with_not_in_traffic else payload["variant"]["path"]
+    )
     print(json.dumps(payload, sort_keys=True))
     return 0
 

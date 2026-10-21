@@ -331,6 +331,110 @@ OFFICIAL_SOURCES = {
         rejected_count=28_612,
         direct_download=False,
     ),
+    "lu-fleet": OfficialSource(
+        key="lu-fleet",
+        # Aggregated by scripts/acquire_lu_fleet.py, streaming SNCA's monthly XML
+        # (890,472,961 bytes, sha256 c133c6af…, Last-Modified 2026-10-06); counts only.
+        # SNCA replaces the export monthly, so re-acquisition gives a newer snapshot.
+        release_id="lu-snca-parc-automobile-20261006",
+        source_id="snca-parc-automobile",
+        publisher="SNCA (Société Nationale de Circulation Automobile), Luxembourg",
+        url=(
+            "https://download.data.public.lu/resources/parc-automobile-du-luxembourg/"
+            "20261006-072811/parc-automobile-202610.xml"
+        ),
+        published_at=datetime(2026, 10, 6, 7, 28, 12, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 10, 6),
+        geography="LU",
+        geography_version="Luxembourg SNCA parc automobile 2026-10-06",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="lu-snca-vehicle-register",
+        terms_url="https://data.public.lu/fr/datasets/parc-automobile-du-luxembourg/",
+        permitted_local_use="Reuse permitted under CC0 (public domain dedication).",
+        parser_name="national_register_cohorts_csv_v1",
+        expected_schema=(
+            "SNCA parc automobile vehicles with CATEU M1 or M1G aggregated by LIBMRQ, "
+            "TYPCOM, and the year of DATCIRPRM"
+        ),
+        suffix=".csv",
+        artifact_bytes=753_908,
+        sha256="b55b714299ca25d3a2a291bfcbf6b56c872a26dd4037ec9586a7dbf9f1c7db56",
+        raw_count=31_351,
+        accepted_count=21_175,
+        rejected_count=10_176,
+        direct_download=False,
+    ),
+    "lt-fleet": OfficialSource(
+        key="lt-fleet",
+        # Aggregated by scripts/acquire_lt_fleet.py --with-not-in-traffic from Regitra's
+        # ZIP (167,667,174 bytes, sha256 91725b0b…, member dated 2026-10-01); counts only.
+        release_id="lt-regitra-tp-parkas-20261001",
+        source_id="regitra-tp-parko-duomenys",
+        publisher="VĮ Regitra, Lithuania",
+        url="https://www.regitra.lt/wp-content/uploads/failai/Atviri_TP_parko_duomenys.zip",
+        published_at=datetime(2026, 10, 21, 5, 27, 29, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 10, 1),
+        geography="LT",
+        geography_version="Lithuania Regitra registered vehicles 2026-10-01",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="lt-regitra-vehicle-register",
+        terms_url="https://data.gov.lt/datasets/1211/",
+        permitted_local_use=(
+            "Reuse permitted under Creative Commons Attribution 4.0 International "
+            "with attribution to VĮ Regitra."
+        ),
+        parser_name="national_register_cohorts_csv_v1",
+        expected_schema=(
+            "Regitra open TP park data with KATEGORIJA_KLASE M1, DAE_STATUSAS T or N, "
+            "aggregated by MARKE, KOMERCINIS_PAV, and the year of PIRM_REG_DATA"
+        ),
+        suffix=".csv",
+        artifact_bytes=2_075_339,
+        sha256="6628e4a7f8a7182475d9de473e8212c7936e70aeb2b39b87beba97d7c216b36d",
+        raw_count=73_408,
+        accepted_count=48_363,
+        rejected_count=25_045,
+        direct_download=False,
+    ),
+    "ee-fleet": OfficialSource(
+        key="ee-fleet",
+        # Aggregated by scripts/acquire_ee_fleet.py --with-suspended, streaming the
+        # 2026-10-01 M1+M1G file (200,926,046 bytes, sha256 b943fb28…); counts only.
+        release_id="ee-transpordiamet-soidukid-20261001",
+        source_id="transpordiamet-soidukite-staatused",
+        publisher="Transpordiamet (Estonian Transport Administration)",
+        url=(
+            "https://pilv.transpordiamet.ee/s/Iiee4OAYFq4lT1v/download?path=%2F&files="
+            "ar_2026-10-01_M1%2BM1G.csv"
+        ),
+        published_at=datetime(2026, 10, 2, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 10, 1),
+        geography="EE",
+        geography_version="Estonia Transpordiamet vehicle statuses 2026-10-01",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="ee-transpordiamet-vehicle-register",
+        terms_url="https://andmed.eesti.ee/datasets/soidukite-staatused-eestis",
+        permitted_local_use=(
+            "Reuse permitted under Creative Commons Attribution-ShareAlike 4.0 "
+            "International with attribution to Transpordiamet; a dataset derived from "
+            "it and distributed must carry the same licence."
+        ),
+        parser_name="national_register_cohorts_csv_v1",
+        expected_schema=(
+            "Transpordiamet M1+M1G vehicles registered or suspended aggregated by MARK, "
+            "MUDEL, and the year of ESMANE_REG"
+        ),
+        suffix=".csv",
+        artifact_bytes=794_932,
+        sha256="ae80ef1d28c50e07cc2e7508384eb1abc8ac2391aa9874119e069cd349d779f8",
+        raw_count=32_023,
+        accepted_count=16_294,
+        rejected_count=15_729,
+        direct_download=False,
+    ),
 }
 
 _EEA_HISTORY_ARTIFACTS = {
