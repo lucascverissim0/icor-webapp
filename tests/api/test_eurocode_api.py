@@ -4,14 +4,19 @@ The map is the fictional demo map (`Q` codes, invented brands); nothing here is
 ICOR data.
 """
 
+import json
 from collections.abc import Iterator
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from icor.api import app as app_module
 from icor.api.app import _configured_eurocodes, create_app
+from icor.api.eurocodes import report_path
+from icor.eurocodes.data_coverage import FleetCell, FleetRange, build_report
 from icor.eurocodes.demo import demo_eurocodes, write_demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
@@ -130,9 +135,10 @@ def test_only_a_local_service_on_the_active_snapshot_falls_back_to_the_private_f
         app_module, "DEFAULT_EUROCODE_DIR", write_demo_eurocodes(tmp_path / "private")
     )
 
-    assert _configured_eurocodes(local_active_snapshot=False) == (None, None)
-    loaded, warning = _configured_eurocodes(local_active_snapshot=True)
+    assert _configured_eurocodes(local_active_snapshot=False) == (None, None, None)
+    loaded, warning, folder = _configured_eurocodes(local_active_snapshot=True)
     assert loaded is not None and warning is None
+    assert folder == tmp_path / "private"
 
 
 def test_a_broken_private_folder_is_reported_not_served(
@@ -143,7 +149,7 @@ def test_a_broken_private_folder_is_reported_not_served(
     monkeypatch.delenv("ICOR_EUROCODE_DIR", raising=False)
     monkeypatch.setattr(app_module, "DEFAULT_EUROCODE_DIR", folder)
 
-    loaded, warning = _configured_eurocodes(local_active_snapshot=True)
+    loaded, warning, _folder = _configured_eurocodes(local_active_snapshot=True)
 
     assert loaded is None
     assert warning == "The private Eurocode files could not be loaded (ValueError)."
@@ -195,14 +201,85 @@ def test_the_ranking_reads_by_eurocode(client: TestClient) -> None:
     contributions = client.get(
         f"/api/v1/opportunities/{group_id}/contributions", params={"group_by": "eurocode"}
     ).json()
-    assert sum(item["demand"]["base_units"] for item in contributions) == (
-        rows["Q301"]["demand"]["base_units"]
+    assert (
+        sum(item["demand"]["base_units"] for item in contributions)
+        == (rows["Q301"]["demand"]["base_units"])
     )
 
 
 def test_without_a_map_the_eurocode_ranking_is_a_clear_problem(tmp_path: Path) -> None:
     with _client(tmp_path) as plain:
         response = plain.get("/api/v1/opportunities", params={"group_by": "eurocode"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "eurocodes_not_loaded"
+
+
+def _demo_report(snapshot_id: str) -> dict:
+    cells = [
+        FleetCell(
+            identity="aurora mobility|a1 horizon",
+            raw_model="A1 HORIZON",
+            geography=geography,
+            cohort_year=2024,
+            evidence="registrations",
+            fleet=FleetRange(Decimal(90), Decimal(100), Decimal(110)),
+            fleet_2028=Decimal(95),
+            sources=frozenset({"pub-a"}),
+        )
+        for geography in ("DE", "FR")
+    ]
+    return build_report(demo_eurocodes(), cells, year=2026, snapshot_id=snapshot_id)
+
+
+def _data_client(tmp_path: Path, document: dict | None) -> TestClient:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    if document is not None:
+        report_path(reports, "demo-snapshot").write_text(json.dumps(document))
+    test_client = _client(tmp_path, eurocodes=demo_eurocodes(), eurocode_report_dir=reports)
+    test_client.app.state.snapshot_manifest = SimpleNamespace(snapshot_id="demo-snapshot")
+    return test_client
+
+
+def test_the_data_report_for_the_active_snapshot_is_served(tmp_path: Path) -> None:
+    with _data_client(tmp_path, _demo_report("demo-snapshot")) as test_client:
+        body = test_client.get("/api/v1/eurocodes/data-coverage").json()
+
+    assert body["available"] is True
+    report = body["report"]
+    assert report["snapshot_id"] == "demo-snapshot"
+    assert report["totals"]["fleet"] == 200
+    (aurora,) = [code for code in report["codes"] if code["code"] == "Q201"]
+    assert aurora["fleet"]["certain_p50"] == 200
+    assert aurora["observed_markets"] == ["DE", "FR"]
+    assert report["official_source"] is None
+    assert {item["code"] for item in report["no_data"]} >= {"Q301", "Q401"}
+
+
+def test_a_report_written_for_another_snapshot_is_not_served(tmp_path: Path) -> None:
+    with _data_client(tmp_path, _demo_report("older-snapshot")) as test_client:
+        body = test_client.get("/api/v1/eurocodes/data-coverage").json()
+
+    assert body["available"] is False
+    assert body["report"] is None
+    assert "another snapshot" in body["message"]
+
+
+def test_a_missing_report_says_how_to_measure(tmp_path: Path) -> None:
+    with _data_client(tmp_path, None) as test_client:
+        body = test_client.get("/api/v1/eurocodes/data-coverage").json()
+
+    assert body == {
+        "available": False,
+        "message": "Run scripts/report_eurocode_data.py to measure the active snapshot.",
+        "report": None,
+    }
+
+
+def test_without_a_map_the_data_report_is_a_clear_problem(tmp_path: Path) -> None:
+    with _client(tmp_path) as test_client:
+        response = test_client.get("/api/v1/eurocodes/data-coverage")
 
     assert response.status_code == 422
     assert response.json()["code"] == "eurocodes_not_loaded"

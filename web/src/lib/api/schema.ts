@@ -55,6 +55,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/eurocodes/data-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eurocode Data Coverage
+         * @description The private data report written for the active snapshot, never another's.
+         *
+         *     The report is measured offline (it reads every cohort of the snapshot) and
+         *     names real codes, so it lives beside the private map. A report written for
+         *     another snapshot or catalogue is not served: its numbers would describe
+         *     data this service does not show.
+         */
+        get: operations["eurocode_data_coverage_api_v1_eurocodes_data_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/eurocodes/status": {
         parameters: {
             query?: never;
@@ -494,6 +519,215 @@ export interface components {
             /** Unreviewed Units */
             unreviewed_units: number;
         };
+        /** EurocodeDataBandResponse */
+        EurocodeDataBandResponse: {
+            /** Band */
+            band: string;
+            /** Modelled */
+            modelled: number;
+            /** Official */
+            official: number | null;
+        };
+        /** EurocodeDataCodeResponse */
+        EurocodeDataCodeResponse: {
+            /** Code */
+            code: string;
+            /** Drive */
+            drive: string;
+            evidence: components["schemas"]["EurocodeDataEvidenceResponse"];
+            /** Families */
+            families: string[];
+            /** First Year */
+            first_year: number;
+            /** Flags */
+            flags: string[];
+            fleet: components["schemas"]["EurocodeDataFleetResponse"];
+            /** Label */
+            label: string;
+            /** Last Year */
+            last_year: number | null;
+            /** Life Years */
+            life_years: number;
+            /** Markets */
+            markets: number;
+            /** Observed Life Years */
+            observed_life_years: number;
+            /** Observed Markets */
+            observed_markets: string[];
+            /** Observed Share */
+            observed_share: number | null;
+            /** Shared With */
+            shared_with: string[];
+            /** Shared With Uncoded */
+            shared_with_uncoded: boolean;
+            /** Sources */
+            sources: string[];
+            /** Tier */
+            tier: string;
+            /** Years Before 2010 */
+            years_before_2010: number;
+        };
+        /**
+         * EurocodeDataCountryGapResponse
+         * @description A market's official count of cars on the road against the model's, by age band.
+         */
+        EurocodeDataCountryGapResponse: {
+            /** Bands */
+            bands: components["schemas"]["EurocodeDataBandResponse"][];
+            /** Geography */
+            geography: string;
+            /** Modelled */
+            modelled: number;
+            /** Modelled Share */
+            modelled_share: number | null;
+            /** Official */
+            official: number;
+            /** Publisher Geography */
+            publisher_geography: string;
+            /** Year */
+            year: number;
+        };
+        /**
+         * EurocodeDataCoverageResponse
+         * @description The data report for the active snapshot, or why there is none to show.
+         */
+        EurocodeDataCoverageResponse: {
+            /** Available */
+            available: boolean;
+            /** Message */
+            message?: string | null;
+            report?: components["schemas"]["EurocodeDataReportResponse"] | null;
+        };
+        /**
+         * EurocodeDataEvidenceResponse
+         * @description Cars by the evidence that produced them.
+         */
+        EurocodeDataEvidenceResponse: {
+            /** Forecast */
+            forecast: number;
+            /** Interpolated */
+            interpolated: number;
+            /** Registrations */
+            registrations: number;
+            /** Stock */
+            stock: number;
+        };
+        /**
+         * EurocodeDataFleetResponse
+         * @description A code's cars on the road at the report year (P50 unless named) and at 2028.
+         */
+        EurocodeDataFleetResponse: {
+            /** Certain 2028 */
+            certain_2028: number;
+            /** Certain P10 */
+            certain_p10: number;
+            /** Certain P50 */
+            certain_p50: number;
+            /** Certain P90 */
+            certain_p90: number;
+            /** Shared 2028 */
+            shared_2028: number;
+            /** Shared P50 */
+            shared_p50: number;
+        };
+        /** EurocodeDataMarketResponse */
+        EurocodeDataMarketResponse: {
+            by_evidence: components["schemas"]["EurocodeDataEvidenceResponse"];
+            by_outcome: components["schemas"]["EurocodeDataOutcomeResponse"];
+            /** Fleet */
+            fleet: number;
+            /** Geography */
+            geography: string;
+            /** Has Pre 2010 Cohorts */
+            has_pre_2010_cohorts: boolean;
+        };
+        /** EurocodeDataNoDataTotalsResponse */
+        EurocodeDataNoDataTotalsResponse: {
+            /** First Year From 2000 */
+            first_year_from_2000: number;
+            /** Not Reviewed */
+            not_reviewed: number;
+            /** Reviewed */
+            reviewed: number;
+        };
+        /** EurocodeDataOfficialSourceResponse */
+        EurocodeDataOfficialSourceResponse: {
+            /** Dataset */
+            dataset: string;
+            /** File */
+            file: string;
+            /** Licence */
+            licence: string;
+            /** Missing Markets */
+            missing_markets: string[];
+            /** Sha256 */
+            sha256: string;
+            /** Updated */
+            updated: string | null;
+            /** Url */
+            url: string;
+        };
+        /** EurocodeDataOutcomeResponse */
+        EurocodeDataOutcomeResponse: {
+            /** Outside */
+            outside: number;
+            /** Shared */
+            shared: number;
+            /** Single */
+            single: number;
+            /** Unassignable */
+            unassignable: number;
+            /** Unreviewed */
+            unreviewed: number;
+        };
+        /** EurocodeDataReportResponse */
+        EurocodeDataReportResponse: {
+            /** Codes */
+            codes: components["schemas"]["EurocodeDataCodeResponse"][];
+            /** Country Gap */
+            country_gap: components["schemas"]["EurocodeDataCountryGapResponse"][];
+            /** Markets */
+            markets: components["schemas"]["EurocodeDataMarketResponse"][];
+            /** No Data */
+            no_data: components["schemas"]["EurocodeNoDataResponse"][];
+            official_source: components["schemas"]["EurocodeDataOfficialSourceResponse"] | null;
+            /** Snapshot Id */
+            snapshot_id: string;
+            thresholds: components["schemas"]["EurocodeDataThresholdsResponse"];
+            totals: components["schemas"]["EurocodeDataTotalsResponse"];
+            /** Year */
+            year: number;
+        };
+        /** EurocodeDataThresholdsResponse */
+        EurocodeDataThresholdsResponse: {
+            /** Pre 2010 Share Cap C */
+            pre_2010_share_cap_c: number;
+            /** Tier A Markets */
+            tier_a_markets: number;
+            /** Tier A Observed Share */
+            tier_a_observed_share: number;
+            /** Tier B Observed Share */
+            tier_b_observed_share: number;
+        };
+        /** EurocodeDataTierResponse */
+        EurocodeDataTierResponse: {
+            /** Certain P50 */
+            certain_p50: number;
+            /** Codes */
+            codes: number;
+        };
+        /** EurocodeDataTotalsResponse */
+        EurocodeDataTotalsResponse: {
+            by_evidence: components["schemas"]["EurocodeDataEvidenceResponse"];
+            by_outcome: components["schemas"]["EurocodeDataOutcomeResponse"];
+            /** Fleet */
+            fleet: number;
+            no_data: components["schemas"]["EurocodeDataNoDataTotalsResponse"];
+            /** Tiers */
+            tiers: {
+                [key: string]: components["schemas"]["EurocodeDataTierResponse"];
+            };
+        };
         /**
          * EurocodeGroupResponse
          * @description A Eurocode row's code, vehicles, and the units it may share beyond its certain ones.
@@ -519,6 +753,28 @@ export interface components {
             shared_with_uncoded: boolean;
             /** Vehicles */
             vehicles: components["schemas"]["EurocodeVehicleResponse"][];
+        };
+        /**
+         * EurocodeNoDataResponse
+         * @description A passenger-car code no car in the model reaches.
+         */
+        EurocodeNoDataResponse: {
+            /** Code */
+            code: string;
+            /** Descriptions */
+            descriptions: string[];
+            /** First Year */
+            first_year: number | null;
+            /** Label */
+            label: string | null;
+            /** Last Year */
+            last_year: number | null;
+            /** Makes */
+            makes: string[];
+            /** Reviewed */
+            reviewed: boolean;
+            /** Tier */
+            tier: string;
         };
         /**
          * EurocodeSearchResponse
@@ -1563,6 +1819,44 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+        };
+    };
+    eurocode_data_coverage_api_v1_eurocodes_data_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EurocodeDataCoverageResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

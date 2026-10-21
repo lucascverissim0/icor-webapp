@@ -33,9 +33,10 @@ from icor.eurocodes.runtime import EurocodeMap
 DOCUMENT_FORMAT = "icor-eurocode-data-coverage"
 DOCUMENT_VERSION = 1
 
-#: Evidence behind a fleet cell, strongest first.
-EVIDENCE_KINDS = ("register", "registrations", "interpolated", "forecast")
-OBSERVED_KINDS = frozenset({"register", "registrations"})
+#: Evidence behind a fleet cell, strongest first: a national register's count of
+#: the cars on the road (stock), reported registrations, an interpolated gap, a forecast.
+EVIDENCE_KINDS = ("stock", "registrations", "interpolated", "forecast")
+OBSERVED_KINDS = frozenset({"stock", "registrations"})
 
 _STATUSES = ("single", "shared", "outside", "unassignable", "unreviewed")
 
@@ -244,7 +245,7 @@ def build_report(
         if summary is None:
             raise ValueError("an allocated code has no reviewed summary")
         whole = sum(tally.evidence.values(), _ZERO)
-        observed = tally.evidence["register"] + tally.evidence["registrations"]
+        observed = tally.evidence["stock"] + tally.evidence["registrations"]
         observed_share = observed / whole if whole else None
         last = summary.last_year if summary.last_year is not None else year
         life = range(summary.first_year, min(last, year) + 1)

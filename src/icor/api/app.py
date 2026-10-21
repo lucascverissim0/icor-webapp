@@ -68,8 +68,10 @@ class _FixedEurocodeStatus:
         return self._status
 
 
-def _configured_eurocodes(*, local_active_snapshot: bool) -> tuple[EurocodeMap | None, str | None]:
-    """The private Eurocode map this process serves, and why none is, if none is.
+def _configured_eurocodes(
+    *, local_active_snapshot: bool
+) -> tuple[EurocodeMap | None, str | None, Path | None]:
+    """The private Eurocode map this process serves, why none is, and its folder.
 
     ``ICOR_EUROCODE_DIR`` names the folder explicitly, and a folder named that
     way that cannot be loaded stops the process rather than serving rows
@@ -81,17 +83,21 @@ def _configured_eurocodes(*, local_active_snapshot: bool) -> tuple[EurocodeMap |
 
     configured = os.getenv("ICOR_EUROCODE_DIR")
     if configured:
-        return EurocodeMap.from_directory(Path(configured)), None
+        return EurocodeMap.from_directory(Path(configured)), None, Path(configured)
     if not local_active_snapshot or not (
         (DEFAULT_EUROCODE_DIR / "catalog.json").is_file()
         and (DEFAULT_EUROCODE_DIR / "decisions.json").is_file()
     ):
-        return None, None
+        return None, None, None
     try:
-        return EurocodeMap.from_directory(DEFAULT_EUROCODE_DIR), None
+        return EurocodeMap.from_directory(DEFAULT_EUROCODE_DIR), None, DEFAULT_EUROCODE_DIR
     except (OSError, ValueError, KeyError) as error:
         LOGGER.warning("Eurocodes not loaded error_type=%s", type(error).__name__)
-        return None, f"The private Eurocode files could not be loaded ({type(error).__name__})."
+        return (
+            None,
+            f"The private Eurocode files could not be loaded ({type(error).__name__}).",
+            None,
+        )
 
 
 def _problem(request: Request, *, code: str, message: str, status_code: int) -> JSONResponse:
@@ -122,6 +128,7 @@ def create_app(
     vehicle_forecast_service=None,
     client_release: bool = False,
     eurocodes: EurocodeMap | None = None,
+    eurocode_report_dir: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ICOR Planner API",
@@ -160,7 +167,7 @@ def create_app(
             LOGGER.warning("Planning snapshot unavailable error_type=%s", type(error).__name__)
     eurocode_warning = None
     if eurocodes is None:
-        eurocodes, eurocode_warning = _configured_eurocodes(
+        eurocodes, eurocode_warning, eurocode_dir = _configured_eurocodes(
             local_active_snapshot=(
                 not client_release
                 and repository is None
@@ -168,6 +175,9 @@ def create_app(
                 and snapshot_manifest is not None
             )
         )
+        if eurocode_report_dir is None and eurocode_dir is not None:
+            # Data reports name real codes, so they live beside the private map.
+            eurocode_report_dir = eurocode_dir / "reports"
     selected_coverage_repository = coverage_repository or SQLiteCoverageRepository(
         Path(os.getenv("ICOR_COVERAGE_DB", DEFAULT_COVERAGE_DB))
     )
@@ -236,6 +246,7 @@ def create_app(
     app.state.snapshot_manifest = snapshot_manifest
     app.state.snapshot_repository = snapshot_ledger
     app.state.eurocodes = eurocodes
+    app.state.eurocode_report_dir = eurocode_report_dir
     if eurocodes is not None and snapshot_manifest is not None and snapshot_ledger is not None:
         snapshot_status = SnapshotEurocodeStatus(
             eurocodes, snapshot_ledger.path, snapshot_manifest.snapshot_id

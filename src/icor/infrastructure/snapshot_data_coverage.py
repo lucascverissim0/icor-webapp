@@ -27,7 +27,7 @@ STORED_HORIZON = 2028
 
 _EVIDENCE = {
     "reconciled-registration-cohort": "registrations",
-    "observed-stock-anchored-cohort": "register",
+    "observed-stock-anchored-cohort": "stock",
     "estimated-registration-cohort": "interpolated",
     "forecast-registration-cohort": "forecast",
 }
@@ -178,7 +178,7 @@ def read_fleet(
         if evidence is None:
             raise ValueError(f"unknown cohort evidence {first_code!r}")
         stock_year = None
-        if evidence == "register":
+        if evidence == "stock":
             stock_year = stock_years.get(geography)
             if stock_year is None:
                 raise ValueError(f"{geography}: register cohort without a register date")

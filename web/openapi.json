@@ -398,6 +398,625 @@
         "title": "EurocodeCoverageResponse",
         "type": "object"
       },
+      "EurocodeDataBandResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "band": {
+            "title": "Band",
+            "type": "string"
+          },
+          "modelled": {
+            "title": "Modelled",
+            "type": "integer"
+          },
+          "official": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Official"
+          }
+        },
+        "required": [
+          "band",
+          "official",
+          "modelled"
+        ],
+        "title": "EurocodeDataBandResponse",
+        "type": "object"
+      },
+      "EurocodeDataCodeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "drive": {
+            "title": "Drive",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EurocodeDataEvidenceResponse"
+          },
+          "families": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Families",
+            "type": "array"
+          },
+          "first_year": {
+            "title": "First Year",
+            "type": "integer"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "fleet": {
+            "$ref": "#/components/schemas/EurocodeDataFleetResponse"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Year"
+          },
+          "life_years": {
+            "title": "Life Years",
+            "type": "integer"
+          },
+          "markets": {
+            "title": "Markets",
+            "type": "integer"
+          },
+          "observed_life_years": {
+            "title": "Observed Life Years",
+            "type": "integer"
+          },
+          "observed_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Observed Markets",
+            "type": "array"
+          },
+          "observed_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Share"
+          },
+          "shared_with": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shared With",
+            "type": "array"
+          },
+          "shared_with_uncoded": {
+            "title": "Shared With Uncoded",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          },
+          "years_before_2010": {
+            "title": "Years Before 2010",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "families",
+          "first_year",
+          "last_year",
+          "drive",
+          "fleet",
+          "shared_with",
+          "shared_with_uncoded",
+          "evidence",
+          "observed_share",
+          "markets",
+          "observed_markets",
+          "sources",
+          "life_years",
+          "observed_life_years",
+          "years_before_2010",
+          "tier",
+          "flags"
+        ],
+        "title": "EurocodeDataCodeResponse",
+        "type": "object"
+      },
+      "EurocodeDataCountryGapResponse": {
+        "additionalProperties": false,
+        "description": "A market's official count of cars on the road against the model's, by age band.",
+        "properties": {
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeDataBandResponse"
+            },
+            "title": "Bands",
+            "type": "array"
+          },
+          "geography": {
+            "title": "Geography",
+            "type": "string"
+          },
+          "modelled": {
+            "title": "Modelled",
+            "type": "integer"
+          },
+          "modelled_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelled Share"
+          },
+          "official": {
+            "title": "Official",
+            "type": "integer"
+          },
+          "publisher_geography": {
+            "title": "Publisher Geography",
+            "type": "string"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "geography",
+          "publisher_geography",
+          "year",
+          "official",
+          "modelled",
+          "modelled_share",
+          "bands"
+        ],
+        "title": "EurocodeDataCountryGapResponse",
+        "type": "object"
+      },
+      "EurocodeDataCoverageResponse": {
+        "additionalProperties": false,
+        "description": "The data report for the active snapshot, or why there is none to show.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeDataReportResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "EurocodeDataCoverageResponse",
+        "type": "object"
+      },
+      "EurocodeDataEvidenceResponse": {
+        "additionalProperties": false,
+        "description": "Cars by the evidence that produced them.",
+        "properties": {
+          "forecast": {
+            "title": "Forecast",
+            "type": "integer"
+          },
+          "interpolated": {
+            "title": "Interpolated",
+            "type": "integer"
+          },
+          "registrations": {
+            "title": "Registrations",
+            "type": "integer"
+          },
+          "stock": {
+            "title": "Stock",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stock",
+          "registrations",
+          "interpolated",
+          "forecast"
+        ],
+        "title": "EurocodeDataEvidenceResponse",
+        "type": "object"
+      },
+      "EurocodeDataFleetResponse": {
+        "additionalProperties": false,
+        "description": "A code's cars on the road at the report year (P50 unless named) and at 2028.",
+        "properties": {
+          "certain_2028": {
+            "title": "Certain 2028",
+            "type": "integer"
+          },
+          "certain_p10": {
+            "title": "Certain P10",
+            "type": "integer"
+          },
+          "certain_p50": {
+            "title": "Certain P50",
+            "type": "integer"
+          },
+          "certain_p90": {
+            "title": "Certain P90",
+            "type": "integer"
+          },
+          "shared_2028": {
+            "title": "Shared 2028",
+            "type": "integer"
+          },
+          "shared_p50": {
+            "title": "Shared P50",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "certain_p10",
+          "certain_p50",
+          "certain_p90",
+          "shared_p50",
+          "certain_2028",
+          "shared_2028"
+        ],
+        "title": "EurocodeDataFleetResponse",
+        "type": "object"
+      },
+      "EurocodeDataMarketResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "by_evidence": {
+            "$ref": "#/components/schemas/EurocodeDataEvidenceResponse"
+          },
+          "by_outcome": {
+            "$ref": "#/components/schemas/EurocodeDataOutcomeResponse"
+          },
+          "fleet": {
+            "title": "Fleet",
+            "type": "integer"
+          },
+          "geography": {
+            "title": "Geography",
+            "type": "string"
+          },
+          "has_pre_2010_cohorts": {
+            "title": "Has Pre 2010 Cohorts",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "geography",
+          "fleet",
+          "by_outcome",
+          "by_evidence",
+          "has_pre_2010_cohorts"
+        ],
+        "title": "EurocodeDataMarketResponse",
+        "type": "object"
+      },
+      "EurocodeDataNoDataTotalsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "first_year_from_2000": {
+            "title": "First Year From 2000",
+            "type": "integer"
+          },
+          "not_reviewed": {
+            "title": "Not Reviewed",
+            "type": "integer"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reviewed",
+          "not_reviewed",
+          "first_year_from_2000"
+        ],
+        "title": "EurocodeDataNoDataTotalsResponse",
+        "type": "object"
+      },
+      "EurocodeDataOfficialSourceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "licence": {
+            "title": "Licence",
+            "type": "string"
+          },
+          "missing_markets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Markets",
+            "type": "array"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset",
+          "url",
+          "licence",
+          "file",
+          "sha256",
+          "updated",
+          "missing_markets"
+        ],
+        "title": "EurocodeDataOfficialSourceResponse",
+        "type": "object"
+      },
+      "EurocodeDataOutcomeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "outside": {
+            "title": "Outside",
+            "type": "integer"
+          },
+          "shared": {
+            "title": "Shared",
+            "type": "integer"
+          },
+          "single": {
+            "title": "Single",
+            "type": "integer"
+          },
+          "unassignable": {
+            "title": "Unassignable",
+            "type": "integer"
+          },
+          "unreviewed": {
+            "title": "Unreviewed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "single",
+          "shared",
+          "outside",
+          "unassignable",
+          "unreviewed"
+        ],
+        "title": "EurocodeDataOutcomeResponse",
+        "type": "object"
+      },
+      "EurocodeDataReportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "codes": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeDataCodeResponse"
+            },
+            "title": "Codes",
+            "type": "array"
+          },
+          "country_gap": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeDataCountryGapResponse"
+            },
+            "title": "Country Gap",
+            "type": "array"
+          },
+          "markets": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeDataMarketResponse"
+            },
+            "title": "Markets",
+            "type": "array"
+          },
+          "no_data": {
+            "items": {
+              "$ref": "#/components/schemas/EurocodeNoDataResponse"
+            },
+            "title": "No Data",
+            "type": "array"
+          },
+          "official_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeDataOfficialSourceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/EurocodeDataThresholdsResponse"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/EurocodeDataTotalsResponse"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "year",
+          "thresholds",
+          "totals",
+          "codes",
+          "no_data",
+          "markets",
+          "country_gap",
+          "official_source"
+        ],
+        "title": "EurocodeDataReportResponse",
+        "type": "object"
+      },
+      "EurocodeDataThresholdsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "pre_2010_share_cap_c": {
+            "title": "Pre 2010 Share Cap C",
+            "type": "number"
+          },
+          "tier_a_markets": {
+            "title": "Tier A Markets",
+            "type": "integer"
+          },
+          "tier_a_observed_share": {
+            "title": "Tier A Observed Share",
+            "type": "number"
+          },
+          "tier_b_observed_share": {
+            "title": "Tier B Observed Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tier_a_observed_share",
+          "tier_a_markets",
+          "tier_b_observed_share",
+          "pre_2010_share_cap_c"
+        ],
+        "title": "EurocodeDataThresholdsResponse",
+        "type": "object"
+      },
+      "EurocodeDataTierResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "certain_p50": {
+            "title": "Certain P50",
+            "type": "integer"
+          },
+          "codes": {
+            "title": "Codes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "codes",
+          "certain_p50"
+        ],
+        "title": "EurocodeDataTierResponse",
+        "type": "object"
+      },
+      "EurocodeDataTotalsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "by_evidence": {
+            "$ref": "#/components/schemas/EurocodeDataEvidenceResponse"
+          },
+          "by_outcome": {
+            "$ref": "#/components/schemas/EurocodeDataOutcomeResponse"
+          },
+          "fleet": {
+            "title": "Fleet",
+            "type": "integer"
+          },
+          "no_data": {
+            "$ref": "#/components/schemas/EurocodeDataNoDataTotalsResponse"
+          },
+          "tiers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EurocodeDataTierResponse"
+            },
+            "title": "Tiers",
+            "type": "object"
+          }
+        },
+        "required": [
+          "fleet",
+          "by_outcome",
+          "by_evidence",
+          "tiers",
+          "no_data"
+        ],
+        "title": "EurocodeDataTotalsResponse",
+        "type": "object"
+      },
       "EurocodeGroupResponse": {
         "additionalProperties": false,
         "description": "A Eurocode row's code, vehicles, and the units it may share beyond its certain ones.",
@@ -469,6 +1088,83 @@
           "vehicles"
         ],
         "title": "EurocodeGroupResponse",
+        "type": "object"
+      },
+      "EurocodeNoDataResponse": {
+        "additionalProperties": false,
+        "description": "A passenger-car code no car in the model reaches.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "descriptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Descriptions",
+            "type": "array"
+          },
+          "first_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Year"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "last_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Year"
+          },
+          "makes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Makes",
+            "type": "array"
+          },
+          "reviewed": {
+            "title": "Reviewed",
+            "type": "boolean"
+          },
+          "tier": {
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "makes",
+          "descriptions",
+          "first_year",
+          "last_year",
+          "reviewed",
+          "tier"
+        ],
+        "title": "EurocodeNoDataResponse",
         "type": "object"
       },
       "EurocodeSearchResponse": {
@@ -3330,6 +4026,48 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/eurocodes/data-coverage": {
+      "get": {
+        "description": "The private data report written for the active snapshot, never another's.\n\nThe report is measured offline (it reads every cohort of the snapshot) and\nnames real codes, so it lives beside the private map. A report written for\nanother snapshot or catalogue is not served: its numbers would describe\ndata this service does not show.",
+        "operationId": "eurocode_data_coverage_api_v1_eurocodes_data_coverage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EurocodeDataCoverageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Eurocode Data Coverage",
+        "tags": [
+          "eurocodes"
+        ]
       }
     },
     "/api/v1/eurocodes/status": {

@@ -259,6 +259,154 @@ class EurocodeStatusResponse(ApiModel):
     coverage: tuple[EurocodeCoverageResponse, ...]
 
 
+class EurocodeDataFleetResponse(ApiModel):
+    """A code's cars on the road at the report year (P50 unless named) and at 2028."""
+
+    certain_p10: int
+    certain_p50: int
+    certain_p90: int
+    # Cars the code shares with other codes, never split between them.
+    shared_p50: int
+    certain_2028: int
+    shared_2028: int
+
+
+class EurocodeDataEvidenceResponse(ApiModel):
+    """Cars by the evidence that produced them."""
+
+    # Cars a national register counted on the road.
+    stock: int
+    registrations: int
+    interpolated: int
+    forecast: int
+
+
+class EurocodeDataCodeResponse(ApiModel):
+    code: str
+    label: str
+    families: tuple[str, ...]
+    first_year: int
+    last_year: int | None
+    drive: str
+    fleet: EurocodeDataFleetResponse
+    shared_with: tuple[str, ...]
+    shared_with_uncoded: bool
+    evidence: EurocodeDataEvidenceResponse
+    # Share of the code's cars (certain and shared) from registrations or a register.
+    observed_share: float | None
+    markets: int
+    observed_markets: tuple[str, ...]
+    sources: tuple[str, ...]
+    life_years: int
+    observed_life_years: int
+    years_before_2010: int
+    tier: str
+    flags: tuple[str, ...]
+
+
+class EurocodeNoDataResponse(ApiModel):
+    """A passenger-car code no car in the model reaches."""
+
+    code: str
+    label: str | None
+    makes: tuple[str, ...]
+    descriptions: tuple[str, ...]
+    first_year: int | None
+    last_year: int | None
+    reviewed: bool
+    tier: str
+
+
+class EurocodeDataOutcomeResponse(ApiModel):
+    single: int
+    shared: int
+    outside: int
+    unassignable: int
+    unreviewed: int
+
+
+class EurocodeDataMarketResponse(ApiModel):
+    geography: str
+    fleet: int
+    by_outcome: EurocodeDataOutcomeResponse
+    by_evidence: EurocodeDataEvidenceResponse
+    has_pre_2010_cohorts: bool
+
+
+class EurocodeDataBandResponse(ApiModel):
+    band: str
+    official: int | None
+    modelled: int
+
+
+class EurocodeDataCountryGapResponse(ApiModel):
+    """A market's official count of cars on the road against the model's, by age band."""
+
+    geography: str
+    publisher_geography: str
+    year: int
+    official: int
+    modelled: int
+    modelled_share: float | None
+    bands: tuple[EurocodeDataBandResponse, ...]
+
+
+class EurocodeDataTierResponse(ApiModel):
+    codes: int
+    certain_p50: int
+
+
+class EurocodeDataNoDataTotalsResponse(ApiModel):
+    reviewed: int
+    not_reviewed: int
+    first_year_from_2000: int
+
+
+class EurocodeDataTotalsResponse(ApiModel):
+    fleet: int
+    by_outcome: EurocodeDataOutcomeResponse
+    by_evidence: EurocodeDataEvidenceResponse
+    tiers: dict[str, EurocodeDataTierResponse]
+    no_data: EurocodeDataNoDataTotalsResponse
+
+
+class EurocodeDataThresholdsResponse(ApiModel):
+    tier_a_observed_share: float
+    tier_a_markets: int
+    tier_b_observed_share: float
+    pre_2010_share_cap_c: float
+
+
+class EurocodeDataOfficialSourceResponse(ApiModel):
+    dataset: str
+    url: str
+    licence: str
+    file: str
+    sha256: str
+    updated: str | None
+    missing_markets: tuple[str, ...]
+
+
+class EurocodeDataReportResponse(ApiModel):
+    snapshot_id: str
+    year: int
+    thresholds: EurocodeDataThresholdsResponse
+    totals: EurocodeDataTotalsResponse
+    codes: tuple[EurocodeDataCodeResponse, ...]
+    no_data: tuple[EurocodeNoDataResponse, ...]
+    markets: tuple[EurocodeDataMarketResponse, ...]
+    country_gap: tuple[EurocodeDataCountryGapResponse, ...]
+    official_source: EurocodeDataOfficialSourceResponse | None
+
+
+class EurocodeDataCoverageResponse(ApiModel):
+    """The data report for the active snapshot, or why there is none to show."""
+
+    available: bool
+    message: str | None = None
+    report: EurocodeDataReportResponse | None = None
+
+
 class MarketVehicleForecastResponse(ApiModel):
     code: str
     name: str

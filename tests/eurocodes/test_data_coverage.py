@@ -73,7 +73,7 @@ def test_every_car_is_accounted_for_by_outcome_and_by_evidence():
         [
             _cell(AURORA, 2024, "DE", "registrations", 100),
             _cell(AURORA, 2019, "DE", "registrations", 9),
-            _cell(MERIDIAN, 2024, "NL", "register", 50, raw="M5 VECTOR"),
+            _cell(MERIDIAN, 2024, "NL", "stock", 50, raw="M5 VECTOR"),
             _cell("nobody|x", 2024, "NL", "interpolated", 7, raw="X"),
         ]
     )
@@ -88,7 +88,7 @@ def test_every_car_is_accounted_for_by_outcome_and_by_evidence():
         "unreviewed": 7,
     }
     assert totals["by_evidence"] == {
-        "register": 50,
+        "stock": 50,
         "registrations": 109,
         "interpolated": 7,
         "forecast": 0,
@@ -111,7 +111,7 @@ def test_an_unknown_kind_of_evidence_is_refused():
 
 
 def test_one_markets_register_is_not_enough_for_tier_a():
-    report = _report([_cell(MERIDIAN, 2024, "NL", "register", 50, raw="M5 VECTOR")])
+    report = _report([_cell(MERIDIAN, 2024, "NL", "stock", 50, raw="M5 VECTOR")])
 
     meridian = _code(report, "Q301")
     assert meridian["observed_share"] == 1.0

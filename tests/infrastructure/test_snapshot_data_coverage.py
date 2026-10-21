@@ -95,7 +95,7 @@ def test_fleet_at_another_year_follows_the_curve_the_snapshot_was_built_with():
     assert registered.sources == frozenset({"pub-new"})
     # A register's cohort, seen at the register's own year, is the register's count.
     counted = cells["NL", 2005]
-    assert counted.evidence == "register"
+    assert counted.evidence == "stock"
     assert counted.fleet.p50 == Decimal(400)
     assert counted.sources == frozenset({"pub-register"})
     # A forecast cohort registered after the report year has no car on the road yet,

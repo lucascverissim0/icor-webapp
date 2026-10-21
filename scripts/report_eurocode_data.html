@@ -43,7 +43,7 @@ const t = R.totals;
 const kpi = (label, value) => `<div class="kpi">${label}<b>${value}</b></div>`;
 document.getElementById("kpis").innerHTML =
   kpi("Cars in the model", fmt(t.fleet)) +
-  kpi("Observed (register + registrations)", pct((t.by_evidence.register + t.by_evidence.registrations) / t.fleet)) +
+  kpi("Observed (registrations + register counts)", pct((t.by_evidence.stock + t.by_evidence.registrations) / t.fleet)) +
   ["A","B","C","D"].map(k => kpi(`Tier ${k}`, `${fmt(t.tiers[k].codes)} codes · ${fmt(t.tiers[k].certain_p50)} cars`)).join("");
 const bands = ["Y_LT2","Y2-5","Y5-10","Y10-20","Y_GT20"];
 const bandLabel = {"Y_LT2":"<2","Y2-5":"2–4","Y5-10":"5–9","Y10-20":"10–19","Y_GT20":"20+"};
