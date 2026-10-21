@@ -18,6 +18,8 @@ from icor.evidence.sources.dgt import PARSER_NAME as DGT_PARSER_NAME
 from icor.evidence.sources.dgt import DGTParqueLoader
 from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
+from icor.evidence.sources.national_register import PARSER_NAME as REGISTER_PARSER_NAME
+from icor.evidence.sources.national_register import NationalRegisterLoader
 from icor.evidence.sources.rdw import PARSER_NAME as RDW_PARSER_NAME
 from icor.evidence.sources.rdw import RDWRegisteredCarsLoader
 from icor.evidence.sources.traficom import PARSER_NAME as TRAFICOM_PARSER_NAME
@@ -58,6 +60,7 @@ def official_loader_registry() -> Mapping[str, EvidenceLoader]:
         RDW_PARSER_NAME: RDWRegisteredCarsLoader(),
         TRAFICOM_PARSER_NAME: TraficomVehicleLoader(),
         DGT_PARSER_NAME: DGTParqueLoader(),
+        REGISTER_PARSER_NAME: NationalRegisterLoader(),
     }
 
 
