@@ -93,9 +93,10 @@ def test_a_complete_register_gives_every_cohort_from_2006(tmp_path: Path) -> Non
         (row.registration_cohort_year, row.value, row.validation_flags, row.period_end)
         for row in repository.list_observations()
     )
+    untaught = ("labels-do-not-teach-vocabulary",)
     assert rows == [
-        (2006, Decimal(5), (), date(2026, 10, 1)),
-        (2024, Decimal(30), (), date(2026, 10, 1)),
+        (2006, Decimal(5), untaught, date(2026, 10, 1)),
+        (2024, Decimal(30), untaught, date(2026, 10, 1)),
     ]
     observation = repository.list_observations()[0]
     assert observation.measure is Measure.ACTIVE_FLEET
@@ -104,16 +105,18 @@ def test_a_complete_register_gives_every_cohort_from_2006(tmp_path: Path) -> Non
     assert observation.normalized_model == "horizon"
 
 
-def test_a_lower_bound_register_stops_before_eea_names_models(tmp_path: Path) -> None:
+def test_a_lower_bound_register_flags_every_cohort(tmp_path: Path) -> None:
     body = "AURORA,Horizon,2009,5\nAURORA,Horizon,2010,30\n"
-    release, repository = _release(tmp_path, body, raw=2, accepted=1, rejected=1)
+    release, repository = _release(tmp_path, body, raw=2, accepted=2, rejected=0)
     profile = replace(_COMPLETE, lower_bound=True)
 
     NationalRegisterLoader({"xx-register": profile}).load((release,), repository)
 
-    (observation,) = repository.list_observations()
-    assert observation.registration_cohort_year == 2009
-    assert observation.validation_flags == (STOCK_LOWER_BOUND_FLAG,)
+    observations = repository.list_observations()
+    assert sorted(item.registration_cohort_year for item in observations) == [2009, 2010]
+    assert {item.validation_flags for item in observations} == {
+        (STOCK_LOWER_BOUND_FLAG, "labels-do-not-teach-vocabulary")
+    }
 
 
 @pytest.mark.parametrize(

@@ -59,3 +59,24 @@ def test_registered_volume_still_teaches_as_before():
     )
 
     assert index.identity_for("s3") == ("bmw", "serie")
+
+
+_UNTAUGHT = json.dumps(
+    ["observed-stock-anchored-cohort", "survival", "observed-stock-labels-do-not-teach-vocabulary"]
+)
+
+
+def test_a_vehicle_known_only_from_an_untaught_register_does_not_teach_the_vocabulary():
+    index = load_identity_index(
+        _snapshot(
+            [
+                ("x5", "60000", _REGISTERED),
+                ("s3", "400", _REGISTERED),
+                ("serie", "40000", _UNTAUGHT),
+                ("x5", "9000", _UNTAUGHT),
+            ]
+        )
+    )
+
+    assert index.identity_for("s3") == ("bmw", "serie 3")
+    assert index.identity_for("serie") == ("bmw", "serie")

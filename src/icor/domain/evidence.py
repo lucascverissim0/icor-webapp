@@ -58,6 +58,12 @@ class ConfidenceBand(StrEnum):
 STOCK_LOWER_BOUND_FLAG = "stock-lower-bound"
 #: Reason code on a cohort built from such an observation.
 STOCK_LOWER_BOUND_REASON = "observed-stock-lower-bound"
+#: Validation flag on a register's active-fleet observation whose labels must not
+#: teach the identity vocabulary: a register added after the vocabulary was
+#: reviewed may not change how the vehicles already reviewed fold.
+VOCABULARY_EXCLUDED_FLAG = "labels-do-not-teach-vocabulary"
+#: Reason code on a cohort built from such an observation.
+VOCABULARY_EXCLUDED_REASON = "observed-stock-labels-do-not-teach-vocabulary"
 #: Validation flag on a registration observation whose source rows carry no
 #: commercial name; the name comes from the same type approval's named rows.
 MODEL_RECOVERED_FLAG = "model-recovered-by-type-approval"

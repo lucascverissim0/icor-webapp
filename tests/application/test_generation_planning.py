@@ -10,6 +10,8 @@ from icor.domain.evidence import (
     MODEL_RECOVERED_REASON,
     STOCK_LOWER_BOUND_FLAG,
     STOCK_LOWER_BOUND_REASON,
+    VOCABULARY_EXCLUDED_FLAG,
+    VOCABULARY_EXCLUDED_REASON,
     ConfidenceBand,
     Measure,
 )
@@ -902,3 +904,26 @@ def test_a_lower_bound_register_never_keeps_two_spellings_of_one_car() -> None:
     register = _cohort_years(repository, "vehicle-register-golf")
     assert register == {2020, 2021, 2022}
     assert not golf & register
+
+
+def test_a_register_whose_labels_do_not_teach_says_so_and_stays_complete() -> None:
+    repository = Repository()
+    _add_stock(
+        repository,
+        repository.generation,
+        "DE",
+        date(2025, 12, 31),
+        ((2020, "90"), (2021, "95")),
+        flags=(VOCABULARY_EXCLUDED_FLAG,),
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    codes = {
+        item.registration_cohort_year: item.reason_codes
+        for item in repository.cohorts
+        if item.as_of_year == 2028
+    }
+    assert VOCABULARY_EXCLUDED_REASON in codes[2020]
+    assert STOCK_LOWER_BOUND_REASON not in codes[2020]
+    assert codes[2020][0] == "observed-stock-anchored-cohort"

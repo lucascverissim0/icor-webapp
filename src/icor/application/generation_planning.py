@@ -15,6 +15,8 @@ from icor.domain.evidence import (
     MODEL_RECOVERED_REASON,
     STOCK_LOWER_BOUND_FLAG,
     STOCK_LOWER_BOUND_REASON,
+    VOCABULARY_EXCLUDED_FLAG,
+    VOCABULARY_EXCLUDED_REASON,
     ConfidenceBand,
     Measure,
 )
@@ -673,7 +675,10 @@ def _collect_stock(observation, assignment, stock_dates, stock_series) -> None:
     cohorts = stock_series.setdefault(key, {})
     existing = cohorts.get(year)
     lower_bound = STOCK_LOWER_BOUND_FLAG in observation.validation_flags or bool(
-        existing and existing.extra_reason_codes
+        existing and STOCK_LOWER_BOUND_REASON in existing.extra_reason_codes
+    )
+    excluded = VOCABULARY_EXCLUDED_FLAG in observation.validation_flags or bool(
+        existing and VOCABULARY_EXCLUDED_REASON in existing.extra_reason_codes
     )
     cohorts[year] = _AnnualValue(
         (existing.registrations if existing else Decimal(0)) + observation.value,
@@ -683,7 +688,8 @@ def _collect_stock(observation, assignment, stock_dates, stock_series) -> None:
             )
         ),
         "observed-stock",
-        (STOCK_LOWER_BOUND_REASON,) if lower_bound else (),
+        ((STOCK_LOWER_BOUND_REASON,) if lower_bound else ())
+        + ((VOCABULARY_EXCLUDED_REASON,) if excluded else ()),
     )
 
 

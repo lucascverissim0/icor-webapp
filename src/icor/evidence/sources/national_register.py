@@ -5,10 +5,11 @@ Every register is acquired into the same counts-only aggregate
 registration anywhere, and vehicles. What differs between registers is kept in
 one reviewed profile each: the market, the labels it uses for a masked car, and
 whether its counts are complete. A register that hides some cars (masked rare
-models, or many cars without a first-registration year) is only a lower bound;
-like Spain's DGT it then serves the years before EEA monitoring names models
-(before 2010) and nothing later, where it would replace complete registrations
-with part of them.
+models, or many cars without a first-registration year) is only a lower bound:
+its cohorts are flagged, and planning keeps it per vehicle only where it counts
+more than the registrations surviving to its date. Every register's labels are
+flagged too, so that they never teach the identity vocabulary the reviewed
+vehicles fold by.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from decimal import Decimal
 
 from icor.domain.evidence import (
     STOCK_LOWER_BOUND_FLAG,
+    VOCABULARY_EXCLUDED_FLAG,
     EvidenceConfidence,
     MappingStatus,
     Measure,
@@ -35,8 +37,6 @@ from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceReposit
 PARSER_NAME = "national_register_cohorts_csv_v1"
 #: Register cohorts the model uses: twenty years before the newest registrations.
 EARLIEST_COHORT_YEAR = 2006
-#: The last cohort a lower-bound register may give: EEA names every model from 2010.
-LATEST_LOWER_BOUND_COHORT_YEAR = 2009
 _OBSERVATION_BATCH_SIZE = 2_000
 
 
@@ -82,8 +82,7 @@ def classify_group(
     if not (_positive_integer(cohort) and _positive_integer(vehicles)):
         return None
     cohort_year = int(cohort)
-    latest = LATEST_LOWER_BOUND_COHORT_YEAR if profile.lower_bound else None
-    if cohort_year < EARLIEST_COHORT_YEAR or (latest is not None and cohort_year > latest):
+    if cohort_year < EARLIEST_COHORT_YEAR:
         return None
     return RegisterGroup(make, model, cohort_year, int(vehicles), row_number)
 
@@ -169,7 +168,7 @@ class NationalRegisterLoader:
         if profile.lower_bound:
             notes += (
                 "The register hides some cars, so a cohort's count is a lower bound; "
-                f"only cohorts up to {LATEST_LOWER_BOUND_COHORT_YEAR} are used.",
+                "planning keeps it only where it counts more than registrations.",
             )
         batch: list[Observation] = []
         for group in groups:
@@ -203,7 +202,10 @@ class NationalRegisterLoader:
                     canonical_vehicle_id=None,
                     mapping_status=MappingStatus.UNRESOLVED,
                     transformation_notes=notes,
-                    validation_flags=(STOCK_LOWER_BOUND_FLAG,) if profile.lower_bound else (),
+                    validation_flags=(
+                        (STOCK_LOWER_BOUND_FLAG,) if profile.lower_bound else ()
+                    )
+                    + (VOCABULARY_EXCLUDED_FLAG,),
                     evidence_confidence=_confidence(profile),
                     registration_cohort_year=group.cohort_year,
                 )
