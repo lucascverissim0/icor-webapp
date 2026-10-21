@@ -42,6 +42,8 @@ class Repository:
                 period_end=date(year, 12, 31),
                 measure=Measure.NEW_REGISTRATIONS,
                 validation_flags=(),
+                original_make="VOLKSWAGEN",
+                original_model="GOLF",
                 value=Decimal(value),
             )
             for year, value in ((2020, "100"), (2021, "110"), (2022, "120"))
@@ -110,7 +112,9 @@ def test_internal_registration_gap_is_explicitly_estimated() -> None:
     assert "estimated-registration-cohort" in estimated.reason_codes
 
 
-def _add_vehicle(repository, name: str, years_values, *, kind=None, end_month=None):
+def _add_vehicle(
+    repository, name: str, years_values, *, kind=None, end_month=None, make="FIXTURE", model=None
+):
     """Add a second vehicle in DE so the market's latest data year is known."""
 
     generation = SimpleNamespace(
@@ -130,6 +134,8 @@ def _add_vehicle(repository, name: str, years_values, *, kind=None, end_month=No
             period_end=date(year, 12, 31),
             measure=Measure.NEW_REGISTRATIONS,
             validation_flags=(),
+            original_make=make,
+            original_model=model or name.upper(),
             value=Decimal(value),
         )
         for year, value in years_values
@@ -371,6 +377,8 @@ class TwoPublisherRepository:
                     period_end=date(year, 12, 31),
                     measure=Measure.NEW_REGISTRATIONS,
                     validation_flags=(),
+                    original_make="FIXTURE",
+                    original_model="MODEL",
                     value=Decimal("100"),
                 )
             )
@@ -386,6 +394,8 @@ class TwoPublisherRepository:
                         period_end=date(year, 3 + 3 * quarter, 28),
                         measure=Measure.NEW_REGISTRATIONS,
                         validation_flags=(),
+                        original_make="FIXTURE",
+                        original_model="MODEL",
                         value=Decimal("24"),
                     )
                 )
@@ -400,6 +410,8 @@ class TwoPublisherRepository:
                     period_end=date(year, 12, 31),
                     measure=Measure.NEW_REGISTRATIONS,
                     validation_flags=(),
+                    original_make="FIXTURE",
+                    original_model="MODEL",
                     value=Decimal("40"),
                 )
             )
@@ -539,13 +551,25 @@ def test_the_only_publisher_present_decomposes_the_country_year() -> None:
     assert result.superseded_coverage_input_count == 0
 
 
-def _add_stock(repository, generation, geography: str, stock_date: date, cohorts, *, flags=()):
+def _add_stock(
+    repository,
+    generation,
+    geography: str,
+    stock_date: date,
+    cohorts,
+    *,
+    flags=(),
+    make="FIXTURE",
+    model="MODEL",
+):
     """Observed active fleet by cohort, as the RDW register or DfT VEH0124 report it."""
 
     observations = tuple(
         SimpleNamespace(
             observation_id=f"stock-{generation.generation_id}-{geography.lower()}-{year}",
             validation_flags=flags,
+            original_make=make,
+            original_model=model,
             release_id="release-stock",
             canonical_vehicle_id=generation.canonical_vehicle_id,
             geography=geography,
@@ -812,3 +836,69 @@ def test_a_reviewed_series_absent_from_a_later_reported_year_has_ended() -> None
     GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
 
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
+
+
+def _register_spelling(repository):
+    """The Golf as a register spells it: another raw vehicle, the same real car."""
+
+    generation = SimpleNamespace(
+        generation_id="generation-register-golf",
+        canonical_vehicle_id="vehicle-register-golf",
+        end_month=None,
+    )
+    repository.extra_generations = (*getattr(repository, "extra_generations", ()), generation)
+    return generation
+
+
+def test_a_lower_bound_register_counts_a_car_only_where_it_holds_more() -> None:
+    repository = Repository()
+    _add_vehicle(repository, "witness", ((2020, "5"), (2021, "5"), (2022, "5")))
+    _add_stock(
+        repository,
+        _register_spelling(repository),
+        "DE",
+        date(2025, 12, 31),
+        # 2021: more Golfs on the road than its registrations could leave
+        # (imported used); 2022: fewer, as when a register hides some.
+        ((2021, "200"), (2022, "50")),
+        flags=(STOCK_LOWER_BOUND_FLAG,),
+        make="VOLKSWAGEN. VW",
+        model="GOLF",
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2022} | set(
+        range(2023, 2029)
+    )
+    assert _cohort_years(repository, "vehicle-register-golf") == {2021}
+    # A car the register does not name keeps its registrations in the register's years.
+    assert {2020, 2021, 2022} <= _cohort_years(repository, "vehicle-witness")
+    (register,) = [
+        item
+        for item in repository.cohorts
+        if item.canonical_vehicle_id == "vehicle-register-golf" and item.as_of_year == 2028
+    ]
+    assert register.registrations == Decimal(200)
+    assert STOCK_LOWER_BOUND_REASON in register.reason_codes
+
+
+def test_a_lower_bound_register_never_keeps_two_spellings_of_one_car() -> None:
+    repository = Repository()
+    _add_stock(
+        repository,
+        _register_spelling(repository),
+        "DE",
+        date(2025, 12, 31),
+        ((2020, "300"), (2021, "300"), (2022, "300")),
+        flags=(STOCK_LOWER_BOUND_FLAG,),
+        make="VOLKSWAGEN. VW",
+        model="GOLF",
+    )
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    golf = _cohort_years(repository, "vehicle-volkswagen-golf-eu")
+    register = _cohort_years(repository, "vehicle-register-golf")
+    assert register == {2020, 2021, 2022}
+    assert not golf & register

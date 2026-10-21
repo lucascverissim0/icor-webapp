@@ -20,6 +20,7 @@ from icor.domain.evidence import (
 )
 from icor.domain.generations import GenerationIdentityKind
 from icor.evidence.normalization import stable_evidence_id
+from icor.evidence.vehicle_identity import VehicleIdentityIndex
 from icor.forecasting.reconciliation import (
     CoverageCandidate,
     RegistrationCoverageSelector,
@@ -126,10 +127,21 @@ class GenerationPlanningService:
         # stock date so memory holds one register snapshot per market.
         stock_dates: dict[str, date] = {}
         stock_series: dict[tuple[str, str, str], dict[int, _AnnualValue]] = {}
+        # Every vehicle's labels, and the registrations that teach the identity
+        # vocabulary, to compare a lower-bound register with registrations by
+        # real vehicle rather than by spelling.
+        labels: dict[str, tuple[str, str]] = {}
+        teaching: dict[str, float] = defaultdict(float)
         for observation in repository.list_observations():
             assignment = assignments.get(observation.observation_id)
             if assignment is None or observation.canonical_vehicle_id is None:
                 continue
+            labels.setdefault(
+                observation.canonical_vehicle_id,
+                (observation.original_make, observation.original_model),
+            )
+            if observation.measure is Measure.NEW_REGISTRATIONS:
+                teaching[observation.canonical_vehicle_id] += float(observation.value)
             if observation.measure is Measure.ACTIVE_FLEET:
                 _collect_stock(observation, assignment, stock_dates, stock_series)
                 continue
@@ -288,10 +300,21 @@ class GenerationPlanningService:
         anchored_stock = {key: cohorts for key, cohorts in anchored_stock.items() if cohorts}
         # The register is the market's count of record only for the cohort years
         # it reports. One published for old cohorts alone (Spain's, before 2010)
-        # leaves the newer years to registrations.
+        # leaves the newer years to registrations. A register that hides some
+        # cars is no count of record: see _lower_bound_choices.
         stock_years: dict[str, set[int]] = defaultdict(set)
+        lower_bound_years: dict[str, set[int]] = defaultdict(set)
         for (_generation, _vehicle, geography), cohorts in anchored_stock.items():
-            stock_years[geography].update(cohorts)
+            for year, annual in cohorts.items():
+                if STOCK_LOWER_BOUND_REASON in annual.extra_reason_codes:
+                    lower_bound_years[geography].add(year)
+                else:
+                    stock_years[geography].add(year)
+        if any(years & stock_years[geography] for geography, years in lower_bound_years.items()):
+            raise ValueError("a market's register is both complete and a lower bound")
+        dropped_registrations, dropped_stock = self._lower_bound_choices(
+            lower_bound_years, anchored_stock, series, stock_dates, labels, teaching
+        )
 
         evidence_only_series_count = short_history_series_count = 0
         stock_anchored_series_count = beyond_support_cohort_count = 0
@@ -340,12 +363,17 @@ class GenerationPlanningService:
                         # a vehicle absent from it sold none under this name.
                         if year not in covered_years[geography]:
                             values[year] = _AnnualValue(value, all_input_ids, "forecast")
-            stock = anchored_stock.get(series_key, {})
+            stock = {
+                year: annual
+                for year, annual in anchored_stock.get(series_key, {}).items()
+                if (series_key, year) not in dropped_stock
+            }
             if geography in anchor_year:
                 values = {
                     year: annual
                     for year, annual in values.items()
                     if year not in stock_years[geography]
+                    and (series_key, year) not in dropped_registrations
                 }
             if not values and not stock:
                 evidence_only_series_count += 1
@@ -522,6 +550,74 @@ class GenerationPlanningService:
                 )
             )
         )
+
+    def _lower_bound_choices(
+        self,
+        lower_bound_years: dict[str, set[int]],
+        anchored_stock: dict[tuple[str, str, str], dict[int, _AnnualValue]],
+        series: dict[tuple[str, str, str], dict[int, _AnnualValue]],
+        stock_dates: dict[str, date],
+        labels: dict[str, tuple[str, str]],
+        teaching: dict[str, float],
+    ) -> tuple[set[tuple[tuple[str, str, str], int]], set[tuple[tuple[str, str, str], int]]]:
+        """Per vehicle and cohort, the larger of a lower-bound register and registrations.
+
+        A register that masks some cars counts at least the cars it names, so
+        where registrations surviving to its date are fewer (a car imported
+        used is in the register but not in new registrations) the register is
+        the better count, and where they are more (a masked model, or cars
+        without a first-registration year) registrations are. The choice is made
+        per real vehicle, folding publisher spellings as the read side does, so
+        two spellings of one car are never both kept. Only registrations teach
+        the folding vocabulary; a register's own labels never change it.
+        """
+
+        dropped_registrations: set[tuple[tuple[str, str, str], int]] = set()
+        dropped_stock: set[tuple[tuple[str, str, str], int]] = set()
+        if not lower_bound_years:
+            return dropped_registrations, dropped_stock
+        index = VehicleIdentityIndex.from_rows(
+            (
+                (vehicle_id, make, model, teaching.get(vehicle_id, 0.0))
+                for vehicle_id, (make, model) in labels.items()
+            ),
+            vocabulary_volume={
+                vehicle_id: volume for vehicle_id, volume in teaching.items() if volume > 0
+            },
+        )
+
+        def vehicle(vehicle_id: str) -> tuple[str, str]:
+            return index.identity_for(vehicle_id) or ("", vehicle_id)
+
+        for geography, years in lower_bound_years.items():
+            stock_keys = [key for key in anchored_stock if key[2] == geography]
+            series_keys = [key for key in series if key[2] == geography]
+            for year in years:
+                register: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+                surviving: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+                for key in stock_keys:
+                    annual = anchored_stock[key].get(year)
+                    if annual is not None:
+                        register[vehicle(key[1])] += annual.registrations
+                for key in series_keys:
+                    annual = series[key].get(year)
+                    if annual is not None:
+                        surviving[vehicle(key[1])] += self.survival.interval(
+                            annual.registrations,
+                            age_years=stock_dates[geography].year - year,
+                        ).p50
+                register_wins = {
+                    identity
+                    for identity, count in register.items()
+                    if count >= surviving.get(identity, Decimal(0))
+                }
+                for key in stock_keys:
+                    if year in anchored_stock[key] and vehicle(key[1]) not in register_wins:
+                        dropped_stock.add((key, year))
+                for key in series_keys:
+                    if year in series[key] and vehicle(key[1]) in register_wins:
+                        dropped_registrations.add((key, year))
+        return dropped_registrations, dropped_stock
 
     def _forecast(
         self, values: dict[int, _AnnualValue], horizon: int
