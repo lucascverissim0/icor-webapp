@@ -585,12 +585,16 @@ def compare(arguments: argparse.Namespace) -> int:
         for geography, year, model, units in _cells(entry):
             a = first.allocate(key, year, geography, raw_model=model)
             b = second.allocate(key, year, geography, raw_model=model)
-            if (a.codes, a.status, a.family) == (b.codes, b.status, b.family):
+            if (a.codes, a.status, a.family, a.uncoded) == (b.codes, b.status, b.family, b.uncoded):
                 agreed += units
                 continue
             slot = differences.setdefault(
                 (year, drive_side(geography), body_hint(model) or "", a, b),
-                {"a": [a.status, list(a.codes)], "b": [b.status, list(b.codes)], "units": 0},
+                {
+                    "a": [a.status, [*a.codes, *("?" * a.uncoded)]],
+                    "b": [b.status, [*b.codes, *("?" * b.uncoded)]],
+                    "units": 0,
+                },
             )
             slot["units"] += units
         total_units += entry["units"]
@@ -651,7 +655,10 @@ def _runs(values: list[tuple[int, str]]) -> str:
 
 
 def timeline_lines(decisions: EurocodeDecisions, family_key: str) -> list[str]:
-    """Every registration year's code set for a family, per drive side and body."""
+    """Every registration year's code set for a family, per drive side and body.
+
+    ``?`` marks a year in which a registration may be a vehicle without a code.
+    """
 
     family = decisions.families[family_key]
     timeline = decisions.timeline(family_key)
@@ -661,7 +668,12 @@ def timeline_lines(decisions: EurocodeDecisions, family_key: str) -> list[str]:
     lines = [f"family {family_key} ({family.label})"]
     for drive in ("LHD", "RHD"):
         for body in [None, *bodies]:
-            values = [(year, "+".join(timeline.codes(year, drive, body)) or "-") for year in years]
+            values = []
+            for year in years:
+                codes = timeline.codes(year, drive, body)
+                if codes and timeline.shared_with_uncoded(year, drive, codes):
+                    codes = (*codes, "?")
+                values.append((year, "+".join(codes) or "-"))
             lines.append(f"  {drive} {body or 'unnamed body'}: {_runs(values)}")
     return lines
 
@@ -717,13 +729,25 @@ def coverage(arguments: argparse.Namespace) -> int:
     )
     demand = json.loads((REVIEW / "demand.json").read_text(encoding="utf-8"))
     statuses: dict[str, int] = defaultdict(int)
+    uncoded = 0
     for key, entry in demand["identities"].items():
         for geography, year, model, units in _cells(entry):
-            statuses[decisions.allocate(key, year, geography, raw_model=model).status] += units
+            allocation = decisions.allocate(key, year, geography, raw_model=model)
+            statuses[allocation.status] += units
+            uncoded += units if allocation.uncoded else 0
     total = demand["total"]
     report = {status: round(units / total, 5) for status, units in sorted(statuses.items())}
     reviewed = 1 - statuses.get("unreviewed", 0) / total
-    print(json.dumps({"reviewed_share": round(reviewed, 5), "by_status": report}, indent=1))
+    print(
+        json.dumps(
+            {
+                "reviewed_share": round(reviewed, 5),
+                "by_status": report,
+                "shared_with_uncoded": round(uncoded / total, 5),
+            },
+            indent=1,
+        )
+    )
     return 0 if reviewed >= COVERAGE_TARGET else 1
 
 

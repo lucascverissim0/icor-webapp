@@ -74,9 +74,15 @@ class CodeFact:
     appear in; ``first_year_latest`` the year from which it certainly has, when
     the catalogue's start years disagree. ``last_year`` is the last production
     year when known; otherwise the code runs until a code that ``replaces`` it
-    is certainly in volume. ``uncoded_successor`` is the year a successor the
-    catalogue has no code for is in volume: from then on the code's last stock
-    and the successor cannot be told apart, so the code explains neither.
+    is certainly in volume. ``uncoded_successor`` is the first year a successor
+    the catalogue has no code for can appear, and ``uncoded_successor_latest``
+    (default: that year) the year it certainly took over. As with a coded
+    successor, the launch span is shared: a registration may be the code's last
+    stock or the successor, so the code stays possible but is flagged as shared
+    with a vehicle the catalogue lacks. After the span the two cannot be told
+    apart and the code explains neither. ``uncoded_sibling`` is the year a
+    vehicle without a code went on sale alongside under the same name (an
+    electric version on another platform): the code stays, flagged from then on.
     """
 
     code: str
@@ -90,6 +96,24 @@ class CodeFact:
     replaces: tuple[str, ...]
     rows: tuple[int, ...]
     uncoded_successor: int | None = None
+    uncoded_successor_latest: int | None = None
+    uncoded_sibling: int | None = None
+
+    @property
+    def uncoded_takeover(self) -> int | None:
+        """The year an uncoded successor certainly took over (None: there is none)."""
+
+        if self.uncoded_successor is None:
+            return None
+        return self.uncoded_successor_latest or self.uncoded_successor
+
+    def shared_with_uncoded(self, year: int) -> bool:
+        """Whether a registration of this year may be a vehicle without a code instead."""
+
+        return any(start is not None and start <= year for start in self._uncoded_starts())
+
+    def _uncoded_starts(self) -> tuple[int | None, int | None]:
+        return (self.uncoded_successor, self.uncoded_sibling)
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,12 +187,16 @@ class Allocation:
     ``status`` is ``single`` (one code), ``shared`` (several, never split),
     ``outside`` (a reviewed vehicle in a year no code of its family covers),
     ``unassignable`` (reviewed: the identity cannot name one vehicle or is not
-    in the catalogue) or ``unreviewed``.
+    in the catalogue) or ``unreviewed``. ``uncoded`` marks a registration that
+    may also be a vehicle the catalogue has no code for (a successor in its
+    launch span, or a sibling sold under the same name): it is ``shared`` even
+    with a single code.
     """
 
     codes: tuple[str, ...]
     status: str
     family: str | None = None
+    uncoded: bool = False
 
 
 UNREVIEWED = Allocation((), "unreviewed")
@@ -242,8 +270,8 @@ class FamilyTimeline:
                     )
                     for body in fact.bodies
                 }
-                if fact.uncoded_successor is not None:
-                    end = fact.uncoded_successor - 1
+                end = fact.uncoded_takeover
+                if end is not None:
                     until = {
                         body: end if last is None else min(last, end)
                         for body, last in until.items()
@@ -268,6 +296,14 @@ class FamilyTimeline:
                 else:
                     spans[code] = (window.fact.first_year, end)
         return spans
+
+    def shared_with_uncoded(self, year: int, drive: str, codes: Iterable[str]) -> bool:
+        """Whether any of these codes may, in this year, be a vehicle without a code instead."""
+
+        wanted = set(codes)
+        return any(
+            w.fact.code in wanted and w.fact.shared_with_uncoded(year) for w in self._windows[drive]
+        )
 
     def codes(self, year: int, drive: str, body: str | None = None) -> tuple[str, ...]:
         """Every code a registration of this family can belong to.
@@ -360,18 +396,19 @@ class EurocodeDecisions:
         if not families:
             return Allocation((), "unassignable")
         drive = drive_side(geography)
-        codes = tuple(
-            sorted(
-                {
-                    code
-                    for family in families
-                    for code in self._timelines[family].codes(year, drive, body or raw_body)
-                }
-            )
-        )
+        per_family = {
+            family: self._timelines[family].codes(year, drive, body or raw_body)
+            for family in families
+        }
+        codes = tuple(sorted({code for found in per_family.values() for code in found}))
         if not codes:
             return Allocation((), "outside", families[0])
-        return Allocation(codes, "single" if len(codes) == 1 else "shared", families[0])
+        uncoded = any(
+            self._timelines[family].shared_with_uncoded(year, drive, found)
+            for family, found in per_family.items()
+        )
+        status = "single" if len(codes) == 1 and not uncoded else "shared"
+        return Allocation(codes, status, families[0], uncoded)
 
     def timeline(self, family: str) -> FamilyTimeline:
         return self._timelines[family]
@@ -423,6 +460,8 @@ def _family(
         latest = int(raw.get("first_year_latest") or first)
         last = raw.get("last_year")
         uncoded = raw.get("uncoded_successor")
+        uncoded_latest = raw.get("uncoded_successor_latest")
+        sibling = raw.get("uncoded_sibling")
         bodies = frozenset(raw.get("bodies") or [ALL_BODIES])
         fact = CodeFact(
             code=code,
@@ -436,6 +475,8 @@ def _family(
             replaces=tuple(str(value) for value in raw.get("replaces") or ()),
             rows=tuple(int(value) for value in raw.get("rows") or ()),
             uncoded_successor=None if uncoded is None else int(uncoded),
+            uncoded_successor_latest=None if uncoded_latest is None else int(uncoded_latest),
+            uncoded_sibling=None if sibling is None else int(sibling),
         )
         _check_fact(key, fact, rows_by_code)
         facts.append(fact)
@@ -474,6 +515,18 @@ def _check_fact(
             raise ValueError(f"{where}: uncoded_successor must follow first_year")
         if fact.last_year is not None and fact.uncoded_successor > fact.last_year + 1:
             raise ValueError(f"{where}: uncoded_successor after the run-out year")
+    if fact.uncoded_successor_latest is not None:
+        if fact.uncoded_successor is None:
+            raise ValueError(f"{where}: uncoded_successor_latest without uncoded_successor")
+        if fact.uncoded_successor_latest < fact.uncoded_successor:
+            raise ValueError(f"{where}: uncoded_successor_latest before uncoded_successor")
+        if fact.last_year is not None and fact.uncoded_successor_latest > fact.last_year + 1:
+            raise ValueError(f"{where}: uncoded_successor_latest after the run-out year")
+    if fact.uncoded_sibling is not None:
+        if fact.uncoded_sibling < fact.first_year:
+            raise ValueError(f"{where}: uncoded_sibling before first_year")
+        if fact.last_year is not None and fact.uncoded_sibling > fact.last_year + 1:
+            raise ValueError(f"{where}: uncoded_sibling after the run-out year")
     if not fact.bodies <= BODIES | {ALL_BODIES}:
         raise ValueError(f"{where}: unknown body {sorted(fact.bodies - BODIES)}")
     if fact.role not in ROLES:

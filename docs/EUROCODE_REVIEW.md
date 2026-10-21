@@ -89,7 +89,9 @@ Write one JSON file, `.local/private/eurocode/review/out/<batch>.<reviewer>.json
 | `drive` | `both` (default), or `LHD`/`RHD` when the code exists for one drive side only. When a generation has an RHD-specific code, its unmarked counterpart is `LHD`. |
 | `replaces` | Codes of the same family that this code succeeds, for the bodies it covers. |
 | `label` | A short human label for the code, such as model and generation. |
-| `uncoded_successor` | The year a successor the catalogue has no code for is in volume (a new generation launched after the catalogue was compiled). From that year the code explains no registrations, since its last stock and the new model cannot be told apart; they stay outside. Use it instead of a `last_year` run-out that would hand the new model's first year to the old code. |
+| `uncoded_successor` | The first year a successor the catalogue has no code for can be registered (a new generation launched after the catalogue was compiled). As with a coded successor, its launch span is shared: the code stays possible, flagged as shared with a vehicle without a code. After the span the code explains nothing, since its last stock and the new model cannot be told apart. Use it instead of a `last_year` run-out that would hand the new model's years to the old code. |
+| `uncoded_successor_latest` | Only with `uncoded_successor`, when the takeover took longer than one year: the year the uncoded successor certainly took over. |
+| `uncoded_sibling` | The year a vehicle without a code went on sale alongside the code's vehicle under the same name (an electric version on another platform sold next to the combustion one). The code stays, flagged as shared with a vehicle without a code from then on. |
 | `note` | Optional: any doubt, contradiction or external fact you relied on. |
 
 How the software turns facts into registration years (per drive side):
@@ -102,7 +104,9 @@ How the software turns facts into registration years (per drive side):
   after production ends. When `last_year` equals the successor's certain start,
   the shared launch year already covers that stock.
 - The last code of a family stays active for future years; never invent a future code.
-  When a successor without a code is already on sale, set `uncoded_successor`.
+  When a successor without a code is on sale or has an officially confirmed
+  European launch year, set `uncoded_successor` to that year; when a same-name
+  sibling without a code is, set `uncoded_sibling`.
 - A code replaced for some of its bodies must also end for its other bodies,
   either by a successor for them or by a stated `last_year`. Validation refuses it
   otherwise.

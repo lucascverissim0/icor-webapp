@@ -277,23 +277,52 @@ def test_a_code_replaced_for_some_bodies_must_end_for_the_others() -> None:
         )
 
 
-@pytest.mark.parametrize("last_year", [None, 2025])
-def test_a_successor_the_catalogue_lacks_ends_the_code_without_a_run_out(last_year) -> None:
-    # The successor reached volume in 2026 but has no code: its registrations and the
-    # last stock of Q501 cannot be told apart, so neither is given Q501.
+@pytest.mark.parametrize("last_year", [None, 2026])
+def test_a_successor_the_catalogue_lacks_shares_its_launch_span_then_ends_the_code(
+    last_year,
+) -> None:
+    # The successor has no code. In its launch years a registration may be it or
+    # the last stock of Q501: Q501 stays possible, flagged as shared with a vehicle
+    # the catalogue lacks. Once the successor certainly took over, Q501 explains
+    # nothing.
     decisions = _bolt(
         {
             "code": "Q501",
             "first_year": 2005,
             "last_year": last_year,
             "uncoded_successor": 2026,
+            "uncoded_successor_latest": 2027,
             "rows": [1],
         },
     )
 
-    assert _bolt_codes(decisions, 2025) == ("Q501",)
-    assert decisions.allocate("zephyr|bolt", 2026, "NL") == Allocation((), "outside", "zephyr/bolt")
-    assert decisions.timeline("zephyr/bolt").spans()["Q501"] == (2005, 2025)
+    assert decisions.allocate("zephyr|bolt", 2025, "NL") == Allocation(
+        ("Q501",), "single", "zephyr/bolt"
+    )
+    for year in (2026, 2027):
+        assert decisions.allocate("zephyr|bolt", year, "NL") == Allocation(
+            ("Q501",), "shared", "zephyr/bolt", uncoded=True
+        )
+    assert decisions.allocate("zephyr|bolt", 2028, "NL") == Allocation((), "outside", "zephyr/bolt")
+    assert decisions.timeline("zephyr/bolt").spans()["Q501"] == (2005, 2027)
+
+
+def test_an_uncoded_successor_launch_span_defaults_to_its_first_year() -> None:
+    decisions = _bolt({"code": "Q501", "first_year": 2005, "uncoded_successor": 2026, "rows": [1]})
+
+    assert decisions.allocate("zephyr|bolt", 2026, "NL").uncoded
+    assert decisions.allocate("zephyr|bolt", 2027, "NL").status == "outside"
+
+
+def test_a_sibling_the_catalogue_lacks_keeps_the_code_but_flags_its_years() -> None:
+    # An electric sibling sold alongside under the same name: the code stays,
+    # but from the sibling's launch a registration may be either.
+    decisions = _bolt({"code": "Q501", "first_year": 2005, "uncoded_sibling": 2026, "rows": [1]})
+
+    assert decisions.allocate("zephyr|bolt", 2025, "NL").status == "single"
+    assert decisions.allocate("zephyr|bolt", 2030, "NL") == Allocation(
+        ("Q501",), "shared", "zephyr/bolt", uncoded=True
+    )
 
 
 def test_years_before_the_first_code_are_outside_not_guessed() -> None:
@@ -558,6 +587,17 @@ def test_validation_refuses_invented_codes_and_foreign_citations() -> None:
         ({"replaces": ["Q999"]}, "outside the family"),
         ({"uncoded_successor": 2005}, "uncoded_successor must follow first_year"),
         ({"last_year": 2010, "uncoded_successor": 2012}, "uncoded_successor after the run-out"),
+        (
+            {"uncoded_successor": 2020, "uncoded_successor_latest": 2019},
+            "uncoded_successor_latest before uncoded_successor",
+        ),
+        (
+            {"last_year": 2020, "uncoded_successor": 2021, "uncoded_successor_latest": 2022},
+            "uncoded_successor_latest after the run-out",
+        ),
+        ({"uncoded_successor_latest": 2020}, "uncoded_successor_latest without uncoded_successor"),
+        ({"uncoded_sibling": 2004}, "uncoded_sibling before first_year"),
+        ({"last_year": 2010, "uncoded_sibling": 2012}, "uncoded_sibling after the run-out"),
     ],
 )
 def test_validation_refuses_inconsistent_facts(change: dict, message: str) -> None:
