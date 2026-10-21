@@ -72,7 +72,12 @@ def _document(**metadata: str) -> dict:
             },
         },
         "identities": {
-            "zephyr|arrow": {"family": "zephyr/arrow"},
+            "zephyr|arrow": {
+                "family": "zephyr/arrow",
+                "variants": [
+                    {"match": "alpha", "family": "zephyr/alpha", "why": "names the Alpha"}
+                ],
+            },
             "zephyr|alpha": {"family": "zephyr/alpha"},
             "zephyr|beta": {"family": "zephyr/beta"},
         },
@@ -102,6 +107,14 @@ def test_codes_are_described_with_make_label_and_registration_years() -> None:
     assert shared.label == "Zephyr Alpha / Zephyr Beta"
     assert shared.families == ("zephyr/alpha", "zephyr/beta")
     assert (shared.first_year, shared.last_year) == (2014, None)
+
+
+def test_the_publishers_model_label_selects_a_reviewed_variant() -> None:
+    eurocodes = EurocodeMap.from_documents(CATALOGUE, _document())
+
+    assert eurocodes.allocate("zephyr|arrow", 2016, "DE").codes == ("Q102",)
+    routed = eurocodes.allocate("zephyr|arrow", 2016, "DE", raw_model="ARROW ALPHA 1.6")
+    assert (routed.codes, routed.family) == (("Q301",), "zephyr/alpha")
 
 
 def test_catalogue_codes_without_reviewed_vehicles_are_known_but_undescribed() -> None:

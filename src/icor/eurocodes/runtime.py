@@ -149,9 +149,22 @@ class EurocodeMap:
         return self._summaries
 
     def allocate(
-        self, identity: str, year: int, geography: str, raw_body: str | None = None
+        self,
+        identity: str,
+        year: int,
+        geography: str,
+        raw_body: str | None = None,
+        *,
+        raw_model: str | None = None,
     ) -> Allocation:
-        return self.decisions.allocate(identity, year, geography, raw_body)
+        """The codes a registration may carry.
+
+        ``raw_model`` is the publisher's model label (``canonical_vehicle.model``).
+        Without it no reviewed variant applies: spelling routes, model-range pools
+        and year-limited pools are all keyed on that label.
+        """
+
+        return self.decisions.allocate(identity, year, geography, raw_body, raw_model=raw_model)
 
     def state(
         self,
