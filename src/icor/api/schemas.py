@@ -171,6 +171,56 @@ class VehicleForecastOptionsResponse(ApiModel):
     search_year: int | None = None
 
 
+class EurocodeShareResponse(ApiModel):
+    """One Eurocode's part of a row: units certainly its own, and units it may share."""
+
+    code: str
+    label: str
+    # Registration years the code can explain; last_year None means still current.
+    first_year: int
+    last_year: int | None
+    drive: str
+    certain_units: int
+    # Never split: these units belong to this code or to one in shared_with.
+    shared_units: int
+    shared_with: tuple[str, ...]
+    shared_with_uncoded: bool
+
+
+class EurocodeBreakdownResponse(ApiModel):
+    """A row's base units by Eurocode outcome; each unit is counted once."""
+
+    codes: tuple[EurocodeShareResponse, ...]
+    single_units: int
+    shared_units: int
+    outside_units: int
+    unassignable_units: int
+    unreviewed_units: int
+
+
+class EurocodeCoverageResponse(ApiModel):
+    horizon: int
+    total_units: int
+    single_units: int
+    shared_units: int
+    outside_units: int
+    unassignable_units: int
+    unreviewed_units: int
+    shared_with_uncoded_units: int
+
+
+class EurocodeStatusResponse(ApiModel):
+    """Whether Eurocodes are served, against which catalogue, and how much they cover."""
+
+    loaded: bool
+    catalogue_sha256: str | None
+    decisions_snapshot_id: str | None
+    reviewed_identities: int
+    orphaned_identities: int
+    warnings: tuple[str, ...]
+    coverage: tuple[EurocodeCoverageResponse, ...]
+
+
 class MarketVehicleForecastResponse(ApiModel):
     code: str
     name: str
@@ -179,6 +229,8 @@ class MarketVehicleForecastResponse(ApiModel):
     cohort_count: int
     active_fleet: DemandRangeResponse | None
     replacements: DemandRangeResponse | None
+    # The market's registrations of the selection by Eurocode; None when not loaded.
+    eurocodes: EurocodeBreakdownResponse | None = None
 
 
 class DemandRankResponse(ApiModel):
@@ -270,56 +322,6 @@ class OpportunityScoreResponse(ApiModel):
     @field_serializer("total_points")
     def serialize_total_points(self, value: float) -> float:
         return round(value, 1)
-
-
-class EurocodeShareResponse(ApiModel):
-    """One Eurocode's part of a row: units certainly its own, and units it may share."""
-
-    code: str
-    label: str
-    # Registration years the code can explain; last_year None means still current.
-    first_year: int
-    last_year: int | None
-    drive: str
-    certain_units: int
-    # Never split: these units belong to this code or to one in shared_with.
-    shared_units: int
-    shared_with: tuple[str, ...]
-    shared_with_uncoded: bool
-
-
-class EurocodeBreakdownResponse(ApiModel):
-    """A row's base units by Eurocode outcome; each unit is counted once."""
-
-    codes: tuple[EurocodeShareResponse, ...]
-    single_units: int
-    shared_units: int
-    outside_units: int
-    unassignable_units: int
-    unreviewed_units: int
-
-
-class EurocodeCoverageResponse(ApiModel):
-    horizon: int
-    total_units: int
-    single_units: int
-    shared_units: int
-    outside_units: int
-    unassignable_units: int
-    unreviewed_units: int
-    shared_with_uncoded_units: int
-
-
-class EurocodeStatusResponse(ApiModel):
-    """Whether Eurocodes are served, against which catalogue, and how much they cover."""
-
-    loaded: bool
-    catalogue_sha256: str | None
-    decisions_snapshot_id: str | None
-    reviewed_identities: int
-    orphaned_identities: int
-    warnings: tuple[str, ...]
-    coverage: tuple[EurocodeCoverageResponse, ...]
 
 
 class OpportunityRowResponse(ApiModel):

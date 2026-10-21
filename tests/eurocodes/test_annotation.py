@@ -6,6 +6,8 @@ not use).
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from icor.eurocodes.annotation import EurocodeCell, eurocode_breakdown
 from icor.eurocodes.catalog import parse_rows
 from icor.eurocodes.demo import demo_eurocodes
@@ -167,3 +169,24 @@ def test_cells_without_units_add_no_code() -> None:
 
     assert breakdown.codes == ()
     assert breakdown.total_units == 0
+
+
+def test_fractional_registrations_round_once_and_still_reconcile() -> None:
+    breakdown = eurocode_breakdown(
+        demo_eurocodes(),
+        (
+            _cell("aurora mobility|a1 horizon", 2024, Decimal("0.6")),
+            _cell("aurora mobility|a1 horizon", 2027, Decimal("0.6")),
+            _cell("aurora mobility|a1 horizon", 2025, Decimal("2.4")),
+            _cell("northstar automotive|n7 atlas", 2027, Decimal("0.3")),
+        ),
+    )
+
+    assert breakdown.total_units == 4  # 3.9 rounded once, not 1 + 1 + 2 + 0
+    assert (breakdown.single_units, breakdown.shared_units, breakdown.unreviewed_units) == (
+        1,
+        3,
+        0,
+    )
+    assert sum(share.certain_units for share in breakdown.codes) == breakdown.single_units
+    assert all(share.shared_units == 2 for share in breakdown.codes)

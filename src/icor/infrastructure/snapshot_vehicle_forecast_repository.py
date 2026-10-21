@@ -5,13 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from icor.application.ranking import DEMAND_POINTS_MAX, demand_percentile_rank
 from icor.domain.evidence import CanonicalVehicle
 from icor.domain.planner import DemandRange
+from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeCell, eurocode_breakdown
+from icor.eurocodes.runtime import EurocodeMap, identity_key
 from icor.evidence.normalization import (
     normalize_vehicle_label,
     source_vehicle_display_label,
@@ -121,6 +123,8 @@ class MarketVehicleForecast:
     cohort_count: int
     active_fleet: DemandRange | None
     replacements: DemandRange | None
+    #: The market's registrations of the selection by Eurocode; None when not loaded.
+    eurocodes: EurocodeBreakdown | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,8 +208,10 @@ class SnapshotVehicleForecastRepository:
         catalog: ReviewedGenerationCatalog | None = None,
         verified_only: bool = False,
         model_year_only: bool = False,
+        eurocodes: EurocodeMap | None = None,
     ) -> None:
         self._path = path
+        self._eurocodes = eurocodes
         self._data_version = data_version
         self._catalog = catalog or ranking_public_generation_catalog()
         self._verified_only = verified_only
@@ -331,6 +337,7 @@ class SnapshotVehicleForecastRepository:
                 raise VehicleForecastSelectionError("the selected vehicle is unavailable")
             rows = self._cohort_rows(connection, vehicle_ids, horizon)
             demand_rank = self._demand_rank(connection, vehicle_ids, horizon)
+            index = self._identity_index(connection) if self._eurocodes is not None else None
         if not rows:
             raise VehicleForecastSelectionError(
                 "no forecast is available for this vehicle and horizon"
@@ -352,7 +359,11 @@ class SnapshotVehicleForecastRepository:
         if not selected_rows:
             raise VehicleForecastSelectionError("no cohorts match the selected generation")
         europe, *countries = (
-            self._market_result(code, name, selected_rows, selection, horizon)
+            self._with_eurocodes(
+                self._market_result(code, name, selected_rows, selection, horizon),
+                selected_rows,
+                index,
+            )
             for code, name in _TARGETS
         )
         markets = (
@@ -644,6 +655,39 @@ class SnapshotVehicleForecastRepository:
             DemandRange(_units(interval.p10), _units(interval.p50), _units(interval.p90)),
         )
 
+    def _with_eurocodes(
+        self,
+        market: MarketVehicleForecast,
+        rows: list[sqlite3.Row],
+        index: VehicleIdentityIndex | None,
+    ) -> MarketVehicleForecast:
+        """The market's registrations of the selection, by the Eurocodes they may carry.
+
+        Weighted by registrations, the figure the market reports, and rounded
+        once so the breakdown sums to it.
+        """
+
+        if self._eurocodes is None or index is None or market.availability != "available":
+            return market
+        cells = (
+            EurocodeCell(
+                identity=identity_key(
+                    index, row["canonical_vehicle_id"], row["make"], row["model"]
+                ),
+                year=row["registration_cohort_year"],
+                geography=row["geography"],
+                raw_model=row["model"],
+                units=Decimal(row["registrations"]),
+            )
+            for row in rows
+            if (
+                row["geography"] in _EU27
+                if market.code == "EU27"
+                else row["geography"] == market.code
+            )
+        )
+        return replace(market, eurocodes=eurocode_breakdown(self._eurocodes, cells))
+
     def _identity_index(self, connection: sqlite3.Connection) -> VehicleIdentityIndex:
         """Build the canonical make/model index once per repository instance."""
 
@@ -785,7 +829,7 @@ class SnapshotVehicleForecastRepository:
             rows.extend(
                 connection.execute(
                     f"""SELECT c.cohort_id, c.generation_id, c.geography,
-                        c.registration_cohort_year, c.registrations,
+                        c.canonical_vehicle_id, c.registration_cohort_year, c.registrations,
                         c.active_fleet_p10, c.active_fleet_p50, c.active_fleet_p90,
                         c.survival_method, c.reason_codes, v.make, v.model
                     FROM opportunity_input oi

@@ -767,6 +767,7 @@ export interface components {
             code: string;
             /** Cohort Count */
             cohort_count: number;
+            eurocodes?: components["schemas"]["EurocodeBreakdownResponse"] | null;
             /** Name */
             name: string;
             /** Registration Cohort Units */

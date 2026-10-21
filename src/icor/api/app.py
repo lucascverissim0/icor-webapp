@@ -259,6 +259,7 @@ def create_app(
             snapshot_ledger.path,
             snapshot_manifest.snapshot_id,
             model_year_only=client_release,
+            eurocodes=eurocodes,
         )
     app.state.vehicle_forecast_service = vehicle_forecast_service
     if completeness_service is None and snapshot_manifest is not None:

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from icor.eurocodes.catalog import parse_rows
+from icor.eurocodes.runtime import EurocodeMap
 from icor.forecasting.survival import CohortSurvivalModel
 from icor.infrastructure.snapshot_vehicle_forecast_repository import (
     SnapshotVehicleForecastRepository,
@@ -352,3 +354,81 @@ def test_a_register_anchored_cohort_is_observed_evidence() -> None:
     ]
 
     assert _latest_evidence_year(rows) == 2019
+
+
+def _golf_eurocodes() -> EurocodeMap:
+    """Fictional codes (`Q` prefix, unused by the real catalogue); 2020 is a launch year."""
+
+    catalogue = parse_rows(
+        (
+            ("Q701", "VOLKSWAGEN", "GOLF 5D HBK 2015-", None, 2015),
+            ("Q702", "VOLKSWAGEN", "GOLF 5D HBK 2020-", None, 2020),
+        ),
+        make_aliases={},
+        source_sha256="d" * 64,
+    )
+    return EurocodeMap.from_documents(
+        catalogue,
+        {
+            "format": "icor-eurocode-decisions",
+            "version": 1,
+            "metadata": {"catalogue_sha256": "d" * 64},
+            "families": {
+                "volkswagen/golf": {
+                    "label": "Volkswagen Golf",
+                    "make": "volkswagen",
+                    "codes": [
+                        {"code": "Q701", "label": "Golf A", "first_year": 2015, "rows": [2]},
+                        {
+                            "code": "Q702",
+                            "label": "Golf B",
+                            "first_year": 2020,
+                            "first_year_latest": 2021,
+                            "replaces": ["Q701"],
+                            "rows": [3],
+                        },
+                    ],
+                }
+            },
+            "identities": {"volkswagen|golf": {"family": "volkswagen/golf"}},
+        },
+    )
+
+
+def test_each_market_breaks_its_registrations_down_by_eurocode(tmp_path: Path) -> None:
+    path = tmp_path / "snapshot.sqlite3"
+    _database(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE cohort_estimate SET registrations = '10.5' "
+            "WHERE cohort_id = 'golf-be-2020-estimate'"
+        )
+    repository = SnapshotVehicleForecastRepository(
+        path, "snapshot-test", eurocodes=_golf_eurocodes()
+    )
+
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+    )
+
+    markets = {market.code: market for market in result.markets}
+    for code, units in (("BE", 111), ("FR", 200), ("EU27", 311)):
+        breakdown = markets[code].eurocodes
+        assert markets[code].registration_cohort_units == units
+        assert breakdown is not None and breakdown.total_units == units, code
+        assert [(s.code, s.shared_units, s.shared_with) for s in breakdown.codes] == [
+            ("Q701", units, ("Q702",)),
+            ("Q702", units, ("Q701",)),
+        ], code
+    assert markets["DE"].availability == "unavailable"
+    assert markets["DE"].eurocodes is None
+
+
+def test_without_eurocodes_markets_carry_none(
+    repository: SnapshotVehicleForecastRepository,
+) -> None:
+    result = repository.forecast(
+        brand="Volkswagen", model="Golf", year=2020, generation=None, horizon=2028
+    )
+
+    assert all(market.eurocodes is None for market in result.markets)

@@ -1114,6 +1114,16 @@
             "title": "Cohort Count",
             "type": "integer"
           },
+          "eurocodes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EurocodeBreakdownResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "title": "Name",
             "type": "string"

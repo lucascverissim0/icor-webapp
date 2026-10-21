@@ -10,12 +10,16 @@ Shared units are never divided between codes. Each code reports the units that
 are certainly its own and, apart from them, the units it may share and with
 which codes: "certain X, up to Y more". Unassigned units are reported by reason,
 so the row's units are always accounted for in full.
+
+Cells may carry fractional units (estimated registrations). The totals are then
+rounded once, by largest remainder, so they still sum to the rounded whole.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 from icor.eurocodes.runtime import EurocodeMap
 
@@ -28,7 +32,7 @@ class EurocodeCell:
     year: int
     geography: str
     raw_model: str
-    units: int
+    units: int | Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,10 +80,28 @@ class EurocodeBreakdown:
         )
 
 
+_STATUSES = ("single", "shared", "outside", "unassignable", "unreviewed")
+
+
+def _whole(value: Decimal) -> int:
+    return int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+
+def _apportion(values: Sequence[Decimal], total: int | None = None) -> list[int]:
+    """Whole numbers summing to ``total`` (the rounded sum), by largest remainder."""
+
+    target = _whole(sum(values, Decimal(0))) if total is None else total
+    floors = [int(value) for value in values]
+    order = sorted(range(len(values)), key=lambda index: (floors[index] - values[index], index))
+    for index in order[: target - sum(floors)]:
+        floors[index] += 1
+    return floors
+
+
 def eurocode_breakdown(eurocodes: EurocodeMap, cells: Iterable[EurocodeCell]) -> EurocodeBreakdown:
-    totals = {"single": 0, "shared": 0, "outside": 0, "unassignable": 0, "unreviewed": 0}
-    certain: dict[str, int] = {}
-    shared: dict[str, int] = {}
+    totals = {status: Decimal(0) for status in _STATUSES}
+    certain: dict[str, Decimal] = {}
+    shared: dict[str, Decimal] = {}
     partners: dict[str, set[str]] = {}
     uncoded: set[str] = set()
     families: dict[str, tuple[str, ...]] = {}
@@ -93,14 +115,24 @@ def eurocode_breakdown(eurocodes: EurocodeMap, cells: Iterable[EurocodeCell]) ->
         for code in allocation.codes:
             families.setdefault(code, allocation.families)
             if allocation.status == "single":
-                certain[code] = certain.get(code, 0) + cell.units
+                certain[code] = certain.get(code, Decimal(0)) + cell.units
             else:
-                shared[code] = shared.get(code, 0) + cell.units
+                shared[code] = shared.get(code, Decimal(0)) + cell.units
                 partners.setdefault(code, set()).update(
                     other for other in allocation.codes if other != code
                 )
                 if allocation.uncoded:
                     uncoded.add(code)
+    single, shared_total, outside, unassignable, unreviewed = _apportion(
+        [totals[status] for status in _STATUSES]
+    )
+    certain_whole = dict(
+        zip(
+            families,
+            _apportion([certain.get(code, Decimal(0)) for code in families], single),
+            strict=True,
+        )
+    )
     shares = []
     for code in families:
         summary = eurocodes.describe(code, families[code])
@@ -112,8 +144,8 @@ def eurocode_breakdown(eurocodes: EurocodeMap, cells: Iterable[EurocodeCell]) ->
                 first_year=summary.first_year,
                 last_year=summary.last_year,
                 drive=summary.drive,
-                certain_units=certain.get(code, 0),
-                shared_units=shared.get(code, 0),
+                certain_units=certain_whole[code],
+                shared_units=min(_whole(shared.get(code, Decimal(0))), shared_total),
                 shared_with=tuple(sorted(partners.get(code, ()))),
                 shared_with_uncoded=code in uncoded,
             )
@@ -121,9 +153,9 @@ def eurocode_breakdown(eurocodes: EurocodeMap, cells: Iterable[EurocodeCell]) ->
     shares.sort(key=lambda share: (-share.certain_units, -share.shared_units, share.code))
     return EurocodeBreakdown(
         codes=tuple(shares),
-        single_units=totals["single"],
-        shared_units=totals["shared"],
-        outside_units=totals["outside"],
-        unassignable_units=totals["unassignable"],
-        unreviewed_units=totals["unreviewed"],
+        single_units=single,
+        shared_units=shared_total,
+        outside_units=outside,
+        unassignable_units=unassignable,
+        unreviewed_units=unreviewed,
     )
