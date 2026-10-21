@@ -63,6 +63,7 @@ def test_a_codes_cars_are_certain_or_shared_and_shared_cars_are_never_split():
     assert new["fleet"]["certain_p50"] == 0
     assert new["fleet"]["shared_p50"] == 70
     assert "shared-only" in new["flags"]
+    assert "new" not in old["flags"]
     # The shared launch years count once in the market and in the totals.
     assert report["totals"]["fleet"] == 170
     assert report["totals"]["by_outcome"]["shared"] == 70
@@ -118,6 +119,8 @@ def test_one_markets_register_is_not_enough_for_tier_a():
     assert meridian["observed_markets"] == ["NL"]
     assert meridian["tier"] == "B"
     assert "one-market" in meridian["flags"]
+    # Launched two years before the report year: mostly forecast cars, by nature.
+    assert "new" in meridian["flags"]
 
 
 def test_observed_cars_in_five_markets_reach_tier_a():

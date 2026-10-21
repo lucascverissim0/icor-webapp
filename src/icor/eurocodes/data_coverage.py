@@ -50,6 +50,9 @@ TIER_B_OBSERVED_SHARE = Decimal("0.5")
 FIRST_EEA_YEAR = 2010
 #: A code with at least this share of its life before 2010 is tier C at best.
 PRE_2010_SHARE_CAP_C = Decimal("0.5")
+#: A code launched this many years before the report year or later is new: its
+#: cars are mostly the forecast year's, so a low observed share is expected.
+NEW_CODE_YEARS = 2
 
 #: Eurostat's age bands, as ages in whole years at the end of the stock year.
 AGE_BANDS: tuple[tuple[str, int, int | None], ...] = (
@@ -254,7 +257,7 @@ def build_report(
         flags = []
         if summary.first_year < FIRST_EEA_YEAR:
             flags.append("pre-2010")
-        if summary.first_year >= year - 1:
+        if summary.first_year >= year - NEW_CODE_YEARS:
             flags.append("new")
         if not tally.certain[1]:
             flags.append("shared-only")
