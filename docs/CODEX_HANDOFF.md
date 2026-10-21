@@ -6829,3 +6829,109 @@ goes on the risk list. The private scripts `review/adjudication/forecast_apply.p
 3. Then steps 4–8, starting with passing `raw_model` through the runtime.
 
 No server or long-running process is active.
+
+### Step 3 complete: re-check, two sweeps, golden set (2026-10-21)
+
+**Re-check.** Sixteen packets covered 252 families: every one of the top 200 plus a random
+10% of the rest. They produced 91 findings: 25 wrong, 28 doubtful, 38 cosmetic. Every finding
+was adjudicated, accepted or rejected with a reason. The private
+`review/recheck/adjudication.md` lists each decision, the rejects and the risk list. The private
+`review/adjudication/recheck_apply.py` applies them; fact notes carry a dated tag. Corrections
+that matter (public model names only):
+- **Multivan T6.1:** the "Multivan 6.1" was sold alongside the T7, so it now ends in 2024 and
+  is not replaced by the T7.
+- **Micra K14:** ended 2023. The 2025 electric Micra replaces nothing.
+- **Passat:** no longer holds the Superb I code.
+- **New families:** Corolla Verso (with spelling variants), Vauxhall Tigra, Omega and VX220.
+- **Elantra:** a successor without a code from 2021 (Elantra CN7 sold in PL and RO), instead of
+  an ending.
+- **New spelling variants:**
+  - 3 Series GT trims;
+  - Astra saloon;
+  - Megane Grand Scenic;
+  - Q6 body labels;
+  - GB A6 pooled with the A6 e-tron from 2024.
+- **Labelled not in the catalogue:** Bronco Sport and Corolla Cross.
+- **Labelled ambiguous:** a few late-year spellings.
+- **Re-weighed body roles:**
+  - E36 and E46 coupé/cabriolet and E92 coupé become main;
+  - E93 cabriolet and T-Roc Cabriolet stay minor;
+  - 4 Series F33 becomes main, with the G23 cabriolet a sibling without a code.
+
+**Systemic finding: duplicate families had diverged.** A batch must define every family it
+references, so 16 families exist under two keys (Mercedes compacts and vans, three Range
+Rovers, 3 and 4 Series). Their facts differed. The make's own batch is now canonical: the
+copies were reconciled and synced, and `sync_duplicates()` in the apply script must be re-run
+after any later edit. The rule is now in `docs/EUROCODE_REVIEW.md`.
+
+**Sweep L (launch timing).** 300 successor codes lacked `first_year_latest`. Eight agents
+checked their first European deliveries, and 58 facts were added: the next year is shared
+when deliveries began in October–December or in a later year. Fourteen cases were skipped
+because the predecessor had ended well before the launch, so no stock overlaps. This rule is
+also in the brief.
+
+**Sweep F (forecast years).** 291 open families had no dated check. Ten agents classed them:
+227 current, 26 ended, 14 successor, 4 sibling, 20 unclear. Only officially confirmed facts
+were applied:
+- **Successor without a code:**
+  - Karoq (2028);
+  - V-Class to VLE (2027–28);
+  - DS 7 to N°7 (2026–27);
+  - Outback to E-Outback (2026–27);
+  - Roma Spider (2026–27);
+  - Across (2026).
+- **Ended:**
+  - Touran, Z4, Supra, Tipo, Discovery Sport, 8 Series, Citan/T-Class and B-Class: 2026;
+  - X4, MX-30, A7/RS7, C5 X, Grand Cherokee and Renegade: 2025;
+  - Ignis, MG5, S60, Space Star and Multivan 6.1: 2024;
+  - Touareg: 2026;
+  - Stelvio and Giulia: 2027.
+- **Sibling without a code:**
+  - MG4 Urban (2026);
+  - Tiggo 7 Pro (2025).
+
+Press-only reports stay on the risk list: 208 III, Octavia V, Corolla 13th gen, i30, EQE, Q8,
+Colt, Vito VAN.EA, X6 G66, Velar, Mazda2 and several Chinese rebadges.
+
+**Coverage after merge** (private `decisions.json`: 765 families, 1,590 identities):
+
+| Measure | Share | Before |
+|---|---|---|
+| Reviewed | 99.001% | |
+| Single | 80.50% | 82.28% |
+| Shared | 17.01% | |
+| Outside | 0.71% | |
+| Unassignable | 0.78% | |
+| Unreviewed | 1.00% | |
+| Shared with a vehicle without a code | 1.00% | |
+
+The drop in single-code volume is deliberate: late-launch years and forecast successors were
+falsely certain before. The unreviewed tail holds 0.53% of 2026–28 forecast units, mostly new
+Chinese brands.
+
+**Private golden set.** `golden.json` holds 310 cases over 88 identities. They cover the top
+70 identities at four years each, plus transitions, RHD/GB pools, body and spelling variants,
+uncoded spans, `outside` and `unassignable`. Every case was checked by hand against the real
+model's generations and launch, end and successor dates, and each case's `why` names its
+routed family and labels. `tests/eurocodes/test_private_golden.py` now runs instead of
+skipping.
+
+**Verification:**
+- every batch `validate`: `problems: []`;
+- `merge`: 765 families, 1,590 identities;
+- `uv run pytest tests/eurocodes tests/test_repository_security.py -q`: 84 passed (the golden
+  test included).
+
+**Open for Lucas:**
+1. A private backup location for `.local/private/eurocode/` (it exists only on this Mac).
+2. Whether the client release may carry the private mapping.
+3. The EQA, which no catalogue row names (it stays not-in-catalogue).
+
+**Next:** plan step 4.
+1. Annotate opportunity rows with Eurocodes in `SnapshotOpportunityRepository._row` and
+   `OpportunityService._row`, passing `canonical_vehicle.model` as `raw_model`.
+2. Add the API fields and page meta, then regenerate the OpenAPI types.
+3. Add the score-invariance test.
+4. Then steps 5–8: UI, search, `group_by=eurocode`, close-out.
+
+No server or long-running process is active.
