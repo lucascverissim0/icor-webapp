@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from icor.evidence.cepik_fleet_acquisition import (
+    EARLIEST_WINDOW_YEAR,
     PASSENGER_KINDS,
     Slice,
     crawl,
@@ -28,16 +29,27 @@ from icor.evidence.cepik_fleet_acquisition import (
 #: passenger cars and 192 of Mazowieckie's 2,687,152 (0.007%). Filtering on a rare
 #: spelling also makes the API time out (HTTP 504), as it scans the whole window.
 DEFAULT_KINDS = PASSENGER_KINDS[:1]
+#: The model takes register cohorts from 2006 on; older windows (about a third of
+#: Poland's registered cars) would double the crawl for cohorts it does not use.
+DEFAULT_FROM_YEAR = 2006
 
 
 def _plan(state_dir: Path) -> tuple[Slice, ...]:
     plan = state_dir / "plan.json"
     if not plan.exists():
         state_dir.mkdir(parents=True, exist_ok=True)
-        document = {"plan_date": date.today().isoformat(), "kinds": list(DEFAULT_KINDS)}
+        document = {
+            "plan_date": date.today().isoformat(),
+            "kinds": list(DEFAULT_KINDS),
+            "from_year": DEFAULT_FROM_YEAR,
+        }
         plan.write_text(json.dumps(document, ensure_ascii=False) + "\n", encoding="utf-8")
     document = json.loads(plan.read_text(encoding="utf-8"))
-    return plan_slices(date.fromisoformat(document["plan_date"]), document["kinds"])
+    return plan_slices(
+        date.fromisoformat(document["plan_date"]),
+        document["kinds"],
+        from_year=document.get("from_year", EARLIEST_WINDOW_YEAR),
+    )
 
 
 def _log(message: str) -> None:

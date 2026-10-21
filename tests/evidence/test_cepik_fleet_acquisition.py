@@ -95,6 +95,16 @@ def test_slices_cover_every_two_year_window_up_to_today() -> None:
     assert len({item.name for item in slices}) == len(slices)
 
 
+def test_a_later_start_keeps_the_same_windows_and_names() -> None:
+    full = plan_slices(date(2026, 10, 21))
+    recent = plan_slices(date(2026, 10, 21), from_year=2006)
+
+    assert min(item.start for item in recent) == date(2006, 1, 1)
+    assert set(recent) == {item for item in full if item.start.year >= 2006}
+    with pytest.raises(ValueError, match="even years"):
+        plan_slices(date(2026, 10, 21), from_year=2007)
+
+
 def test_a_slice_pages_until_a_short_page_and_counts_each_vehicle_once(tmp_path: Path) -> None:
     seen: list[dict[str, list[str]]] = []
     first = _full_page("a")

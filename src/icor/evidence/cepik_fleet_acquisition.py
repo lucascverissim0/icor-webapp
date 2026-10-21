@@ -126,15 +126,25 @@ class AcquisitionResult:
     last_slice_finished: str
 
 
-def plan_slices(today: date, kinds: Iterable[str] = PASSENGER_KINDS) -> tuple[Slice, ...]:
-    """Every kind × voivodeship × two-year window from 1900 to ``today``."""
+def plan_slices(
+    today: date, kinds: Iterable[str] = PASSENGER_KINDS, *, from_year: int = EARLIEST_WINDOW_YEAR
+) -> tuple[Slice, ...]:
+    """Every kind × voivodeship × two-year window from ``from_year`` to ``today``.
+
+    Windows run on the date of first registration in Poland, which is never
+    earlier than the first registration anywhere: windows from ``from_year`` on
+    hold every car whose cohort is ``from_year`` or later (and some older imports,
+    whose cohorts are then incomplete).
+    """
 
     unknown = set(kinds) - set(PASSENGER_KINDS)
     if unknown:
         raise ValueError(f"not a CEPiK passenger-car kind: {sorted(unknown)}")
+    if from_year < EARLIEST_WINDOW_YEAR or (from_year - EARLIEST_WINDOW_YEAR) % 2:
+        raise ValueError("windows start on even years from 1900")
 
     windows = []
-    year = EARLIEST_WINDOW_YEAR
+    year = from_year
     while year <= today.year:
         end = min(date(year + 1, 12, 31), today)
         windows.append((date(year, 1, 1), end))
