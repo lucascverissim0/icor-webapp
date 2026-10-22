@@ -7866,3 +7866,66 @@ critical, make no mistakes"). Approved plan (outside the repo):
 - 6: `estimated_cohort` table, report v3, ranking toggle.
 
 The acceptance gates are in the plan file.
+
+### Phase 0, part 1 done (2026-10-22, `276b637`) — per-band age layouts
+- `src/icor/domain/age_bands.py` is now the one table of band layouts: `2y`, `3y` and `2y-4y`
+  (Italy: ages 0–1, 2–5, 6–9, 10+). The report (`data_coverage._band`/`_by_band`), net retention
+  (`MarketYear.convention`, `band_ages(name, convention)`) and `calibrate_net_retention.py` all read
+  it; the old shared `shift` is gone.
+- `eurostat_age_conventions`: a second test on "2 to 5 years". Its ratio to carmot over 3 or 4
+  registration years must lie within 0.15 of the youngest band's ratio, and 0.10 closer than the
+  other reading. The four-year layout is adopted only after 5 consecutive findings, because young
+  used imports blur the test (RO 2018–21, LT 2018–19, CY 2021–23, PL "3-4" 2019–22 are
+  rejected that way). Measured with that rule:
+  - IT is 2y-4y in all 13 years;
+  - stable for AT (3y), BE, ES, FR ≥2017, DE ≥2017 (3y), NL (3y), NO;
+  - the young-band tests stay unreliable for import markets.
+- An exploratory year-on-year test (each band's change against the cohorts entering and leaving it)
+  agreed for IT (5–10 = ages 6–9) but is too noisy elsewhere and breaks across convention changes
+  (DE 2017). It was not adopted.
+- **Net retention recalibrated:** BE and LU curves byte-identical, so the method is unchanged and
+  needs no rebuild. IT left `rejected_markets`: with correct bands it needs no calibration; its old
+  5–10 target of 0.924 was the artefact.
+- **Report regenerated on the active snapshot:** only IT changed. Y2-5 missing went 2.10M → 0.85M;
+  Y5-10 went from 0.52M above official to 0.73M missing (the UK curve at ages 6–9).
+- **Verification:** `uv run pytest -q` 1338 passed, 7 skipped, 4 xfailed; ruff clean. Web:
+  typecheck and lint ok, Vitest 142, both builds ok, `openapi:check` exit 0, Playwright 32 passed.
+
+### Phase 2 measurements so far (KBA FZ10, scratch only, nothing integrated)
+- **Files:** December files `fz10_<y>_12_xls.xls?__blob=publicationFile&v=2` for 2004–2012 under
+  `https://www.kba.de/SharedDocs/Downloads/DE/Statistik/Fahrzeuge/FZ10/`.
+  - Old BIFF `.xls`, so the parser needs `xlrd`, a new dependency, not yet added.
+  - The KBA server sometimes returns a 504 HTML page; retry.
+- **Layout:**
+  - a make header row with an empty value, then rows labelled "<MAKE> <MODEL SERIES>";
+  - annual column "Jan.-Dezember <y>";
+  - "ZUSAMMEN" make subtotals;
+  - "NEUZULASSUNGEN INSGESAMT" total.
+  - Group headers: "BMW, MINI", "TOYOTA, LEXUS", "RENAULT, DACIA", "NISSAN, INFINITI",
+    "CHRYSLER, JEEP(, DODGE)", "MG ROVER, AUSTIN", "OPEL, GM ...".
+  - Small makes appear as one row with a count and no model (Aston Martin, Bentley, Saab, …),
+    which must be rejected as unnamed.
+  - "GENERAL MOTORS" rows are "GM CADILLAC SRX" and similar, which need a make mapping.
+- **Totals:** the row sums equal the published total, and **equal Eurostat carmot exactly**, for
+  every year 2004–2012.
+- **Combined labels hold 18–19% of the volume:**
+  - "VW GOLF, JETTA" (2005–12), "VW GOLF, BORA" (2004);
+  - "AUDI A4, S4", "A3, S3(, RS3)", "A6, S6(, RS6, A7)";
+  - "SEAT IBIZA, CORDOBA", "SEAT ALTEA, TOLEDO, LEON";
+  - "MERCEDES VITO, VIANO", "TOYOTA YARIS, DAIHATSU CHARADE", etc.
+  - Decision: keep each as its own vehicle in the observed layer; the Eurocode review marks it
+    single or shared. Any finer split is a flagged estimate (Phase 5), never observed data.
+- **Name match** (folding with the snapshot vocabulary, KBA labels not teaching, refold 0):
+  - about 80% of KBA cars fold onto an existing snapshot identity (2004–2012);
+  - only 57–66% fold onto **German EEA** identities, because **the snapshot's own DE EEA
+    identities are fragmented**: EEA DE 2011–12 rows carry KBA-style labels such as
+    ('volkswagenvwvw', 'golf'), ('bmw', '3er reihe'), ('audi', 'audia4'), and the aggregate
+    ('bmw', 'xreihe').
+  - So a label-level gate understates the match.
+- **Next for Phase 2:**
+  1. a production parser with explicit rules and tests (make prefix, group headers, single-row
+     makes, GM);
+  2. an Eurocode review round for the KBA identities;
+  3. an **overlap test at Eurocode level**: KBA 2010–12 allocated through the decisions against EEA
+     2010–12, measured as per-code WAPE;
+  4. only then load 2004–09 as registrations, build a candidate, run the gates and promote.
