@@ -42,7 +42,9 @@ from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 
 _BATCH_SIZE = 20_000
 #: A provisional market-year holding less than this share of the year before is incomplete.
-INCOMPLETE_PROVISIONAL_SHARE = Decimal("0.9")
+#: Below a genuine market fall: EEA 2025 holds 73% of Poland's 2024 (whole makes missing)
+#: but 85% of Malta's, whose market fell (EEA 96.8% of Eurostat's 2025 registrations).
+INCOMPLETE_PROVISIONAL_SHARE = Decimal("0.8")
 _SUPPORTED_HORIZONS = frozenset({2028, 2031})
 
 

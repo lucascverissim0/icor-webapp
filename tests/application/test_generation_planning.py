@@ -949,7 +949,7 @@ def _provisional_2023(repository, values) -> None:
 
 def test_a_vehicle_absent_from_an_incomplete_provisional_year_has_not_ended() -> None:
     repository = Repository()  # the Golf: 100, 110, 120 to 2022, final
-    _provisional_2023(repository, (("newcomer", "30"),))  # 30 < 0.9 x 120
+    _provisional_2023(repository, (("newcomer", "30"),))  # 30 < 0.8 x 120
 
     GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
 
@@ -958,7 +958,16 @@ def test_a_vehicle_absent_from_an_incomplete_provisional_year_has_not_ended() ->
 
 def test_a_vehicle_absent_from_a_complete_provisional_year_has_ended() -> None:
     repository = Repository()
-    _provisional_2023(repository, (("successor", "125"),))  # 125 >= 0.9 x 120
+    _provisional_2023(repository, (("successor", "125"),))  # 125 >= 0.8 x 120
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
+
+
+def test_a_provisional_year_after_a_market_fall_is_complete() -> None:
+    repository = Repository()
+    _provisional_2023(repository, (("successor", "100"),))  # 100 >= 0.8 x 120
 
     GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
 
