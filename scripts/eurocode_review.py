@@ -234,15 +234,21 @@ def _splits(path: Path) -> dict[str, list[tuple[str, str]]]:
     }
 
 
+#: Codes whose rows all ended before this year never cover reviewed demand.
+OLDEST_RELEVANT_END = 1980
+
+
 def _catalogue_lines(catalogue: Any, makes: set[str]) -> list[str]:
     lines = []
     for code, rows in catalogue.codes().items():
         relevant = [row for row in rows if set(row.makes) & makes]
         if not relevant:
             continue
-        starts = [row.start for row in relevant if row.start is not None]
-        ends = [row.end for row in relevant if row.end is not None]
-        if starts and max(starts) < 1985 and (not ends or max(ends) < 1988):
+        # Only codes whose every row ended long before any reviewed demand are left
+        # out. An open-ended row is still current, and a code whose rows end a few
+        # years before production did (the Renault 4's 1986) can still be the right one.
+        ends = [row.end for row in relevant]
+        if all(end is not None for end in ends) and max(ends) < OLDEST_RELEVANT_END:
             continue
         for row in sorted(relevant, key=lambda item: item.row):
             notes = ",".join(row.flags)
