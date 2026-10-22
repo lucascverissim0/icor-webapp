@@ -21,6 +21,7 @@ def test_catalog_contains_only_reviewed_https_sources():
         "lu-fleet",
         "lt-fleet",
         "ee-fleet",
+        "si-fleet",
     }
     expected.update(f"eea-{year}-final" for year in range(2010, 2024))
     assert set(OFFICIAL_SOURCES) == expected
@@ -132,7 +133,12 @@ def test_manifest_requires_the_pinned_artifact(tmp_path: Path):
 def test_national_registers_are_dated_aggregates_read_by_their_reviewed_profile() -> None:
     from icor.evidence.sources.national_register import PARSER_NAME, PROFILES
 
-    for key, geography in (("lu-fleet", "LU"), ("lt-fleet", "LT"), ("ee-fleet", "EE")):
+    for key, geography in (
+        ("lu-fleet", "LU"),
+        ("lt-fleet", "LT"),
+        ("ee-fleet", "EE"),
+        ("si-fleet", "SI"),
+    ):
         source = OFFICIAL_SOURCES[key]
         assert source.parser_name == PARSER_NAME
         assert PROFILES[source.source_id].geography == source.geography == geography

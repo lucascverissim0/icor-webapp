@@ -34,6 +34,7 @@ SOURCE_KEYS = (
     "lu-fleet",
     "lt-fleet",
     "ee-fleet",
+    "si-fleet",
 )
 
 
@@ -110,6 +111,8 @@ def _acquisition_adapter(
             ("--with-suspended",),
             "official Transpordiamet fleet acquisition",
         )
+    if source_key == "si-fleet":
+        return "acquire_si_fleet.py", ("--model-head",), "official OPSI fleet acquisition"
     return (
         "acquire_eea_history.py",
         ("--year", str(official.coverage_start.year)),

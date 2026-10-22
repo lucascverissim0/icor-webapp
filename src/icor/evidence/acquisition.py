@@ -435,6 +435,47 @@ OFFICIAL_SOURCES = {
         rejected_count=15_729,
         direct_download=False,
     ),
+    "si-fleet": OfficialSource(
+        key="si-fleet",
+        # Aggregated by scripts/acquire_si_fleet.py --model-head from the pinned ZIP
+        # (384,940,669 bytes, sha256 346ec80a…); counts only. Publication stopped after
+        # this 2023-06-30 snapshot, so it anchors cohorts to 2022 only.
+        release_id="si-opsi-registrirana-vozila-20230630",
+        source_id="opsi-evidenca-registriranih-vozil",
+        publisher="Ministrstvo za notranje zadeve (Ministry of the Interior), Slovenia",
+        url=(
+            "https://podatki.gov.si/dataset/75b38301-c0bc-4371-a225-8ba026a66142"
+            "/resource/81c9ca70-bb57-41ff-b96f-bb1b506ee2b9/download/"
+            "opsipodatkireg.vozilih30.06.2023.zip"
+        ),
+        published_at=datetime(2023, 7, 20, 9, 47, 54, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2023, 6, 30),
+        geography="SI",
+        geography_version="Slovenia register of registered vehicles 2023-06-30",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="si-opsi-vehicle-register",
+        terms_url=(
+            "https://podatki.gov.si/dataset/evidenca-registriranih-vozil-presek-stanja"
+        ),
+        permitted_local_use=(
+            "Reuse permitted under Creative Commons Attribution 4.0 International "
+            "with attribution to the Ministry of the Interior of Slovenia (OPSI)."
+        ),
+        parser_name="national_register_cohorts_csv_v1",
+        expected_schema=(
+            "OPSI register snapshot, J-Kategorija M1 or M1G with status 1 (registrirano), "
+            "aggregated by D1-Znamka, the text of D3-Komerc oznaka before its first slash, "
+            "and the year of B-Datum prve registracije vozila"
+        ),
+        suffix=".csv",
+        artifact_bytes=576_448,
+        sha256="6302c8dc01735a89cafb1f1779524b7e3ad1d839f36adde22f5afe20a7f762ad",
+        raw_count=24_089,
+        accepted_count=12_064,
+        rejected_count=12_025,
+        direct_download=False,
+    ),
 }
 
 _EEA_HISTORY_ARTIFACTS = {

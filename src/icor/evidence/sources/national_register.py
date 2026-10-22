@@ -93,6 +93,17 @@ PROFILES: dict[str, RegisterProfile] = {
                 "M1G, registered or suspended, as Eurostat counts Estonia's fleet)"
             ),
         ),
+        RegisterProfile(
+            source_id="opsi-evidenca-registriranih-vozil",
+            geography="SI",
+            publisher="Ministry of the Interior, Slovenia",
+            definition=(
+                "the year of B-Datum prve registracije vozila, the first registration "
+                "anywhere (J-Kategorija M1 or M1G, status registered, model as the text of "
+                "D3-Komerc oznaka before its first slash), on 2023-06-30, the last snapshot "
+                "published; later cohorts come from registrations"
+            ),
+        ),
     )
 }
 

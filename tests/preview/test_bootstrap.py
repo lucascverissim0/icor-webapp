@@ -32,15 +32,16 @@ EXPECTED_SOURCE_KEYS = (
     "lu-fleet",
     "lt-fleet",
     "ee-fleet",
+    "si-fleet",
 )
 
 
-def test_default_plan_has_exactly_the_approved_twenty_seven_releases() -> None:
+def test_default_plan_has_exactly_the_approved_twenty_eight_releases() -> None:
     plan = default_plan()
 
     assert tuple(source.source_key for source in plan.sources) == EXPECTED_SOURCE_KEYS
-    assert len(plan.release_ids) == 27
-    assert len(set(plan.release_ids)) == 27
+    assert len(plan.release_ids) == 28
+    assert len(set(plan.release_ids)) == 28
     assert plan.release_ids[0] == "dgt-es-parque-2025"
     assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20261006"
     assert plan.build_as_of == BUILD_AS_OF == "2026-08-27T12:00:00+00:00"
@@ -462,7 +463,7 @@ def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) 
     promote_index = next(index for index, value in enumerate(joined) if " promote " in f" {value} ")
     assert build_index < report_index < promote_index
     build = runner.commands[build_index]
-    assert build.count("--release") == 27
+    assert build.count("--release") == 28
     assert build[build.index("--build-as-of") + 1] == BUILD_AS_OF
     assert build[build.index("--deterministic-seed") + 1] == str(DETERMINISTIC_SEED)
     assert runner.commands[-2:] == [("npm", "ci"), ("npm", "run", "build")]
@@ -555,7 +556,7 @@ def test_prepare_reuses_exact_active_snapshot_below_build_capacity(
 
     assert bootstrap_script.main() == 0
     assert json.loads(capsys.readouterr().out) == {
-        "release_count": 27,
+        "release_count": 28,
         "reused": True,
         "snapshot_id": "snapshot-active",
         "start_command": "python scripts/run_codespaces_preview.py",
