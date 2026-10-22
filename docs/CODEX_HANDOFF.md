@@ -8187,3 +8187,76 @@ The acceptance gates are in the plan file.
 2. Phase 4 survival and export retention, gated by the harness.
 3. Replacement rate: wait for ICOR's history; meanwhile look for free per-country anchors.
 4. PL register when the crawl ends.
+
+### Mission 4 Phase 1 v1 — hidden-register harness built; the current fallback fails every gate (2026-10-22)
+
+**Files:**
+- `src/icor/forecasting/hidden_register.py`: pure scoring functions.
+  - `registrations_times_survival`.
+  - `project`: the planner's conditional ageing, per quantile.
+  - `cohort_errors`, `l1_gate` (8% at ages 0–15, 15% at 16–25).
+  - `make_scores`: top-20 make × cohort WAPE, plus mix-only WAPE.
+  - `rescale_to_cohorts`: the oracle.
+  - `per_code`: shared units split evenly; unallocated units kept as `(status)`.
+  - `spearman`, `code_scores`.
+  - Tests: `tests/forecasting/test_hidden_register.py`, 9.
+- `src/icor/infrastructure/snapshot_identity.py`: `load_identity_index(..., extra_vehicles=)`. It folds
+  vehicles the ranking lacks with the snapshot vocabulary and never teaches. Test added.
+- `scripts/backtest_estimated_layer.py`:
+  - truths NL, FI, LU, LT, EE, CZ, DK, SI (register named stock, cohorts 2006 to the year before
+    the register, at the register date; GB excluded);
+  - hidden profile: EEA named registrations 2010+;
+  - estimator: registrations × the snapshot's survival model (the current fallback);
+  - L3 = 2028 fleet per Eurocode, both sides aged with `project`;
+  - fails if any ranked vehicle refolds;
+  - writes `.local/private/backtests/hidden-register-<snapshot>-h<horizon>.json`;
+  - added to the CI ruff list.
+
+**Result on `snapshot-b75d917…` (horizon 2028), every country fails every layer:**
+
+| | NL | FI | LU | LT | EE | CZ | DK | SI |
+|---|---|---|---|---|---|---|---|---|
+| 2010+ cohorts, predicted / truth | 0.685 | 0.680 | 0.963 | 0.443 | 0.681 | 0.717 | 0.966 | 0.830 |
+| Cars in 2006–09 cohorts missed | 1.13M | 0.39M | 24k | 0.38M | 0.13M | 1.01M | 0.20M | 0.23M |
+| L2 make × cohort WAPE (mix only) | 0.33 (0.14) | 0.31 (0.16) | 0.17 (0.17) | 0.67 (0.48) | 0.45 (0.48) | 0.33 (0.20) | 0.19 (0.17) | 0.36 (0.32) |
+| L3 WAPE, codes ≥1k units, 2010+ | 0.34 | 0.30 | 0.17 | 0.63 | 0.36 | 0.30 | 0.29 | 0.39 |
+| L3 bias | −0.31 | −0.30 | −0.02 | −0.50 | −0.28 | −0.25 | −0.01 | −0.12 |
+| L3 Spearman, top 200 codes | 0.89 | 0.88 | 0.89 | 0.47 | 0.59 | 0.83 | 0.80 | 0.68 |
+| L3 P10–P90 coverage (target 72–88%) | 0.09 | 0.06 | 0.11 | 0.02 | 0.19 | 0.06 | 0.29 | 0.18 |
+| L3 WAPE, all cohorts (older ones missed) | 0.40 | 0.38 | 0.17 | 0.74 | 0.46 | 0.41 | 0.31 | 0.43 |
+| L3 WAPE, level corrected to truth (oracle) | 0.22 | 0.19 | 0.16 | 0.47 | 0.40 | 0.23 | 0.29 | 0.40 |
+
+**Reading:**
+1. **Level.** Without a register, cohorts the profile does see are 25–55% short in importing
+   countries (NL, FI, CZ, EE, LT). The cause is used imports plus a UK curve that loses 6% of cars
+   in year 1 (p50: 0.941 at 1, 0.906 at 3, 0.854 at 10, 0.503 at 15). Exporters LU and DK net
+   out near 1.
+2. **Mix.** Even with each cohort's level corrected, per-code error stays 16–47%. Imported cars
+   have another model mix than new sales, and new-registration labels differ from register labels.
+3. **Rank.** Rank order is usable in the west (ρ 0.80–0.89) but not in the east/Baltics
+   (0.47–0.68).
+4. **Intervals.** The survival band alone is far too narrow: 2–29% coverage.
+
+So a non-register country's per-Eurocode fleet is today roughly ±30% off at best and biased low.
+This is the baseline Phase 4/5 estimators must beat. Unreviewed register identities fall in
+`(unreviewed)` and are not scored: 1.7–5% of truth, so they do not change the conclusions.
+
+**Not yet in the harness (the plan's full Phase 1):**
+- degradation profiles: label loss, blank models, ±3–5% source mismatch, coarse trade names;
+- temporal holdouts;
+- nested cross-validation of donors;
+- baselines (ii) own-2010-mix and (iii) donor average;
+- extra truths: ES parque, IT MIT 2019, PL.
+
+They plug in as more estimators and truths, using the same functions.
+
+**Verification:**
+- `uv run pytest -q -p no:cacheprovider`: 1376 passed, 7 skipped, 4 xfailed.
+- `uv run ruff check src tests scripts/backtest_estimated_layer.py`: clean.
+- Backtest run twice with identical output, ~18 s.
+
+**Next actions:**
+1. Phase 4: replace the transferred UK curve with per-country net retention (survival × export
+   retention × imports), fitted to Eurostat bands and carmot. Add it as an estimator in this
+   harness, and promote only where the L1 gates pass.
+2. Then the remaining Phase 1 items above.

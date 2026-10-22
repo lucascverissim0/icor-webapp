@@ -106,3 +106,21 @@ def test_archived_registrations_whose_labels_do_not_teach_change_no_fold():
 
     assert index.identity_for("s3") == ("bmw", "serie 3")
     assert index.identity_for("serie") == ("bmw", "serie")
+
+
+def test_extra_vehicles_fold_onto_the_vocabulary_without_teaching_it():
+    cohorts = [
+        ("x5", "60000", _REGISTERED),
+        ("s3", "400", _REGISTERED),
+        ("serie", "40000", _LOWER_BOUND),
+    ]
+    extras = [("dk-x5", "BMW", "X5"), ("dk-serie", "BMW", "SERIE"), ("x5", "BMW", "IGNORED")]
+
+    index = load_identity_index(_snapshot(cohorts), extra_vehicles=extras)
+
+    # Every ranked vehicle folds as it does without extras.
+    assert index.identity_for("s3") == ("bmw", "serie 3")
+    assert index.identity_for("x5") == ("bmw", "x5")
+    # The extras take the existing identities; one already ranked keeps its own labels.
+    assert index.identity_for("dk-x5") == ("bmw", "x5")
+    assert index.identity_for("dk-serie") == ("bmw", "serie")

@@ -21,6 +21,7 @@ windshields into one forecast.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 
 from icor.domain.evidence import (
     REGISTRATIONS_VOCABULARY_EXCLUDED_REASON,
@@ -62,13 +63,20 @@ def _has_volume(connection: sqlite3.Connection) -> bool:
     return columns >= _VOLUME_COLUMNS
 
 
-def load_identity_index(connection: sqlite3.Connection) -> VehicleIdentityIndex:
+def load_identity_index(
+    connection: sqlite3.Connection,
+    extra_vehicles: Iterable[tuple[str, str, str]] = (),
+) -> VehicleIdentityIndex:
     """Build the canonical identity index from one snapshot's own labels.
 
     Both subqueries are aggregated before they meet, because joining
     `opportunity_estimate` straight onto `cohort_estimate` fans out to one row
     per opportunity-cohort pair and multiplies the registration volume the
     identity vocabulary is weighted by.
+
+    ``extra_vehicles`` (`vehicle_id, make, model`) are folded with the same
+    vocabulary without teaching it, so a backtest can place vehicles the
+    ranking does not hold while every ranked vehicle folds exactly as before.
     """
 
     if _has_volume(connection):
@@ -80,9 +88,20 @@ def load_identity_index(connection: sqlite3.Connection) -> VehicleIdentityIndex:
     else:
         rows = f"SELECT v.vehicle_id, v.make, v.model, 0 {_RANKABLE_VEHICLES}"
     fetched = connection.execute(rows).fetchall()
-    return VehicleIdentityIndex.from_rows(
-        fetched, vocabulary_volume=_vocabulary_volume(connection, fetched)
-    )
+    known = {row[0] for row in fetched}
+    extra = [
+        (vehicle_id, make, model, 0.0)
+        for vehicle_id, make, model in extra_vehicles
+        if vehicle_id not in known
+    ]
+    if not extra:
+        return VehicleIdentityIndex.from_rows(
+            fetched, vocabulary_volume=_vocabulary_volume(connection, fetched)
+        )
+    teaching = _vocabulary_volume(connection, fetched)
+    if teaching is None:
+        teaching = {row[0]: float(row[3] or 0.0) for row in fetched}
+    return VehicleIdentityIndex.from_rows([*fetched, *extra], vocabulary_volume=teaching)
 
 
 def _vocabulary_volume(
