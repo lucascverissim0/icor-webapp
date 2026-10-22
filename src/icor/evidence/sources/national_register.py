@@ -104,6 +104,28 @@ PROFILES: dict[str, RegisterProfile] = {
                 "published; later cohorts come from registrations"
             ),
         ),
+        RegisterProfile(
+            source_id="rsv-vypis-vozidel",
+            geography="CZ",
+            publisher="Ministerstvo dopravy (Ministry of Transport), Czechia",
+            definition=(
+                "the year of Datum 1. registrace, the first registration anywhere "
+                "(Kategorie vozidla M1, status PROVOZOVANÉ)"
+            ),
+            # The register writes "." for a missing value.
+            masks=frozenset({".", "---"}),
+        ),
+        RegisterProfile(
+            source_id="motorstyrelsen-dmr-statistikudtraek",
+            geography="DK",
+            publisher="Motorstyrelsen, Denmark",
+            definition=(
+                "the year of KoeretoejOplysningFoersteRegistreringDato, which for a used "
+                "import is its first registration abroad (Personbil, status Registreret, "
+                "one record per vehicle)"
+            ),
+            masks=frozenset({"*"}),
+        ),
     )
 }
 

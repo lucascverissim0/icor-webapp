@@ -35,6 +35,8 @@ SOURCE_KEYS = (
     "lt-fleet",
     "ee-fleet",
     "si-fleet",
+    "cz-fleet",
+    "dk-fleet",
 )
 
 
@@ -113,6 +115,14 @@ def _acquisition_adapter(
         )
     if source_key == "si-fleet":
         return "acquire_si_fleet.py", ("--model-head",), "official OPSI fleet acquisition"
+    if source_key == "cz-fleet":
+        return "acquire_cz_fleet.py", (), "official RSV fleet acquisition"
+    if source_key == "dk-fleet":
+        return (
+            "acquire_dk_fleet.py",
+            ("--name", official.url.rsplit("/", 1)[-1]),
+            "official DMR fleet acquisition",
+        )
     return (
         "acquire_eea_history.py",
         ("--year", str(official.coverage_start.year)),

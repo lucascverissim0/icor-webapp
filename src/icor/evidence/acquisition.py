@@ -476,6 +476,82 @@ OFFICIAL_SOURCES = {
         rejected_count=12_025,
         direct_download=False,
     ),
+    "cz-fleet": OfficialSource(
+        key="cz-fleet",
+        # Aggregated by scripts/acquire_cz_fleet.py, streaming the 2026-10-01 monthly
+        # extract (7,471,817,357 gzip bytes as served, sha256 4bd4a0e4…); counts only.
+        # The extract is replaced monthly, so re-acquisition gives a newer snapshot.
+        release_id="cz-rsv-vypis-vozidel-20261001",
+        source_id="rsv-vypis-vozidel",
+        publisher="Ministerstvo dopravy (Ministry of Transport), Czechia",
+        url="https://download.dataovozidlech.cz/vypiszregistru/vypisvozidel",
+        published_at=datetime(2026, 10, 1, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 10, 1),
+        geography="CZ",
+        geography_version="Czechia Registr silničních vozidel 2026-10-01",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="cz-rsv-vehicle-register",
+        terms_url="https://download.dataovozidlech.cz/",
+        permitted_local_use=(
+            "Open data under the data.gov.cz terms of use, equivalent to CC0; no "
+            "attribution or use restriction applies."
+        ),
+        parser_name="national_register_cohorts_csv_v1",
+        expected_schema=(
+            "RSV výpis vozidel with Kategorie vozidla M1 and Status PROVOZOVANÉ aggregated "
+            "by Tovární značka, Obchodní označení, and the year of Datum 1. registrace"
+        ),
+        suffix=".csv",
+        artifact_bytes=4_203_416,
+        sha256="6f6e5eb851e5f548ffc5afb06b3bc159941f59a6963aa46ef74b9bbf32a33b53",
+        raw_count=155_493,
+        accepted_count=65_944,
+        rejected_count=89_549,
+        direct_download=False,
+    ),
+    "dk-fleet": OfficialSource(
+        key="dk-fleet",
+        # Aggregated by scripts/acquire_dk_fleet.py, streaming the 2026-10-20 weekly
+        # extract over anonymous FTP (7,083,256,344 bytes, sha256 710895a9…); counts only.
+        # Plain FTP has no transport integrity; the extract's own CRC-32 and the
+        # aggregate's pinned checksum stand in for it.
+        release_id="dk-dmr-statistikudtraek-20261020",
+        source_id="motorstyrelsen-dmr-statistikudtraek",
+        publisher="Motorstyrelsen (Danish Motor Vehicle Agency)",
+        url=(
+            "ftp://5.44.137.84/ESStatistikListeModtag/"
+            "ESStatistikListeModtag-20261020-122157.zip"
+        ),
+        published_at=datetime(2026, 10, 20, 10, 22, 16, tzinfo=UTC),
+        coverage_start=date(1900, 1, 1),
+        coverage_end=date(2026, 10, 20),
+        geography="DK",
+        geography_version="Denmark DMR Statistikudtræk 2026-10-20",
+        measure=Measure.ACTIVE_FLEET,
+        dependency_group="dk-dmr-vehicle-register",
+        terms_url=(
+            "https://motorst.dk/erhverv/motorregistret-for-virksomheder/"
+            "faa-adgang-til-motorregistret/andre-adgange"
+        ),
+        permitted_local_use=(
+            "Free to use (\"Det koster ikke noget at anvende udtrækket\"); no reuse "
+            "licence is stated, and reuse is not forbidden."
+        ),
+        parser_name="national_register_cohorts_csv_v1",
+        expected_schema=(
+            "DMR Statistikudtræk Personbil records with status Registreret, one per "
+            "KoeretoejIdent, aggregated by KoeretoejMaerkeTypeNavn, KoeretoejModelTypeNavn, "
+            "and the year of KoeretoejOplysningFoersteRegistreringDato"
+        ),
+        suffix=".csv",
+        artifact_bytes=1_083_018,
+        sha256="15112314ac7642604fb60eb71e962819bbe4718c411a2cbfe51ec9b6b712d7b5",
+        raw_count=45_268,
+        accepted_count=26_434,
+        rejected_count=18_834,
+        direct_download=False,
+    ),
 }
 
 _EEA_HISTORY_ARTIFACTS = {

@@ -22,11 +22,18 @@ def test_catalog_contains_only_reviewed_https_sources():
         "lt-fleet",
         "ee-fleet",
         "si-fleet",
+        "cz-fleet",
+        "dk-fleet",
     }
     expected.update(f"eea-{year}-final" for year in range(2010, 2024))
     assert set(OFFICIAL_SOURCES) == expected
     for source in OFFICIAL_SOURCES.values():
-        validate_source_url(source, source.url)
+        if source.direct_download or source.key != "dk-fleet":
+            validate_source_url(source, source.url)
+    # Denmark publishes its register only over anonymous FTP; its reviewed adapter
+    # allowlists that host and the aggregate is pinned by checksum.
+    assert OFFICIAL_SOURCES["dk-fleet"].url.startswith("ftp://5.44.137.84/")
+    assert OFFICIAL_SOURCES["dk-fleet"].direct_download is False
 
 
 def test_historical_sources_use_new_canonical_release_revisions() -> None:
@@ -138,6 +145,8 @@ def test_national_registers_are_dated_aggregates_read_by_their_reviewed_profile(
         ("lt-fleet", "LT"),
         ("ee-fleet", "EE"),
         ("si-fleet", "SI"),
+        ("cz-fleet", "CZ"),
+        ("dk-fleet", "DK"),
     ):
         source = OFFICIAL_SOURCES[key]
         assert source.parser_name == PARSER_NAME
