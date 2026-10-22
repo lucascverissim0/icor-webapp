@@ -723,6 +723,22 @@ def preview(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _family_keys(decision: Any) -> set[str]:
+    """Every family an identity decision names, its variants' included."""
+
+    keys: set[str] = set()
+    if isinstance(decision, dict):
+        for name, value in decision.items():
+            if name == "family":
+                keys.update([value] if isinstance(value, str) else value or [])
+            else:
+                keys |= _family_keys(value)
+    elif isinstance(decision, list):
+        for item in decision:
+            keys |= _family_keys(item)
+    return keys
+
+
 def merge(arguments: argparse.Namespace) -> int:
     rows_by_code = _catalogue_rows_by_code()
     index = json.loads((REVIEW / "index.json").read_text(encoding="utf-8"))
@@ -734,17 +750,42 @@ def merge(arguments: argparse.Namespace) -> int:
         previous = json.loads((PRIVATE / "decisions.json").read_text(encoding="utf-8"))
         families.update(previous["families"])
         identities.update(previous["identities"])
+    replace = getattr(arguments, "replace", False)
+    if replace and previous is None:
+        raise SystemExit("--replace applies only to a later round")
+    replaceable_families = set(previous["families"]) if replace and previous else set()
+    replaceable_identities = set(previous["identities"]) if replace and previous else set()
+    redecided: set[str] = set()
+    redefined: set[str] = set()
     for name in arguments.decided:
         document = json.loads(Path(name).read_text(encoding="utf-8"))
         _load_reviewer(Path(name), rows_by_code)
         for key, family in document["families"].items():
             if key in families and families[key] != family:
-                raise SystemExit(f"family {key} is defined differently in two batches")
+                if key not in replaceable_families:
+                    raise SystemExit(f"family {key} is defined differently in two batches")
+                replaceable_families.discard(key)
+                redefined.add(key)
             families[key] = family
         for key, decision in document["identities"].items():
             if key in identities and identities[key] != decision:
-                raise SystemExit(f"identity {key} is decided differently in two batches")
+                if key not in replaceable_identities:
+                    raise SystemExit(f"identity {key} is decided differently in two batches")
+                replaceable_identities.discard(key)
+            redecided.add(key)
             identities[key] = decision
+    if redefined:
+        # A redefined family changes every identity that names it, so each of them
+        # must have been re-decided in this round, not carried over unseen.
+        unseen = sorted(
+            key
+            for key, decision in identities.items()
+            if key not in redecided and _family_keys(decision) & redefined
+        )
+        if unseen:
+            raise SystemExit(
+                f"redefined families are used by identities this round did not decide: {unseen[:5]}"
+            )
     decisions = {
         "format": DECISIONS_FORMAT,
         "version": DECISIONS_VERSION,
@@ -817,6 +858,11 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("second")
     merge_parser = commands.add_parser("merge")
     merge_parser.add_argument("decided", nargs="+")
+    merge_parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="a re-review round may redefine earlier decisions it re-decides in full",
+    )
     commands.add_parser("coverage")
     preview_parser = commands.add_parser("preview")
     preview_parser.add_argument("output")

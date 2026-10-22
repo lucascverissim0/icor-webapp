@@ -7747,3 +7747,24 @@ build ok; `openapi:check` ok; Playwright 32 passed (includes the 390 px data-cov
    worktree; run the gates above; review round for new identities; promote.
 2. Fix the `prepare` pre-1985 catalogue-row filter, then re-check affected decided notes.
 3. Open question for Lucas: none blocking. Push/deploy not authorized.
+
+### Review round `r3-old-codes` merged (2026-10-22, later)
+`458b6c2` fixed the `prepare` filter (codes are hidden only when every row ended before 1980; 531
+codes in 107 makes returned). One re-checker scanned all 1,683 decided identities (114 flagged,
+~60 examined year by year with catalogue rows and production dates). Changed, 316 units:
+BMW 520i/528i/535i 1988 shared with the restored E12/E28 code (all 29 users of `bmw/5-series`
+re-decided); Renault 4 1992 onto the R4 code; Mini bare label and Mini Cooper get the classic Mini
+family (`r3-mini/mini-classic`; 2000 no longer falsely on the R50, 2001 shared); Land Rover Defender
+1991–2015 onto the classic Defender code (filed under ROVER only — a cross-brand gap, not the date
+filter). Rejected: Alto, Renault 5/Super 5, E21/E23, 300 D strays, first-generation Mustang/Camaro.
+New `merge --replace` (this commit): a later round may redefine earlier entries only if every
+identity naming a redefined family is re-decided in the same round; plain `merge` still refuses.
+Merged: 806 families, 1,683 identities (exactly the 7 intended changed), coverage 0.99001; report
+regenerated (tier C 621 codes). Files: private `review/rounds/r3-old-codes/` (`adjudication/
+decide_r3.py`, `diff.py`); backup `decisions.before-r3-old-codes.json`.
+**Open follow-up — cross-brand round:** decisions say "no code" where rows exist under another
+brand: MG ZR (166 units), MG TF (109, MG F code), MG ZS 2001–06 (59) under ROVER; earlier left
+undecided: Lacetti (Daewoo), Chrysler Compass/Renegade/Grand Cherokee (Jeep), BMW-filed Mini/Cooper,
+Galloper (Hyundai), E-HS9 (Hongqi), Niva Travel (VAZ). Needs `prepare` to add related brands to a
+batch's makes. The decided renault 5 note "original R5 has no code" is inaccurate (no allocation
+effect).
