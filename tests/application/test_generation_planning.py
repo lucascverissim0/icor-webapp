@@ -927,3 +927,39 @@ def test_a_register_whose_labels_do_not_teach_says_so_and_stays_complete() -> No
     assert VOCABULARY_EXCLUDED_REASON in codes[2020]
     assert STOCK_LOWER_BOUND_REASON not in codes[2020]
     assert codes[2020][0] == "observed-stock-anchored-cohort"
+
+
+def _provisional_2023(repository, values) -> None:
+    """Publish 2023 as a provisional release holding only ``values`` (name -> cars)."""
+
+    repository.releases = (
+        *repository.releases,
+        SimpleNamespace(
+            release_id="release-eea-provisional",
+            dependency_group="european-register-provisional",
+            source_id="eea-co2-monitoring",
+            publication_status="provisional",
+        ),
+    )
+    for name, value in values:
+        generation = _add_vehicle(repository, name, ((2023, value),))
+        repository.observations[-1].release_id = "release-eea-provisional"
+        assert repository.observations[-1].canonical_vehicle_id == generation.canonical_vehicle_id
+
+
+def test_a_vehicle_absent_from_an_incomplete_provisional_year_has_not_ended() -> None:
+    repository = Repository()  # the Golf: 100, 110, 120 to 2022, final
+    _provisional_2023(repository, (("newcomer", "30"),))  # 30 < 0.9 x 120
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == set(range(2020, 2029))
+
+
+def test_a_vehicle_absent_from_a_complete_provisional_year_has_ended() -> None:
+    repository = Repository()
+    _provisional_2023(repository, (("successor", "125"),))  # 125 >= 0.9 x 120
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}

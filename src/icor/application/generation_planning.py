@@ -19,6 +19,7 @@ from icor.domain.evidence import (
     VOCABULARY_EXCLUDED_REASON,
     ConfidenceBand,
     Measure,
+    PublicationStatus,
 )
 from icor.domain.generations import GenerationIdentityKind
 from icor.evidence.normalization import stable_evidence_id
@@ -40,6 +41,8 @@ from icor.forecasting.survival import (
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 
 _BATCH_SIZE = 20_000
+#: A provisional market-year holding less than this share of the year before is incomplete.
+INCOMPLETE_PROVISIONAL_SHARE = Decimal("0.9")
 _SUPPORTED_HORIZONS = frozenset({2028, 2031})
 
 
@@ -287,6 +290,29 @@ class GenerationPlanningService:
             latest_year[geography] = max(
                 latest_year.get(geography, 0), max(series[_generation, _vehicle, geography])
             )
+        # A provisional year far smaller than the final year before it is
+        # incomplete (EEA's provisional 2025 lacks whole makes in Poland), so a
+        # vehicle absent from it has not ended there and is forecast for it.
+        market_totals: dict[tuple[str, int], Decimal] = defaultdict(Decimal)
+        for (_generation, _vehicle, geography), years in series.items():
+            for year, annual in years.items():
+                market_totals[geography, year] += annual.registrations
+        ending_year = dict(latest_year)
+        incomplete_years: set[tuple[str, int]] = set()
+        for geography, newest in latest_year.items():
+            statuses = {
+                status
+                for source, status in coverage_candidates[geography, newest]
+                if source == coverage[geography, newest]
+            }
+            previous = market_totals.get((geography, newest - 1), Decimal(0))
+            if (
+                statuses == {str(PublicationStatus.PROVISIONAL)}
+                and previous > 0
+                and market_totals[geography, newest] < INCOMPLETE_PROVISIONAL_SHARE * previous
+            ):
+                ending_year[geography] = newest - 1
+                incomplete_years.add((geography, newest))
 
         # A register's count of the cars still on the road replaces modelled
         # survival for the cohorts it covers completely, but only in a market
@@ -336,7 +362,7 @@ class GenerationPlanningService:
             if observed_years:
                 short_history = len(observed_years) < 3
                 end_year = _end_year(
-                    generation, max(observed_years), latest_year[geography]
+                    generation, max(observed_years), ending_year[geography]
                 )
                 values = _fill_internal_gaps(observed_years, covered_years[geography])
                 if end_year is not None:
@@ -367,7 +393,10 @@ class GenerationPlanningService:
                     for year, value in forecasts.items():
                         # A year the market reported is evidence, not a gap:
                         # a vehicle absent from it sold none under this name.
-                        if year not in covered_years[geography]:
+                        if (
+                            year not in covered_years[geography]
+                            or (geography, year) in incomplete_years
+                        ):
                             values[year] = _AnnualValue(value, all_input_ids, "forecast")
             stock = {
                 year: annual
