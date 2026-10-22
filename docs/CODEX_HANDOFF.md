@@ -7768,3 +7768,20 @@ undecided: Lacetti (Daewoo), Chrysler Compass/Renegade/Grand Cherokee (Jeep), BM
 Galloper (Hyundai), E-HS9 (Hongqi), Niva Travel (VAZ). Needs `prepare` to add related brands to a
 batch's makes. The decided renault 5 note "original R5 has no code" is inaccurate (no allocation
 effect).
+
+### Review round `r4-cross-brand` merged (2026-10-22, later)
+Batch rows only show codes filed under the batch's own makes, so rebadged or parent-brand filing
+hid correct codes. One re-checker scanned all 405 decided identities with unassigned/outside demand
+(130,352 units) and every undecided identity ≥ 5 units against rows under other makes. Merged with
+`merge --replace` (private `review/rounds/r4-cross-brand/`, `adjudication/decide_r4.py`, `diff.py`,
+`merge_check.py`): 16 identities changed (6,439 units: MG ZR/TF/ZS 2001–06 under ROVER rows,
+Chevrolet Lacetti J200, BMW-filed Cooper/MINI, Mitsubishi-filed Galloper, E-HS9, Niva Travel
+variants, Grand Cherokee family gains the WJ filed under "Chrysler Jeep", Italian Chrysler-filed
+Renegade/Compass/Grand Cherokee, Toyota-filed Lexus routed by model name), 39 added (1,260 units),
+1 family redefined, 8 new. Rejected for lack of evidence of the same glass: Alpine A290, Ebro
+S400/S800, 2025 Grandis, Eclipse Cross EV (the catalogue gives rebadges their own codes);
+ambiguous labels left (Daewoo Nubira, Chrysler "Grand", Renault Duster, Toyota LC). Lexus-make LC/LS
+are still undecided.
+Result: 814 families, 1,722 identities; coverage 0.99016; report regenerated (tier A 485, B 300,
+C 624 codes; outside 109,663, unassignable 1,315,026, unreviewed 2,430,661 cars). Remaining
+follow-up: make-alias spellings (e.g. "Ford Werke", "Magyar Suzuki") belong in identity rules.
