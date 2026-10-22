@@ -386,7 +386,7 @@ class EurocodeDataCountryGapResponse(ApiModel):
     # The newest year, up to ``year``, whose age bands the office reports in full.
     band_year: int | None
     band_official_total: int | None
-    # Registration years under "less than 2 years": "2y", "3y" or "unclear".
+    # Registration years per band: "2y", "3y", "2y-4y" (four in "2 to 5 years") or "unclear".
     convention: str | None
     # The office has no band over twenty years; its "Y10-20" counts all older cars.
     open_ended: bool

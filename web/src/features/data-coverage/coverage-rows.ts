@@ -161,6 +161,7 @@ export function bandLabel(band: string, openEnded: boolean): string {
 const CONVENTION_TEXT: Record<string, string> = {
   '2y': '2 registration years count as "less than 2 years"',
   '3y': '3 registration years count as "less than 2 years", so every band edge moves up a year',
+  '2y-4y': '2 registration years count as "less than 2 years" and 4 as "2–5 years", so "5–10 years" holds 4 (ages 6–9)',
   unclear: 'convention unclear: the model is shown under both readings (2 and 3 registration years)',
 }
 

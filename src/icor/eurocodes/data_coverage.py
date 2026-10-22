@@ -27,8 +27,27 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, NamedTuple
 
+from icor.domain.age_bands import (
+    AGE_BANDS,
+    BAND_LAYOUTS,
+    THREE_YEARS,
+    TWO_FOUR_YEARS,
+    TWO_YEARS,
+    UNCLEAR,
+    band_layout,
+)
 from icor.eurocodes.catalog import CatalogueRow
 from icor.eurocodes.runtime import EurocodeMap
+
+__all__ = [
+    "AGE_BANDS",
+    "BAND_LAYOUTS",
+    "THREE_YEARS",
+    "TWO_FOUR_YEARS",
+    "TWO_YEARS",
+    "UNCLEAR",
+    "band_layout",
+]
 
 DOCUMENT_FORMAT = "icor-eurocode-data-coverage"
 DOCUMENT_VERSION = 2
@@ -53,17 +72,6 @@ PRE_2010_SHARE_CAP_C = Decimal("0.5")
 #: A code launched this many years before the report year or later is new: its
 #: cars are mostly the forecast year's, so a low observed share is expected.
 NEW_CODE_YEARS = 2
-
-#: Eurostat's age bands, as ages in whole years at the end of the stock year, for
-#: an office that counts two registration years as "less than 2 years". One that
-#: counts three moves every edge up a year (`CountryComparison.convention`).
-AGE_BANDS: tuple[tuple[str, int, int | None], ...] = (
-    ("Y_LT2", 0, 1),
-    ("Y2-5", 2, 4),
-    ("Y5-10", 5, 9),
-    ("Y10-20", 10, 19),
-    ("Y_GT20", 20, None),
-)
 
 _ZERO = Decimal(0)
 
@@ -142,22 +150,17 @@ def _share(part: Decimal, whole: Decimal) -> float | None:
     return None if not whole else round(float(part / whole), 4)
 
 
-def _band(age: int, shift: int = 0, *, open_ended: bool = False) -> str | None:
+def _band(age: int, convention: str | None = TWO_YEARS, *, open_ended: bool = False) -> str | None:
     """The Eurostat band of a cohort ``age`` years old, under an office's convention."""
 
     if age < 0:
         return None
-    age = max(age - shift, 0)
-    for name, low, high in AGE_BANDS:
+    for name, low, high in band_layout(convention):
         if age >= low and (high is None or age <= high):
             if open_ended and name == AGE_BANDS[-1][0]:
                 return AGE_BANDS[-2][0]
             return name
     return None
-
-
-#: Age-band conventions (see `icor.evidence.eurostat_age_conventions`).
-TWO_YEARS, THREE_YEARS, UNCLEAR = "2y", "3y", "unclear"
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +177,7 @@ class CountryComparison:
 
     stock: OfficialStock
     modelled: Mapping[int, Mapping[int, Decimal]]
-    #: The band convention of ``stock.band_year``: "2y", "3y" or "unclear".
+    #: The band convention of ``stock.band_year``: "2y", "3y", "2y-4y" or "unclear".
     convention: str | None = None
     before_sources: Mapping[int, Mapping[int, Decimal]] = field(default_factory=dict)
     unnamed: Mapping[int, Mapping[int, Decimal]] = field(default_factory=dict)
@@ -210,11 +213,11 @@ def _split(gap: Decimal, before: Decimal, unnamed: Decimal) -> dict[str, int]:
 
 
 def _by_band(
-    cohorts: Mapping[int, Decimal], year: int, shift: int, open_ended: bool
+    cohorts: Mapping[int, Decimal], year: int, convention: str | None, open_ended: bool
 ) -> dict[str, Decimal]:
     totals: dict[str, Decimal] = defaultdict(Decimal)
     for cohort, units in cohorts.items():
-        name = _band(year - cohort, shift, open_ended=open_ended)
+        name = _band(year - cohort, convention, open_ended=open_ended)
         if name is not None:
             totals[name] += units
     return totals
@@ -246,20 +249,20 @@ def _country_gap(comparison: CountryComparison) -> dict[str, Any]:
     band_year = stock.band_year
     if band_year is None:
         return entry
-    shift = 1 if comparison.convention == THREE_YEARS else 0
+    convention = comparison.convention
     model_bands = _by_band(
-        comparison.modelled.get(band_year, {}), band_year, shift, stock.open_ended
+        comparison.modelled.get(band_year, {}), band_year, convention, stock.open_ended
     )
     alternative = (
-        _by_band(comparison.modelled.get(band_year, {}), band_year, 1, stock.open_ended)
-        if comparison.convention == UNCLEAR
+        _by_band(comparison.modelled.get(band_year, {}), band_year, THREE_YEARS, stock.open_ended)
+        if convention == UNCLEAR
         else None
     )
     before_bands = _by_band(
-        comparison.before_sources.get(band_year, {}), band_year, shift, stock.open_ended
+        comparison.before_sources.get(band_year, {}), band_year, convention, stock.open_ended
     )
     unnamed_bands = _by_band(
-        comparison.unnamed.get(band_year, {}), band_year, shift, stock.open_ended
+        comparison.unnamed.get(band_year, {}), band_year, convention, stock.open_ended
     )
     for name, _low, _high in AGE_BANDS:
         if stock.open_ended and name == AGE_BANDS[-1][0]:

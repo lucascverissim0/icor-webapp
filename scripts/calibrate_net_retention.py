@@ -55,6 +55,7 @@ def market_years(
     years = sorted(int(year) for year in stock_document["dimension"]["time"]["category"]["index"])
     registrations = eurostat_new_registrations.parse(registration_document, geographies)
     youngest = eurostat_car_stock.band_by_year(stock_document, geographies, "Y_LT2")
+    second = eurostat_car_stock.band_by_year(stock_document, geographies, "Y2-5")
     result: dict[str, list[net_retention.MarketYear]] = {}
     for geography in sorted(geographies):
         market_registrations = registrations.get(geography, {})
@@ -65,7 +66,7 @@ def market_years(
             and not eurostat_new_registrations.includes_used_imports(geography, year)
         }
         conventions = eurostat_age_conventions.measure(
-            youngest.get(geography, {}), market_registrations, geography
+            youngest.get(geography, {}), market_registrations, geography, second.get(geography)
         )
         for year in years:
             convention = conventions.get(year)
@@ -82,7 +83,7 @@ def market_years(
             result.setdefault(geography, []).append(
                 net_retention.MarketYear(
                     year=year,
-                    shift=convention.shift,
+                    convention=convention.convention,
                     official=official,
                     registrations=usable,
                     open_ended=stock.open_ended,

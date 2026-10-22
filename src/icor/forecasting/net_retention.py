@@ -25,13 +25,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from icor.domain.age_bands import TWO_YEARS, band_ages
+
 #: The bands calibrated: the app serves cars up to twenty years old.
-BANDS: tuple[tuple[str, int, int], ...] = (
-    ("Y_LT2", 0, 1),
-    ("Y2-5", 2, 4),
-    ("Y5-10", 5, 9),
-    ("Y10-20", 10, 19),
-)
+BANDS: tuple[str, ...] = ("Y_LT2", "Y2-5", "Y5-10", "Y10-20")
 TOLERANCE = 0.03
 RECENT_YEARS = 3
 FIT_ITERATIONS = 200
@@ -44,8 +41,8 @@ class MarketYear:
     """One office's clean inputs for one stock year."""
 
     year: int
-    #: Years every band edge moves up (1 when three registration years are "under 2").
-    shift: int
+    #: The office's band convention (`icor.domain.age_bands`).
+    convention: str
     #: Official cars by band; a flagged or missing band is absent.
     official: Mapping[str, int]
     #: Usable new registrations by registration year.
@@ -53,24 +50,20 @@ class MarketYear:
     #: The office's last band counts every car ten years and older.
     open_ended: bool = False
 
-
-def band_ages(low: int, high: int, shift: int) -> range:
-    """Ages a band covers under a convention (`data_coverage._band`)."""
-
-    return range(0 if low == 0 else low + shift, high + shift + 1)
+    def ages(self, name: str) -> range:
+        return band_ages(name, self.convention or TWO_YEARS)
 
 
 def modelled(
     item: MarketYear,
-    low: int,
-    high: int,
+    name: str,
     share: Callable[[int], float],
     multiplier: Callable[[int], float] = lambda _age: 1.0,
 ) -> float | None:
     """Cars the curve leaves in a band, or None when a registration year is unusable."""
 
     total = 0.0
-    for age in band_ages(low, high, item.shift):
+    for age in item.ages(name):
         registrations = item.registrations.get(item.year - age)
         if registrations is None:
             return None
@@ -80,11 +73,11 @@ def modelled(
 
 def band_ratios(item: MarketYear, share: Callable[[int], float]) -> dict[str, float]:
     ratios = {}
-    for name, low, high in BANDS:
+    for name in BANDS:
         official = item.official.get(name)
-        if official is None or (item.open_ended and name == BANDS[-1][0]):
+        if official is None or (item.open_ended and name == BANDS[-1]):
             continue
-        value = modelled(item, low, high, share)
+        value = modelled(item, name, share)
         if value:
             ratios[name] = official / value
     return ratios
@@ -148,9 +141,7 @@ def fit_curve(
 
     if all(value >= 1 for value in goal.values()):
         return None
-    bands = [
-        (name, band_ages(low, high, latest.shift)) for name, low, high in BANDS if name in goal
-    ]
+    bands = [(name, latest.ages(name)) for name in BANDS if name in goal]
     weights = {
         name: [latest.registrations.get(latest.year - age, 0) * share(age) for age in ages]
         for name, ages in bands
@@ -223,17 +214,17 @@ def backtest(
     for item in years:
         if item.year <= fit_until:
             continue
-        for name, low, high in BANDS:
+        for name in BANDS:
             official = item.official.get(name)
-            if official is None or (item.open_ended and name == BANDS[-1][0]):
+            if official is None or (item.open_ended and name == BANDS[-1]):
                 continue
-            base = modelled(item, low, high, share)
+            base = modelled(item, name, share)
             if not base:
                 continue
             calibrated = (
                 base
                 if curve is None
-                else modelled(item, low, high, share, lambda age: curve[min(age, len(curve) - 1)])
+                else modelled(item, name, share, lambda age: curve[min(age, len(curve) - 1)])
             )
             cells.append((item.year, name, official, base, calibrated or base))
     return curve, Backtest(tuple(cells))

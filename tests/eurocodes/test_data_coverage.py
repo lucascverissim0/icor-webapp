@@ -255,6 +255,34 @@ def test_a_three_year_convention_moves_every_band_edge_up_a_year():
     assert bands(three) == {"Y_LT2": 10, "Y2-5": 20, "Y5-10": 30, "Y10-20": 40, "Y_GT20": 0}
 
 
+def test_italys_convention_counts_four_registration_years_in_two_to_five():
+    stock = OfficialStock(
+        geography="IT",
+        year=2025,
+        total=400,
+        bands={"Y_LT2": 100, "Y2-5": 100, "Y5-10": 100, "Y10-20": 100},
+        band_year=2025,
+        band_total=400,
+        open_ended=True,
+    )
+    # Ages 1, 2, 5, 6, 9 and 10.
+    modelled = {
+        2025: {
+            2024: Decimal(1),
+            2023: Decimal(2),
+            2020: Decimal(4),
+            2019: Decimal(8),
+            2016: Decimal(16),
+            2015: Decimal(32),
+        }
+    }
+
+    report = _report([], countries={"IT": CountryComparison(stock, modelled, convention="2y-4y")})
+
+    bands = {item["band"]: item["modelled"] for item in report["country_gap"][0]["bands"]}
+    assert bands == {"Y_LT2": 1, "Y2-5": 6, "Y5-10": 24, "Y10-20": 32}
+
+
 def test_an_unclear_convention_is_reported_under_both_readings():
     stock = OfficialStock(
         geography="SE",

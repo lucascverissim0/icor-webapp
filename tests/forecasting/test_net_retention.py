@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from icor.application.generation_planning import GenerationPlanningService
+from icor.domain.age_bands import band_ages
 from icor.forecasting import net_retention
 from icor.forecasting.net_retention import MarketYear
 from icor.forecasting.survival import (
@@ -21,13 +22,13 @@ def _share(age: int) -> float:
     return 0.95**age
 
 
-def _market(year: int, retention, *, shift: int = 0, official=None) -> MarketYear:
+def _market(year: int, retention, *, convention: str = "2y", official=None) -> MarketYear:
     registrations = {item: 1_000 for item in range(year - SUPPORT, year + 1)}
     computed = {}
-    for name, low, high in net_retention.BANDS:
-        ages = net_retention.band_ages(low, high, shift)
+    for name in net_retention.BANDS:
+        ages = band_ages(name, convention)
         computed[name] = round(sum(1_000 * _share(age) * retention(age) for age in ages))
-    return MarketYear(year, shift, official or computed, registrations)
+    return MarketYear(year, convention, official or computed, registrations)
 
 
 def _exporting(age: int) -> float:
@@ -83,8 +84,8 @@ def test_the_fitted_curve_reproduces_the_bands_and_never_increases_or_exceeds_on
     assert max(curve) == 1.0
     # Bands kept whole stay whole: the decline starts after their oldest age.
     assert curve[:5] == (1.0,) * 5
-    for name, low, high in net_retention.BANDS[2:]:
-        ages = net_retention.band_ages(low, high, 0)
+    for name in net_retention.BANDS[2:]:
+        ages = band_ages(name, "2y")
         modelled = sum(1_000 * _share(age) for age in ages)
         fitted = sum(1_000 * _share(age) * curve[age] for age in ages)
         assert fitted / modelled == pytest.approx(goal[name], abs=0.02)
@@ -117,9 +118,23 @@ def test_the_backtest_keeps_a_curve_only_where_it_predicts_later_years_better():
 
 
 def test_a_three_year_convention_moves_every_band_edge_but_the_first():
-    assert list(net_retention.band_ages(0, 1, 1)) == [0, 1, 2]
-    assert list(net_retention.band_ages(2, 4, 1)) == [3, 4, 5]
-    assert list(net_retention.band_ages(10, 19, 0)) == list(range(10, 20))
+    assert list(band_ages("Y_LT2", "3y")) == [0, 1, 2]
+    assert list(band_ages("Y2-5", "3y")) == [3, 4, 5]
+    assert list(band_ages("Y10-20", "2y")) == list(range(10, 20))
+
+
+def test_italy_counts_four_registration_years_in_two_to_five():
+    assert list(band_ages("Y_LT2", "2y-4y")) == [0, 1]
+    assert list(band_ages("Y2-5", "2y-4y")) == [2, 3, 4, 5]
+    assert list(band_ages("Y5-10", "2y-4y")) == [6, 7, 8, 9]
+    assert list(band_ages("Y10-20", "2y-4y")) == list(range(10, 20))
+
+
+def test_a_market_year_reads_its_bands_under_its_convention():
+    italy = _market(2025, lambda _age: 1.0, convention="2y-4y")
+
+    assert italy.ages("Y2-5") == range(2, 6)
+    assert set(net_retention.targets([italy], _share, until=2025).values()) == {1.0}
 
 
 def test_the_retained_model_lowers_only_a_calibrated_market_and_every_quantile_alike():

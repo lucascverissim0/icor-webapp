@@ -270,11 +270,13 @@ def main(argv: list[str] | None = None) -> int:
         official = {}
         official_source: dict = {}
         youngest: dict[str, dict[int, int]] = {}
+        second: dict[str, dict[int, int]] = {}
         comparison_years: dict[str, set[int]] = {}
         if eurostat_path is not None:
             document = json.loads(eurostat_path.read_text(encoding="utf-8"))
             official = eurostat_car_stock.parse(document, geographies)
             youngest = eurostat_car_stock.band_by_year(document, geographies, "Y_LT2")
+            second = eurostat_car_stock.band_by_year(document, geographies, "Y2-5")
             comparison_years = {
                 geography: {stock.year, *((stock.band_year,) if stock.band_year else ())}
                 for geography, stock in official.items()
@@ -300,7 +302,10 @@ def main(argv: list[str] | None = None) -> int:
     conventions = {}
     for geography, stock in official.items():
         convention = eurostat_age_conventions.for_stock(
-            stock, youngest.get(geography, {}), registrations.get(geography, {})
+            stock,
+            youngest.get(geography, {}),
+            registrations.get(geography, {}),
+            second.get(geography),
         )
         conventions[geography] = convention.convention if convention else None
     scale = Decimal(1_000_000)

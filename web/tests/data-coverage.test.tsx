@@ -235,6 +235,10 @@ describe('DataCoverageWorkbench', () => {
         geography: 'BB', band_year: 2026, band_official_total: 1000, convention: '3y',
         bands: [band('Y_LT2', 1000, 900)],
       }),
+      country({
+        geography: 'CC', band_year: 2026, band_official_total: 1000, convention: '2y-4y',
+        bands: [band('Y_LT2', 1000, 900)],
+      }),
     )))
 
     const notes = await screen.findByRole('list', { name: 'Notes on the countries' })
@@ -244,6 +248,7 @@ describe('DataCoverageWorkbench', () => {
       'AA: 2 registration years count as "less than 2 years"',
       'AA: official new-car counts for registration years 2023, 2024 include used imports',
       'BB: 3 registration years count as "less than 2 years", so every band edge moves up a year',
+      'CC: 2 registration years count as "less than 2 years" and 4 as "2–5 years", so "5–10 years" holds 4 (ages 6–9)',
     ])
   })
 
