@@ -160,7 +160,28 @@ Spanish total), writes only counts by `MARCA`, `MODELO` and the year of `FEC_PRI
 with `¡` (27% of passenger cars, whole models at a time), so the
 `dgt_parque_cohorts_csv_v1` loader rejects masked groups, keeps cohorts before 2010 only
 (EEA registrations cover Spain from 2010) and flags every observation `stock-lower-bound`;
-the cohorts built from it carry the reason code `observed-stock-lower-bound`. EEA and KBA are placed in the same dependency group so
+the cohorts built from it carry the reason code `observed-stock-lower-bound`.
+Three more national registers are read by the shared `national_register_cohorts_csv_v1`
+loader, each through a reviewed profile in `icor.evidence.sources.national_register`. Each
+acquisition script writes only counts by make, model and the year of first registration
+anywhere (`icor.evidence.register_aggregate`), records the source's size and sha256, and
+keeps no VIN, plate or owner field. **Luxembourg** SNCA "Parc automobile du Luxembourg"
+(data.public.lu, CC0; attribute "Source: SNCA"): `scripts/acquire_lu_fleet.py` streams the
+monthly XML (`CATEU` M1/M1G, `DATCIRPRM`) and releases it as `lu-fleet`. **Lithuania** Regitra
+open vehicle park data (data.gov.lt dataset 1211, CC BY 4.0; attribute "Source: VĮ Regitra"):
+`scripts/acquire_lt_fleet.py --with-not-in-traffic` (M1, `DAE_STATUSAS` T or N as Eurostat
+counts Lithuania, `PIRM_REG_DATA`) releases `lt-fleet`; Regitra masks private cars unique by
+make, model and municipality as `Nuasmeninta`, which the loader rejects. **Estonia**
+Transpordiamet vehicle statuses (andmed.eesti.ee, CC BY-SA 4.0; attribute "Source:
+Transpordiamet"): `scripts/acquire_ee_fleet.py --with-suspended` (M1/M1G, registered or
+suspended as Eurostat counts Estonia, `ESMANE_REG`) releases `ee-fleet`. ShareAlike means a
+derived dataset distributed outside ICOR must carry CC BY-SA 4.0. Each script prints the
+aggregate path; stage it with `acquire_official_evidence.py --source <key> --artifact <path>`.
+The registers are dated snapshots pinned by checksum, so re-acquisition yields a new release.
+Their labels never teach the identity vocabulary (`labels-do-not-teach-vocabulary`).
+Survival is the UK curve lowered per market by `survival_curves/eurostat_net_retention.json`
+(`scripts/calibrate_net_retention.py`, from pinned Eurostat `road_eqs_carage` and
+`road_eqr_carmot`; Eurostat data is reused under CC BY 4.0). EEA and KBA are placed in the same dependency group so
 their overlap is not treated as independent confirmation.
 
 Dependency groups alone are not enough, and relying on them was a defect. Two
