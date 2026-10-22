@@ -175,7 +175,17 @@ make, model and municipality as `Nuasmeninta`, which the loader rejects. **Eston
 Transpordiamet vehicle statuses (andmed.eesti.ee, CC BY-SA 4.0; attribute "Source:
 Transpordiamet"): `scripts/acquire_ee_fleet.py --with-suspended` (M1/M1G, registered or
 suspended as Eurostat counts Estonia, `ESMANE_REG`) releases `ee-fleet`. ShareAlike means a
-derived dataset distributed outside ICOR must carry CC BY-SA 4.0. Each script prints the
+derived dataset distributed outside ICOR must carry CC BY-SA 4.0. **Slovenia** OPSI
+"Evidenca registriranih vozil" (podatki.gov.si, CC BY 4.0; attribute the Ministry of the
+Interior): `scripts/acquire_si_fleet.py --model-head` (M1/M1G registered, model before the
+first slash of D3) releases `si-fleet` from 2023-06-30, the last snapshot published.
+**Czechia** RSV výpis vozidel (download.dataovozidlech.cz, data.gov.cz terms equivalent to
+CC0): `scripts/acquire_cz_fleet.py` streams the monthly extract (M1, Status PROVOZOVANÉ,
+`Datum 1. registrace`) and releases `cz-fleet`; "." is the register's missing value.
+**Denmark** Motorstyrelsen DMR Statistikudtræk (anonymous FTP; the terms page says use is free
+and states no licence, and does not forbid reuse): `scripts/acquire_dk_fleet.py` streams the
+weekly 7 GB zip (Personbil, Registreret, one record per vehicle) and releases `dk-fleet`. Each
+script prints the
 aggregate path; stage it with `acquire_official_evidence.py --source <key> --artifact <path>`.
 The registers are dated snapshots pinned by checksum, so re-acquisition yields a new release.
 Their labels never teach the identity vocabulary (`labels-do-not-teach-vocabulary`).
