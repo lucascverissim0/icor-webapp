@@ -929,6 +929,18 @@ def test_a_register_whose_labels_do_not_teach_says_so_and_stays_complete() -> No
     assert codes[2020][0] == "observed-stock-anchored-cohort"
 
 
+_OFFICIAL_2023 = {("DE", 2023): 125}
+
+
+def test_without_the_offices_total_a_provisional_year_counts_as_complete() -> None:
+    repository = Repository()
+    _provisional_2023(repository, (("newcomer", "30"),))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
+
+
 def _provisional_2023(repository, values) -> None:
     """Publish 2023 as a provisional release holding only ``values`` (name -> cars)."""
 
@@ -949,26 +961,33 @@ def _provisional_2023(repository, values) -> None:
 
 def test_a_vehicle_absent_from_an_incomplete_provisional_year_has_not_ended() -> None:
     repository = Repository()  # the Golf: 100, 110, 120 to 2022, final
-    _provisional_2023(repository, (("newcomer", "30"),))  # 30 < 0.8 x 120
+    _provisional_2023(repository, (("newcomer", "30"),))  # 30 < 0.85 x 125
 
-    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+    GenerationPlanningService(official_registrations=_OFFICIAL_2023).apply(
+        repository, horizons=(2028,), seed=20260827
+    )
 
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == set(range(2020, 2029))
 
 
 def test_a_vehicle_absent_from_a_complete_provisional_year_has_ended() -> None:
     repository = Repository()
-    _provisional_2023(repository, (("successor", "125"),))  # 125 >= 0.8 x 120
+    _provisional_2023(repository, (("successor", "120"),))  # 120 >= 0.85 x 125
 
-    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+    GenerationPlanningService(official_registrations=_OFFICIAL_2023).apply(
+        repository, horizons=(2028,), seed=20260827
+    )
 
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
 
 
 def test_a_provisional_year_after_a_market_fall_is_complete() -> None:
+    # 30 is a quarter of 2022, but the office registered only 32 cars in 2023.
     repository = Repository()
-    _provisional_2023(repository, (("successor", "100"),))  # 100 >= 0.8 x 120
+    _provisional_2023(repository, (("successor", "30"),))
 
-    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+    GenerationPlanningService(official_registrations={("DE", 2023): 32}).apply(
+        repository, horizons=(2028,), seed=20260827
+    )
 
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}

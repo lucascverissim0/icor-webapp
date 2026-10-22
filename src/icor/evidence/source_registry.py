@@ -10,6 +10,7 @@ from icor.application.generation_mapping import GenerationMappingService
 from icor.application.generation_planning import GenerationPlanningService
 from icor.application.snapshot_build import EvidenceLoader
 from icor.domain.snapshots import SnapshotVersions
+from icor.evidence import eurostat_new_registrations
 from icor.evidence.identity import (
     ExactNormalizedIdentityResolver,
     IdentityAttributingRepository,
@@ -90,6 +91,7 @@ def official_repository_finalizer(
         raise ValueError("official generation mapping is incomplete")
     planning = GenerationPlanningService(
         survival=load_net_retained_survival_model(),
+        official_registrations=eurostat_new_registrations.load_committed_totals(),
     ).apply(repository, seed=20260827)
     if planning.cohort_count == 0 or planning.opportunity_count == 0:
         raise ValueError("official generation planning is incomplete")

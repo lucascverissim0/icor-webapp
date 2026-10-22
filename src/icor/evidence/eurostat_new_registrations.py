@@ -9,8 +9,10 @@ used imports among new registrations; values flagged ``d`` differ in definition.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from icor.evidence.eurostat_car_stock import json_stat_cells
@@ -27,6 +29,8 @@ LICENCE = "Eurostat reuse policy (Commission Decision 2011/833/EU), attribution 
 USED_IMPORTS_BEFORE_2013 = frozenset({"BG", "CY", "LT", "LV", "PL", "RO", "SK"})
 
 _GEOGRAPHY = {"EL": "GR", "UK": "GB"}
+#: National totals from 2010, written by scripts/pin_eurostat_registration_totals.py.
+TOTALS_PATH = Path(__file__).with_name("eurostat_registration_totals.json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,19 @@ def parse(
         year = int(coordinates[time_position])
         result.setdefault(geography, {})[year] = NewRegistrations(value, status)
     return result
+
+
+def load_committed_totals(path: Path | None = None) -> dict[tuple[str, int], int]:
+    """The committed national new-car totals, by (market, year)."""
+
+    document = json.loads((path or TOTALS_PATH).read_text(encoding="utf-8"))
+    if document.get("dataset") != DATASET:
+        raise ValueError("committed registration totals are not road_eqr_carmot")
+    return {
+        (geography, int(year)): int(count)
+        for geography, years in document["totals"].items()
+        for year, count in years.items()
+    }
 
 
 def includes_used_imports(geography: str, year: int) -> bool:

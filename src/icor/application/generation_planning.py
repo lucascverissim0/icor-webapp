@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -41,10 +42,10 @@ from icor.forecasting.survival import (
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 
 _BATCH_SIZE = 20_000
-#: A provisional market-year holding less than this share of the year before is incomplete.
-#: Below a genuine market fall: EEA 2025 holds 73% of Poland's 2024 (whole makes missing)
-#: but 85% of Malta's, whose market fell (EEA 96.8% of Eurostat's 2025 registrations).
-INCOMPLETE_PROVISIONAL_SHARE = Decimal("0.8")
+#: A provisional market-year naming less than this share of the office's own new
+#: registrations is incomplete. EEA's provisional 2025 names 73% of Poland's and 68% of
+#: Finland's (whole makes missing); every other market names at least 92.7%.
+INCOMPLETE_PROVISIONAL_SHARE = Decimal("0.85")
 _SUPPORTED_HORIZONS = frozenset({2028, 2031})
 
 
@@ -96,6 +97,7 @@ class GenerationPlanningService:
         *,
         batch_size: int = _BATCH_SIZE,
         survival: CohortSurvivalModel | None = None,
+        official_registrations: Mapping[tuple[str, int], int] | None = None,
     ) -> None:
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("planning batch size must be a positive integer")
@@ -105,6 +107,8 @@ class GenerationPlanningService:
         # Injectable so a calibrated retention curve can replace the assumed one
         # without editing this service. Its .method flows into every cohort record.
         self.survival = survival or CohortSurvivalModel()
+        # National new-car totals (market, year) that a provisional year is checked against.
+        self.official_registrations = dict(official_registrations or {})
         self.hazard = ReplacementHazardModel()
         self.uncertainty = OpportunityUncertaintyModel()
 
@@ -292,9 +296,10 @@ class GenerationPlanningService:
             latest_year[geography] = max(
                 latest_year.get(geography, 0), max(series[_generation, _vehicle, geography])
             )
-        # A provisional year far smaller than the final year before it is
-        # incomplete (EEA's provisional 2025 lacks whole makes in Poland), so a
-        # vehicle absent from it has not ended there and is forecast for it.
+        # A provisional year naming far fewer cars than the national office
+        # registered is incomplete (EEA's provisional 2025 lacks whole makes in
+        # Poland), so a vehicle absent from it has not ended there and is
+        # forecast for it. Without the office's total the year counts as complete.
         market_totals: dict[tuple[str, int], Decimal] = defaultdict(Decimal)
         for (_generation, _vehicle, geography), years in series.items():
             for year, annual in years.items():
@@ -307,11 +312,11 @@ class GenerationPlanningService:
                 for source, status in coverage_candidates[geography, newest]
                 if source == coverage[geography, newest]
             }
-            previous = market_totals.get((geography, newest - 1), Decimal(0))
+            official = self.official_registrations.get((geography, newest), 0)
             if (
                 statuses == {str(PublicationStatus.PROVISIONAL)}
-                and previous > 0
-                and market_totals[geography, newest] < INCOMPLETE_PROVISIONAL_SHARE * previous
+                and official > 0
+                and market_totals[geography, newest] < INCOMPLETE_PROVISIONAL_SHARE * official
             ):
                 ending_year[geography] = newest - 1
                 incomplete_years.add((geography, newest))
