@@ -19,6 +19,8 @@ from icor.evidence.sources.dgt import PARSER_NAME as DGT_PARSER_NAME
 from icor.evidence.sources.dgt import DGTParqueLoader
 from icor.evidence.sources.eea import EEAAnnualAggregateLoader, EEAPassengerCarLoader
 from icor.evidence.sources.kba import KBAFZ10Loader
+from icor.evidence.sources.kba_archive import PARSER_NAME as KBA_ARCHIVE_PARSER_NAME
+from icor.evidence.sources.kba_archive import KBAFZ10ArchiveLoader
 from icor.evidence.sources.national_register import PARSER_NAME as REGISTER_PARSER_NAME
 from icor.evidence.sources.national_register import NationalRegisterLoader
 from icor.evidence.sources.rdw import PARSER_NAME as RDW_PARSER_NAME
@@ -34,11 +36,11 @@ from icor.forecasting.survival import load_net_retained_survival_model
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
-    source_registry="official-sources-v2",
+    source_registry="official-sources-v3",
     identity_registry="exact-normalized-model-family-v1",
     reconciliation_method="single-coverage-corroboration-v2",
     confidence_method="source-evidence-v1",
-    estimation_method="register-years-stock-anchored-cohorts-v5",
+    estimation_method="register-years-archive-stock-anchored-cohorts-v6",
     survival_method="uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1",
     hazard_method="france-insurance-windshield-hazard-v2",
     forecast_method="validated-recency-damped-ensemble-v2",
@@ -55,6 +57,7 @@ def official_loader_registry() -> Mapping[str, EvidenceLoader]:
         "eea_co2_cars_zip_v1": EEAPassengerCarLoader(),
         "eea_co2_cars_annual_aggregate_csv_v1": EEAAnnualAggregateLoader(),
         "kba_fz10_xlsx_v1": KBAFZ10Loader(),
+        KBA_ARCHIVE_PARSER_NAME: KBAFZ10ArchiveLoader(),
         "uk_dft_veh0120_csv_v1": UKActiveFleetLoader(),
         "uk_dft_veh0160_csv_v1": UKFirstRegistrationLoader(),
         "uk_dft_veh0124_csv_v1": UKVehicleAgeLoader(),

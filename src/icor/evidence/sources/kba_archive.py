@@ -23,6 +23,11 @@ year. These rules read them, and each fails closed:
 Every observation is flagged as archived registrations whose labels do not teach
 the identity vocabulary: the years add their own cohorts and change nothing the
 monitored years planned or folded.
+
+Years before 2010 are loaded whole. In 2011 and 2012 the EEA decomposes Germany,
+but its files omit whole makes (Opel in both years: 0 cars against KBA's 254,605
+and 213,627), so only those makes' rows are loaded. Where the EEA names any car
+of a loaded make, planning fails closed instead of counting it twice.
 """
 
 from __future__ import annotations
@@ -53,6 +58,14 @@ from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceReposit
 PARSER_NAME = "kba_fz10_xls_v1"
 #: The December workbooks whose layout these rules were verified against.
 YEARS = range(2004, 2013)
+#: Years the EEA's model-level monitoring does not cover: every row is loaded.
+ARCHIVE_YEARS = range(2004, 2010)
+#: Makes the EEA's German file omits entirely (0 cars in the raw CSV, measured
+#: 2026-10-22); only these makes' rows are loaded for those years.
+EEA_OMITTED_MAKES = {
+    2011: frozenset({"OPEL", "CHEVROLET", "HONDA"}),
+    2012: frozenset({"OPEL", "SKODA", "SEAT", "CHEVROLET", "PORSCHE"}),
+}
 _ANNUAL_COLUMN = 2
 _LABEL_HEADER = "Marke/\nModellreihe"
 #: Single makes whose model labels abbreviate the make.
@@ -247,8 +260,10 @@ class KBAFZ10ArchiveLoader:
         ):
             raise ValueError("KBA archive release must cover one calendar year")
         table = read_workbook(release.artifact_path, year)
-        observations = observations_for(release, table)
-        if (table.raw_count, len(observations), table.rejected_count, 0) != (
+        rows = loaded_rows(table)
+        observations = observations_for(release, table, rows)
+        rejected_count = table.rejected_count + len(table.rows) - len(rows)
+        if (table.raw_count, len(observations), rejected_count, 0) != (
             manifest.raw_record_count,
             manifest.accepted_record_count,
             manifest.rejected_record_count,
@@ -258,10 +273,22 @@ class KBAFZ10ArchiveLoader:
         repository.add_observations(observations)
 
 
-def observations_for(release: StoredRelease, table: ArchiveTable) -> list[Observation]:
+def loaded_rows(table: ArchiveTable) -> tuple[ArchiveRow, ...]:
+    """Every row of an archive year; only the omitted makes of a year the EEA covers."""
+
+    if table.year in ARCHIVE_YEARS:
+        return table.rows
+    if table.year in EEA_OMITTED_MAKES:
+        return tuple(row for row in table.rows if row.make in EEA_OMITTED_MAKES[table.year])
+    raise ValueError("KBA archive year is neither archived nor supplementary")
+
+
+def observations_for(
+    release: StoredRelease, table: ArchiveTable, rows: Iterable[ArchiveRow] | None = None
+) -> list[Observation]:
     year = table.year
     observations = []
-    for row in table.rows:
+    for row in table.rows if rows is None else rows:
         model = row.model if row.model is not None else "(not reported)"
         mapping_status = (
             MappingStatus.REJECTED
@@ -348,7 +375,10 @@ __all__: Sequence[str] = (
     "YEARS",
     "ArchiveRow",
     "ArchiveTable",
+    "ARCHIVE_YEARS",
+    "EEA_OMITTED_MAKES",
     "KBAFZ10ArchiveLoader",
+    "loaded_rows",
     "observations_for",
     "parse_rows",
     "read_sheet",

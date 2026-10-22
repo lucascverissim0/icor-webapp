@@ -684,3 +684,95 @@ def acquire(source: OfficialSource, root: Path, *, artifact: Path | None = None)
     local = artifact or download(source, root / "downloads" / f"{source.key}{source.suffix}")
     manifest = build_manifest(source, local, retrieved_at=retrieved_at)
     return ReleaseStore(root / "releases").stage(local, manifest)
+
+# KBA FZ10 December workbooks: every row for 2004-2009, before the EEA's model-level
+# monitoring; for 2011-2012 only the makes the EEA's German files omit entirely.
+# (bytes, sha256, raw, accepted, rejected), measured 2026-10-22; Last-Modified of all
+# files is 2025-05-12.
+_KBA_ARCHIVE_ARTIFACTS = {
+    2004: (
+        148_480,
+        "0930f869a73395239fc55d97467ae076e3f7d5745322f0152a0fd877f858c56a",
+        361,
+        322,
+        39,
+    ),
+    2005: (
+        138_240,
+        "31d24d77b32521e7120d7de2c2e35a051b12951e9600c98dcc57743de6655b28",
+        375,
+        334,
+        41,
+    ),
+    2006: (
+        155_648,
+        "587452174e94c8dcc9572027dbe5be7ec3ecd66ea3238771c24620bba2a73050",
+        390,
+        349,
+        41,
+    ),
+    2007: (
+        232_448,
+        "4628fa5845112352b5ebd8ab78b586b278b6af9edaac772bbb954ca10924696c",
+        380,
+        341,
+        39,
+    ),
+    2008: (
+        267_776,
+        "fbde7bf6e62c698907d3036f4135637a681b4c95a98cf66ca927680f97334f9e",
+        399,
+        354,
+        45,
+    ),
+    2009: (
+        235_008,
+        "5c863d44e77227742c6f78a6fb3f1465caccfb208d1f85db520cf8ed1b632d85",
+        411,
+        366,
+        45,
+    ),
+    2011: (
+        198_144,
+        "60f2fced6ed0ca57304037ffe02904e6a1e83b8cab464b39a8c1a1ef3143fb16",
+        401,
+        29,
+        372,
+    ),
+    2012: (
+        191_488,
+        "888e06731e89250801c8dc74c8a54fabde2254bf388962392742e0b9a6518142",
+        396,
+        43,
+        353,
+    ),
+}
+
+for _year, (_bytes, _sha256, _raw, _accepted, _rejected) in _KBA_ARCHIVE_ARTIFACTS.items():
+    OFFICIAL_SOURCES[f"kba-fz10-{_year}"] = OfficialSource(
+        key=f"kba-fz10-{_year}",
+        release_id=f"kba-fz10-{_year}-12-final-v2",
+        source_id="kba-fz10",
+        publisher="Kraftfahrt-Bundesamt (KBA)",
+        url=(
+            "https://www.kba.de/SharedDocs/Downloads/DE/Statistik/Fahrzeuge/FZ10/"
+            f"fz10_{_year}_12_xls.xls?__blob=publicationFile&v=2"
+        ),
+        published_at=datetime(2025, 5, 12, tzinfo=UTC),
+        coverage_start=date(_year, 1, 1),
+        coverage_end=date(_year, 12, 31),
+        geography="DE",
+        geography_version=f"Germany national registration territory {_year}",
+        measure=Measure.NEW_REGISTRATIONS,
+        dependency_group=f"european-passenger-car-registrations-{_year}",
+        terms_url="https://www.govdata.de/dl-de/by-2-0",
+        permitted_local_use="Reuse permitted with source attribution under DL-DE/BY-2.0.",
+        parser_name="kba_fz10_xls_v1",
+        expected_schema=f"FZ 10 December {_year} legacy workbook, annual cumulative column",
+        suffix=".xls",
+        artifact_bytes=_bytes,
+        sha256=_sha256,
+        raw_count=_raw,
+        accepted_count=_accepted,
+        rejected_count=_rejected,
+    )

@@ -21,6 +21,7 @@ from icor.preview.bootstrap import (
 EXPECTED_SOURCE_KEYS = (
     *(f"eea-{year}-final" for year in range(2010, 2025)),
     "eea-2025-provisional",
+    *(f"kba-fz10-{year}" for year in (*range(2004, 2010), 2011, 2012)),
     "kba-fz10-2024",
     "uk-veh0160-gb",
     "uk-veh0120-gb",
@@ -38,12 +39,12 @@ EXPECTED_SOURCE_KEYS = (
 )
 
 
-def test_default_plan_has_exactly_the_approved_thirty_releases() -> None:
+def test_default_plan_has_exactly_the_approved_thirty_eight_releases() -> None:
     plan = default_plan()
 
     assert tuple(source.source_key for source in plan.sources) == EXPECTED_SOURCE_KEYS
-    assert len(plan.release_ids) == 30
-    assert len(set(plan.release_ids)) == 30
+    assert len(plan.release_ids) == 38
+    assert len(set(plan.release_ids)) == 38
     assert plan.release_ids[0] == "cz-rsv-vypis-vozidel-20261001"
     assert plan.release_ids[-1] == "uk-dft-veh0160-gb-2025-final-20261006"
     assert plan.build_as_of == BUILD_AS_OF == "2026-08-27T12:00:00+00:00"
@@ -465,7 +466,7 @@ def test_prepare_builds_reports_promotes_then_compiles_frontend(tmp_path: Path) 
     promote_index = next(index for index, value in enumerate(joined) if " promote " in f" {value} ")
     assert build_index < report_index < promote_index
     build = runner.commands[build_index]
-    assert build.count("--release") == 30
+    assert build.count("--release") == 38
     assert build[build.index("--build-as-of") + 1] == BUILD_AS_OF
     assert build[build.index("--deterministic-seed") + 1] == str(DETERMINISTIC_SEED)
     assert runner.commands[-2:] == [("npm", "ci"), ("npm", "run", "build")]
@@ -558,7 +559,7 @@ def test_prepare_reuses_exact_active_snapshot_below_build_capacity(
 
     assert bootstrap_script.main() == 0
     assert json.loads(capsys.readouterr().out) == {
-        "release_count": 30,
+        "release_count": 38,
         "reused": True,
         "snapshot_id": "snapshot-active",
         "start_command": "python scripts/run_codespaces_preview.py",

@@ -23,6 +23,7 @@ REQUIRED_UV_VERSION = "0.11.3"
 SOURCE_KEYS = (
     *(f"eea-{year}-final" for year in range(2010, 2025)),
     "eea-2025-provisional",
+    *(f"kba-fz10-{year}" for year in (*range(2004, 2010), 2011, 2012)),
     "kba-fz10-2024",
     "uk-veh0160-gb",
     "uk-veh0120-gb",

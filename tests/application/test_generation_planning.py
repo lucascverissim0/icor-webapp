@@ -4,6 +4,8 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from icor.application.generation_planning import GenerationPlanningService
 from icor.domain.evidence import (
     ARCHIVE_REGISTRATIONS_FLAG,
@@ -996,7 +998,9 @@ def test_a_provisional_year_after_a_market_fall_is_complete() -> None:
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
 
 
-def _archive(repository, years_values, *, vehicle="vehicle-volkswagen-golf-eu") -> None:
+def _archive(
+    repository, years_values, *, vehicle="vehicle-volkswagen-golf-eu", make="VW"
+) -> None:
     """Add archived KBA registrations of the Golf for years before the EEA's."""
 
     repository.releases = (
@@ -1019,7 +1023,7 @@ def _archive(repository, years_values, *, vehicle="vehicle-volkswagen-golf-eu") 
             period_end=date(year, 12, 31),
             measure=Measure.NEW_REGISTRATIONS,
             validation_flags=(ARCHIVE_REGISTRATIONS_FLAG, VOCABULARY_EXCLUDED_FLAG),
-            original_make="VW",
+            original_make=make,
             original_model="GOLF, JETTA",
             value=Decimal(value),
         )
@@ -1077,3 +1081,29 @@ def test_a_vehicle_known_only_from_the_archive_is_never_forecast() -> None:
     GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
 
     assert _cohort_years(repository, "vehicle-ritmo") == {2016, 2017}
+
+
+def test_archived_rows_supplement_a_make_the_covering_publisher_omits() -> None:
+    """EEA's German 2011 file has no Opel; KBA's Opel rows fill it and corroborate nothing."""
+
+    baseline = Repository()
+    GenerationPlanningService().apply(baseline, horizons=(2028,), seed=20260827)
+    repository = Repository()
+    _add_vehicle(repository, "astra", (), make="OPEL")
+    _archive(repository, ((2021, "50"),), vehicle="vehicle-astra", make="OPEL")
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    golf = [item for item in repository.cohorts if item.canonical_vehicle_id.endswith("golf-eu")]
+    assert golf == list(baseline.cohorts)
+    (astra,) = [item for item in repository.cohorts if item.canonical_vehicle_id == "vehicle-astra"]
+    assert (astra.registration_cohort_year, astra.registrations) == (2021, Decimal("50"))
+    assert ARCHIVE_REGISTRATIONS_REASON in astra.reason_codes
+
+
+def test_archived_rows_of_a_make_the_covering_publisher_counts_fail_closed() -> None:
+    repository = Repository()
+    _archive(repository, ((2021, "50"),), make="VOLKSWAGEN")
+
+    with pytest.raises(ValueError, match="already counts"):
+        GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)

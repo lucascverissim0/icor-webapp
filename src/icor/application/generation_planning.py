@@ -27,7 +27,7 @@ from icor.domain.evidence import (
 )
 from icor.domain.generations import GenerationIdentityKind
 from icor.evidence.normalization import stable_evidence_id
-from icor.evidence.vehicle_identity import VehicleIdentityIndex
+from icor.evidence.vehicle_identity import VehicleIdentityIndex, fold_make
 from icor.forecasting.reconciliation import (
     CoverageCandidate,
     RegistrationCoverageSelector,
@@ -195,15 +195,20 @@ class GenerationPlanningService:
                 [*identifiers, observation.observation_id],
             )
 
+        # Archived registrations decompose a country-year only where no other
+        # publisher does; beside one they never corroborate its cohorts.
         coverage_candidates: dict[tuple[str, int], set[tuple[str, str]]] = defaultdict(set)
+        archive_candidates: dict[tuple[str, int], set[tuple[str, str]]] = defaultdict(set)
         for key in release_buckets:
             _generation, _vehicle, geography, year, release_id = key
             release = releases.get(release_id)
             if release is None:
                 raise ValueError("planning observation release is unavailable")
-            coverage_candidates[geography, year].add(
-                (release.source_id, str(release.publication_status))
-            )
+            candidates = archive_candidates if key in archive_buckets else coverage_candidates
+            candidates[geography, year].add((release.source_id, str(release.publication_status)))
+        archive_scopes = set(archive_candidates) - set(coverage_candidates)
+        for scope in archive_scopes:
+            coverage_candidates[scope] = archive_candidates[scope]
         coverage_selector = RegistrationCoverageSelector()
         coverage: dict[tuple[str, int], str] = {}
         coverage_corroborators: dict[tuple[str, int], tuple[str, ...]] = {}
@@ -217,6 +222,17 @@ class GenerationPlanningService:
             coverage[scope] = selection.source_id
             coverage_corroborators[scope] = selection.corroborating_source_ids
 
+        # The makes each country-year's coverage source names. Archived rows
+        # beside it supplement only makes it omits entirely (EEA's German 2011
+        # and 2012 files lack Opel and others); one it names would be counted twice.
+        covered_makes: dict[tuple[str, int], set[str]] = defaultdict(set)
+        for key in release_buckets:
+            _generation, vehicle_id, geography, year, release_id = key
+            if key not in archive_buckets and (
+                releases[release_id].source_id == coverage[geography, year]
+            ):
+                covered_makes[geography, year].add(_make(labels[vehicle_id][0]))
+
         annual_candidates: dict[
             tuple[str, str, str, int], list[RegistrationInput]
         ] = defaultdict(list)
@@ -227,7 +243,13 @@ class GenerationPlanningService:
             release = releases.get(release_id)
             if release is None:
                 raise ValueError("planning observation release is unavailable")
-            if release.source_id != coverage[geography, year]:
+            if key in archive_buckets and (geography, year) not in archive_scopes:
+                if _make(labels[vehicle_id][0]) in covered_makes[geography, year]:
+                    raise ValueError(
+                        "archived registrations name a make their market's coverage "
+                        "source already counts"
+                    )
+            elif release.source_id != coverage[geography, year]:
                 # Another publisher decomposes this country-year. Keeping this
                 # release would add the vehicles only it happens to name on top
                 # of a total that already covers the whole market.
@@ -733,6 +755,10 @@ class GenerationPlanningService:
 
 
 _STOCK_ONLY_METHOD = "observed-stock-only-v1"
+
+
+def _make(label: str) -> str:
+    return fold_make(label) or " ".join(label.split()).casefold()
 _ARCHIVE_ONLY_METHOD = "observed-archive-history-only-v1"
 
 

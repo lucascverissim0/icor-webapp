@@ -26,6 +26,7 @@ def test_catalog_contains_only_reviewed_https_sources():
         "dk-fleet",
     }
     expected.update(f"eea-{year}-final" for year in range(2010, 2024))
+    expected.update(f"kba-fz10-{year}" for year in (*range(2004, 2010), 2011, 2012))
     assert set(OFFICIAL_SOURCES) == expected
     for source in OFFICIAL_SOURCES.values():
         if source.direct_download or source.key != "dk-fleet":

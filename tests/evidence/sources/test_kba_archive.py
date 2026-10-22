@@ -14,6 +14,9 @@ from icor.domain.evidence import (
     ReleaseManifest,
 )
 from icor.evidence.sources.kba_archive import (
+    ArchiveRow,
+    ArchiveTable,
+    loaded_rows,
     observations_for,
     parse_rows,
     read_sheet,
@@ -213,3 +216,18 @@ def test_archived_observations_add_cohorts_but_never_teach_or_forecast() -> None
     }
     assert named == {("VW", "GOLF, JETTA"), ("VW", "POLO"), ("TOYOTA", "YARIS"), ("LEXUS", "IS")}
     assert sum(item.value for item in observations) == 492
+
+
+def test_a_year_the_eea_covers_loads_only_the_makes_it_omits() -> None:
+    rows = (
+        ArchiveRow(7, "OPEL ASTRA", "OPEL", "ASTRA", 90),
+        ArchiveRow(8, "SONSTIGE", "OPEL", None, 1, "source_model_aggregate"),
+        ArchiveRow(9, "VW GOLF, JETTA", "VW", "GOLF, JETTA", 250),
+        ArchiveRow(10, "HONDA CIVIC", "HONDA", "CIVIC", 9),
+    )
+    table = ArchiveTable(2011, "Dezember 2011", rows, 6, 2, 350)
+
+    assert [row.row_number for row in loaded_rows(table)] == [7, 8, 10]
+    assert loaded_rows(ArchiveTable(2009, "Dezember-2009", rows, 6, 2, 350)) == rows
+    with pytest.raises(ValueError, match="neither archived nor supplementary"):
+        loaded_rows(ArchiveTable(2010, "Dezember 2010", rows, 6, 2, 350))
