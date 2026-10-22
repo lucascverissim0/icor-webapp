@@ -7929,3 +7929,108 @@ The acceptance gates are in the plan file.
   3. an **overlap test at Eurocode level**: KBA 2010–12 allocated through the decisions against EEA
      2010–12, measured as per-code WAPE;
   4. only then load 2004–09 as registrations, build a candidate, run the gates and promote.
+
+### Phase 2 progress (2026-10-22, `f64b0c4`) — KBA archive parser; EEA DE 2011–12 defect found
+- **Committed `f64b0c4`:**
+  - `src/icor/evidence/sources/kba_archive.py` (`kba_fz10_xls_v1`, `KBAFZ10ArchiveLoader`,
+    `read_workbook`, `parse_rows`, `split_label`); `xlrd>=2.0.1,<3` added to dependencies.
+  - Fail-closed rules: sheet "Dezember[- ]<y>"; annual column 2 ("Jan./Dezember" or
+    "Jan.-Dezember"); make headers; "ZUSAMMEN" must equal its rows; labels must start with the
+    make ("ALFA" under ALFA ROMEO).
+  - Group brands are listed per header. GM maps to CADILLAC/CHEVROLET/HUMMER; CORVETTE,
+    TRAILBLAZER and CAMARO are Chevrolets; "BMW MINI" is MINI MINI; "TOYOTA LEXUS" is an unnamed
+    Lexus.
+  - Single-row makes, SONSTIGE and SONSTIGE HERSTELLER become REJECTED observations, so totals
+    reconcile.
+  - All nine files 2004–2012 parse: subtotals and published totals exact; 99.6–99.7% of cars named.
+  - The planner adds `ARCHIVE_REGISTRATIONS_FLAG`/`_REASON` and
+    `REGISTRATIONS_VOCABULARY_EXCLUDED_REASON` (domain/evidence.py). Archived years add their own
+    cohorts only. Forecasts, short history, gap filling and `all_input_ids` use the monitored years
+    alone; a vehicle known only from the archive gets method `observed-archive-history-only-v1`.
+  - Flagged registrations never teach: planner `teaching`, and
+    `snapshot_identity._vocabulary_volume` via the new reason code.
+  - `compare_snapshot_cohorts.py --codes-only`: a new release in a market explains nothing; only
+    reason codes do.
+  - Tests: planner (archive cohorts added, every monitored cohort equal), snapshot identity (shown to
+    fail on the old code), 22 parser tests. Full suite: 1363 passed, 7 skipped, 4 xfailed.
+- **Not yet done:** OfficialSource entries (sha256 measured in scratch), loader registry,
+  bootstrap SOURCE_KEYS, candidate build, review round.
+  - Artifacts for 2004–09 (bytes, sha256):
+
+    | Year | Bytes | sha256 |
+    |---|---:|---|
+    | 2004 | 148480 | 0930f869… |
+    | 2005 | 138240 | 31d24d77… |
+    | 2006 | 155648 | 58745217… |
+    | 2007 | 232448 | 4628fa58… |
+    | 2008 | 267776 | fbde7bf6… |
+    | 2009 | 235008 | 5c863d44… |
+
+  - Re-measure on acquisition.
+- **Identity folding of KBA labels (snapshot vocabulary, refold 0), 2004–09 volume:**
+  - 72.4% reviewed;
+  - **18.6% unfolded**: comma labels such as "VW GOLF, JETTA" (1.29M), "AUDI A4, S4", "A3, S3",
+    "A6, S6", "TRANSPORTER, CARAVELLE", "IBIZA, CORDOBA", "ALTEA, TOLEDO, LEON", "AVENSIS,
+    CARINA" — 39 labels keyed `raw|<make>|<model>`;
+  - **9.0% unreviewed**: "BMW 3ER/1ER/5ER" fold to `bmw|3er` etc., while the reviewed keys are
+    `bmw|3er reihe`; also MERCEDES ML-/S-/R-/GL-KLASSE, VOLVO 70/40/60/80, OPEL SIGNUM/TIGRA, …
+    (146 labels).
+  - So a review round is required before the coverage gate can pass. Script:
+    `scratchpad/overlap/unfolded.py`.
+- **Eurocode overlap KBA vs EEA, DE 2010–12** (`scratchpad/overlap/overlap.py`):
+  - unusable as a correctness test until that review lands (KBA 19% unfolded, 7% unreviewed);
+  - on code groups with ≥1k EEA units, median absolute error 0.3–8%, 62–72% within 10%.
+  - Re-run after the review round.
+- **CONFIRMED DEFECT: EEA's own DE files for 2011 and 2012 omit whole makes.** The raw EEA CSV DE
+  total for 2011 is 2,639,624, so our loader drops nothing.
+
+  | Year | KBA (= Eurostat carmot) | EEA | Short | Whole makes missing | Other |
+  |---|---:|---:|---:|---|---|
+  | 2011 | 3,173,634 | 2,639,576 | 16.8% | Opel 254,605, Chevrolet 29,986, Honda 29,487 | every other make ~7% short (219k) |
+  | 2012 | 3,082,504 | 2,565,900 | 16.8% | Opel 213,627, Škoda 147,197, SEAT 68,109, Chevrolet 29,584, Porsche 20,516 | — |
+
+  - Other years are within 1–3.5% (2010: 0.985; Fiat 0.85).
+  - EEA also spells VW as "VOLKSWAGEN VW VW" in 2011–12 (the `volkswagenvwvw` identities).
+  - Because DE "reported" those years, the planner reads the missing makes as zero sales: Opel has
+    no DE cohorts for 2011–12.
+  - **Proposed fix (not built):** load KBA 2010–12 too. The planner keeps a flagged KBA row only for
+    a make the coverage source (EEA) names no car of in that country-year (fold_make on both
+    sides), with the same add-cohorts-only semantics. That recovers ~0.8M observed cars.
+  - The 2011 broad 7% shortfall stays for the estimated layer, as a make-level constraint.
+- **Phase 0 in-use audit, west/south (agent report, sources opened unless marked):**
+  - **Already in-use filtered:**
+    - FR SDES: valid inspection plus grace. The register-only figure would be 46.0M against 38.1M
+      in 2018.
+    - NL CBS: insured ≥1 day.
+    - PT INE/IMT: attended one of the last two inspections; light cars 4.33M (2013) → 5.63M (2021).
+    - DE KBA: laid-up cars excluded since 2007/08.
+    - SE: "i trafik", not laid up; 5.04M in traffic against 1.35M laid up.
+    - NO: cars with plates.
+    - IE: taxed only.
+  - **Register stock, inflated by idle cars:**
+    - IT ACI/PRA: ISTAT 2023 has 40.90M registered against 35.04M in circulation (insured or
+      inspected), so 5.87M (14.3%) idle. Of the idle cars, 51.8% are 30+, 31.6% 20–29, 13.0% 10–19,
+      0.8% 5–9 and 2.8% under 5. 2021: 34.2M circulating. Source: ISTAT "Le percorrenze dei veicoli
+      stradali circolanti 2023" plus xlsx annexes.
+    - ES DGT: excludes baja definitiva and temporal. A FLG_CIRCULANTE flag exists, with no
+      published total. M: ~1.8M uninsured cars in 2019.
+    - GR: definition not found. Press: 700k without valid KTEO, 244k uninsured.
+    - BE: everything registered, reference date 1 August (Statbel) or 31 Dec.
+    - AT: over-coverage from deposited plates.
+  - **Age basis:**
+    - DE and FR: first registration (FR uses the certificate date, so it effectively counts first
+      registration anywhere).
+    - **SE: "fordonsår" = model year, else year built, else first in traffic.**
+    - Others not verified.
+  - The Eurostat metadata pages (road_eqs_esms) returned 404, so which series each country sends is
+    unverified.
+  - The east audit agent is still running.
+- **Next actions:**
+  1. Integrate the east audit.
+  2. Implement the make-omission supplement and register KBA 2004–2012 sources
+     (acquire into the release store).
+  3. Build a candidate in a worktree; gates: compare --codes-only (DE ≥2010 EEA cohorts identical
+     except supplements), refold 0.
+  4. Run a review round for the KBA identities until coverage ≥0.99, then re-run the overlap, then
+     promote locally.
+  5. Build the IT in-use target from the ISTAT 2021/2023 annexes.
