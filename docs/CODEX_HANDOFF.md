@@ -8111,3 +8111,79 @@ The acceptance gates are in the plan file.
   - Command: `eurocode_review.py --round r5-kba prepare --database
     .local/evidence/candidates/snapshot-b75d917acf3f8cbdbd23/evidence.sqlite3 --only-undecided`,
     then two blind reviewers per batch, adjudication and merge.
+
+## 2026-10-22 (late) — status review; KBA snapshot promoted (Claude Code)
+
+**Status review given to Lucas** (plan outside the repo: `~/.claude/plans/ok-what-are-the-snoopy-comet.md`):
+- The forecast is three stacked parts.
+  - Registrations: per-series WAPE 0.65 against 0.78 for the baseline; market totals WAPE 5.9%,
+    bias +1.7%. Only a two-year backtest, so the result is diagnostic.
+  - Fleet: good in register countries; elsewhere one UK survival curve.
+  - Replacement rate: one French ~4.3% rate everywhere, never validated.
+- No end-to-end accuracy can be claimed; the replacement rate is now the weakest part.
+- **Lucas's decisions:**
+  - He will ask ICOR for its replacement/sales history later.
+  - Next after KBA: the **Mission 4 Phase 1 validation harness**, before any more estimation.
+
+**Review round `r5-kba` merged:**
+- Private `review/rounds/r5-kba/`, `adjudication/decide_r5.py`; backup
+  `decisions.before-r5-kba.json`.
+- `prepare --only-undecided` on the candidate selected 19 identities: KBA series labels holding
+  29,138 units of 2028 demand.
+- **Tooling fix (private):** `review/make_groups.json` gained `"vw": "volkswagen"`. Without it the
+  batch showed no Volkswagen catalogue rows (backup of the old file only in this session's scratchpad).
+- Every identity maps onto families decided in earlier rounds, copied unchanged.
+  - A combined label pools the families it names: "GOLF, JETTA" → golf + golf-plus + jetta;
+    "A4, S4" → a4 + a4-allroad; "A6, S6" → a6 + a6-allroad; "ALTEA, TOLEDO, LEON" → altea +
+    altea-xl + toledo + leon; "IBIZA, CORDOBA", "KALOS, AVEO", "VITO, VIANO", "GOLF, BORA";
+    "70" → v70 + xc70.
+  - KBA lists no separate Golf Plus, A4/A6 allroad or Altea XL series in 2004–09, so those are
+    pooled.
+  - "AVENSIS, CARINA" → Avensis only (the Carina ended in 1997).
+  - bmw|3er/1er/5er follow the decided "… reihe" keys (5er GT spellings → 5-gt).
+- `validate`: `problems: []`, no demand outside every code. Merged: 814 families, 1,741
+  identities. `coverage` on the candidate: reviewed share **0.99002**.
+
+**Eurocode overlap KBA vs EEA, DE 2010–12** (scratch `overlap.py`, now keyed with
+`runtime.identity_key`, so unfolded labels use their `raw|…` key):
+- refold 0;
+- **2010** (EEA complete): code groups with ≥1k units: median absolute error 0.6%, 78.2% within
+  10% (was 62–72%);
+- per-code WAPE with shared codes split evenly: 0.18. The rest is granularity: KBA's pooled series
+  against EEA's per-model labels, the same cars.
+- 2011–12 diverge by construction (EEA omits Opel, Škoda and others; the KBA supplement fills them).
+
+**Promoted `snapshot-b75d917acf3f8cbdbd23`:**
+- `promote`, `verify`, `mark-verified` on `.local/evidence`: database sha256 `97a16d24…`,
+  2,028,232 observations, 38 releases.
+- Report regenerated:
+  `report_eurocode_data.py --root .local/evidence --eurocode-dir .local/private/eurocode
+  --out-dir .local/private/eurocode/reports --eurostat .local/external-data/eurostat/road_eqs_carage-20261021.json
+  --eurostat-registrations .local/external-data/eurostat/road_eqr_carmot-20261021.json`.
+  - **Minor bug:** a relative `--out-dir` crashes on the final `relative_to` print after the files
+    are written. Pass an absolute path, or fix with `.resolve()`.
+- Fleet 2028: 196.96M → **201.51M**. DE 2025: 39.24M → **44.90M** (90.7% of 49.49M official).
+  - DE 10–20 band: 57.1% → 88.9% of official.
+  - **DE under-20 is now 100.6% of official (44.47M vs 44.21M).** This is not caused by KBA.
+    DE's young bands were already over: <2 y 103.4%, 2–5 y 111.3%, 5–10 y 108.0% (young used-car
+    export; net retention was rejected for DE in Mission 3). The old 10–20 deficit hid it. Phase 4
+    export retention must fix it.
+  - The Mission 3 claim "every market at or below Eurostat under 20" no longer holds for DE.
+- Planner service restarted on the new snapshot: `/api/health` reports `data_version`
+  `snapshot-b75d917acf3f8cbdbd23`; web `/data-coverage` HTTP 200.
+- **Deleted:**
+  - old active `snapshot-2da7ed88…`;
+  - the candidate copy of `b75d…`;
+  - worktree `.local/worktrees/build-kba`.
+  - Disk: 112 GiB used.
+
+**Running processes:**
+- Planner service: API :8000, web :5173, detached.
+- CEPiK crawl, PID 78564: 81/176 slices, currently throttled by HTTP 429. It is resumable.
+
+**Next actions:**
+1. Mission 4 Phase 1: `scripts/backtest_estimated_layer.py`, the validation harness on hidden
+   registers. See the plan's Phase 1 and its acceptance gates.
+2. Phase 4 survival and export retention, gated by the harness.
+3. Replacement rate: wait for ICOR's history; meanwhile look for free per-country anchors.
+4. PL register when the crawl ends.
