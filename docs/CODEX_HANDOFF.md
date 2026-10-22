@@ -8034,3 +8034,80 @@ The acceptance gates are in the plan file.
   4. Run a review round for the KBA identities until coverage ≥0.99, then re-run the overlap, then
      promote locally.
   5. Build the IT in-use target from the ISTAT 2021/2023 annexes.
+
+### Phase 0 in-use and age audit, east (agent report, 2026-10-22; V = source opened, M = snippet)
+- **Eurostat glossary (V, mirror PDF):**
+  - B.II-02 stock: "registered … and licensed to use roads".
+  - B.II-39 age: since first registration, "irrespective of the registering country".
+  - Ratio test, Y_LT2 2024 ÷ new cars 2023+2024: PL 1.06, RO 0.99, HU 1.12, LV 0.99, EE 0.94,
+    SI 0.85, CY 1.01, CZ 1.38, MT 1.33, LT 1.48, HR 1.66 (HR's band reads "<= 2 godina").
+  - So no market visibly ages imports from national registration.
+- **Eurostat coverage gaps:**
+  - **BG and SK have TOTAL only, no age bands**, 2013–25.
+  - CZ >20 exists only for 2014–15.
+  - PL has no 2025 bands.
+  - Flags: PL 2015 b, 2016–22 i, 2024 b, 2025 i; LT 2014 b; SI 2025 b.
+- **Close to in-use:**
+  - LT: deregistered after 90 days without inspection or insurance; −640k cars, the 2014 break.
+  - LV: excluded after 3 years without inspection; TRC023 = Eurostat.
+  - CY: licensed (road tax).
+  - MT: licensed.
+- **PL:**
+  - CEPiK counts every registered car.
+  - Eurostat removed cars over 30 from 2022.
+  - 2024 register clean-up of inactive cars makes the series "nieporównywalne".
+  - Samar puts 7.2M of 27.3M at end-2023 as "dead souls".
+  - Eurostat 2025 is 23.23M (imputed).
+- **Probably include dormant cars:**
+  - RO: DRPCIV open data has age bands 0–2…>20 and make × model; ASF estimates ~25% lack RCA (M).
+  - CZ: cars with STK in the last 4 years average 13.79 years against 16.41 for all.
+  - SK: >600k without PZP, about half actually used; removal from 1 Aug 2026.
+  - HU: plated vehicles; temporary withdrawal is probably still counted.
+  - BG: deregisters automatically on lapsed insurance (V, 2026).
+  - EE: counts all statuses, including suspended; mass temporary deletions in Nov–Dec 2024, so
+    Eurostat fell from 869.7k to 809.1k in 2025.
+- **Age basis:**
+  - **SI: production year** (SURS); a SiStat 2222107S single-year table is free and its total
+    equals Eurostat.
+  - LV: by production year (metadata).
+  - HR: the MUP–DZS agreement cites B.II-39; the register has the production year and the first
+    Croatian registration.
+  - SE: model year (west report).
+  - Others not found.
+- **Implication for Phase 4:**
+  - In-use targets come from national filters where they exist: IT ISTAT circolanti, FR SDES, PT
+    INE/IMT inspection series, NL insured, LT/LV/CY/MT already in use.
+  - For RO/CZ/SK/HU/PL/BG/GR/ES/IT, a "registered, not in use" component concentrated at 20+ years.
+  - SI/LV/SE age definitions differ, which shifts their band edges.
+
+### Candidate `snapshot-b75d917acf3f8cbdbd23` built (2026-10-22, from `2ca0a50`, worktree `.local/worktrees/build-kba`)
+- **Sources:** the eight KBA releases were acquired with `scripts/acquire_official_evidence.py`, and
+  their sha256 verified. The build ran via `.local/run_build.sh` (seed 20260922, as-of 2026-09-22):
+  exit 0, 2,028,232 observations. Log `.local/build-kba.log`.
+- **Gates against the active `snapshot-2da7ed88…`:**
+  - `compare_snapshot_cohorts.py --codes-only`: refold 0. By cohort id every market shows equal
+    added/removed counts with zero delta, which is the known cohort-id re-key.
+  - Re-keyed by (vehicle, market, cohort year) at horizon 2028: **removed 0, changed 0** (fleet and
+    reason codes) and added 1,850, all `archive-registrations-not-forecast` in DE.
+- **Added registrations:**
+
+  | Year | Registrations |
+  |---|---:|
+  | 2004 | 3,255,773 |
+  | 2005 | 3,331,781 |
+  | 2006 | 3,456,137 |
+  | 2007 | 3,140,051 |
+  | 2008 | 3,081,363 |
+  | 2009 | 3,797,155 |
+  | 2011 | 313,780 |
+  | 2012 | 478,064 |
+
+  These are the named rows, matching the parser.
+- **DE 2028 fleet:** +2,911,093 (42.56M → 45.47M). This is small because the UK survival curve at
+  ages 16–24 is low; the L1 survival work in Phase 4 will revisit it.
+- **Not yet done:** the Eurocode review round for the KBA identities (about 28% of pre-2010 volume
+  is unfolded or unreviewed). After it: coverage ≥ 0.99, re-run the overlap, promote, then delete
+  the old snapshot and worktree.
+  - Command: `eurocode_review.py --round r5-kba prepare --database
+    .local/evidence/candidates/snapshot-b75d917acf3f8cbdbd23/evidence.sqlite3 --only-undecided`,
+    then two blind reviewers per batch, adjudication and merge.
