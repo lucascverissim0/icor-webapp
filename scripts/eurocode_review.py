@@ -16,6 +16,12 @@ prints counts and identity names only, never a code.
     uv run python scripts/eurocode_review.py merge <decided.json>...
     uv run python scripts/eurocode_review.py coverage
     uv run python scripts/eurocode_review.py preview <reviewer.json> [family...]
+
+A later snapshot adds identities without undoing the review: ``--round <name>``
+(before the command) keeps that round's batches, demand, index and outputs under
+``review/rounds/<name>``, ``prepare --database <ledger> --only-undecided`` selects
+only identities ``decisions.json`` does not decide, counting the decided ones
+toward the target, and ``merge`` in a round adds to the existing decisions.
 """
 
 from __future__ import annotations
@@ -40,11 +46,14 @@ from icor.eurocodes.allocation import (
 )
 from icor.eurocodes.catalog import from_document
 from icor.eurocodes.runtime import RAW_IDENTITY_PREFIX, identity_key
+from icor.evidence.release_manifests import load_snapshot_manifest
 from icor.infrastructure.snapshot_identity import load_identity_index
 
 ROOT = Path(__file__).resolve().parents[1]
 PRIVATE = ROOT / ".local" / "private" / "eurocode"
-REVIEW = PRIVATE / "review"
+BASE_REVIEW = PRIVATE / "review"
+#: The current round's directory; ``--round`` moves it under ``BASE_REVIEW/rounds``.
+REVIEW = BASE_REVIEW
 IDENTITY_RULES = ROOT / "data" / "vehicle_identity.json"
 HORIZON = 2028
 COVERAGE_TARGET = 0.99
@@ -291,29 +300,48 @@ def _identity_lines(
     return lines
 
 
+def _snapshot_of(database: Path) -> str:
+    """The snapshot id the manifest beside a ledger names."""
+
+    manifest = load_snapshot_manifest(database.parent / "snapshot.json")
+    return manifest.snapshot_id
+
+
 def prepare(arguments: argparse.Namespace) -> int:
-    snapshot_id, database = _active_snapshot()
+    if arguments.database:
+        database = Path(arguments.database)
+        snapshot_id = _snapshot_of(database)
+    else:
+        snapshot_id, database = _active_snapshot()
     catalogue_path = PRIVATE / "catalog.json"
     catalogue = from_document(json.loads(catalogue_path.read_text(encoding="utf-8")))
     demand = build_demand(database)
+    decided: set[str] = set()
+    if arguments.only_undecided:
+        if REVIEW == BASE_REVIEW:
+            raise SystemExit("--only-undecided needs --round, so the first review stays intact")
+        existing = json.loads((PRIVATE / "decisions.json").read_text(encoding="utf-8"))
+        decided = set(existing["identities"])
     total = sum(entry["units"] for entry in demand.values())
     ranked = sorted(demand.items(), key=lambda item: -item[1]["units"])
     selected: list[str] = []
-    covered = 0
+    covered = sum(entry["units"] for key, entry in ranked if key in decided)
     for key, entry in ranked:
         if covered / total >= arguments.target:
             break
+        if key in decided:
+            continue
         selected.append(key)
         covered += entry["units"]
 
-    groups = _groups(REVIEW / "make_groups.json")
+    groups = _groups(BASE_REVIEW / "make_groups.json")
     by_make: dict[str, list[str]] = defaultdict(list)
     for key in selected:
         make = _make_of(key)
         by_make[groups.get(make, make)].append(key)
     batches: list[tuple[str, list[str], set[str]]] = []
     small: list[str] = []
-    splits = _splits(REVIEW / "make_groups.json")
+    splits = _splits(BASE_REVIEW / "make_groups.json")
     for make, keys in sorted(by_make.items(), key=lambda item: -len(item[1])):
         catalogue_makes = set(make.split("+"))
         if len(keys) < SMALL_MAKE_IDENTITIES:
@@ -385,6 +413,7 @@ def prepare(arguments: argparse.Namespace) -> int:
             "identity_rules_sha256": _sha256(IDENTITY_RULES),
             "target": arguments.target,
             "selected_share": covered / total,
+            "decided_before": len(decided),
             "batches": index,
         },
     )
@@ -392,6 +421,7 @@ def prepare(arguments: argparse.Namespace) -> int:
         json.dumps(
             {
                 "identities": len(selected),
+                "decided_before": len(decided),
                 "share": round(covered / total, 5),
                 "batches": [(item["batch"], len(item["identities"])) for item in index],
             }
@@ -692,6 +722,12 @@ def merge(arguments: argparse.Namespace) -> int:
     index = json.loads((REVIEW / "index.json").read_text(encoding="utf-8"))
     families: dict[str, Any] = {}
     identities: dict[str, Any] = {}
+    previous: dict[str, Any] | None = None
+    if REVIEW != BASE_REVIEW:
+        # A later round adds to what was decided; it never silently redefines it.
+        previous = json.loads((PRIVATE / "decisions.json").read_text(encoding="utf-8"))
+        families.update(previous["families"])
+        identities.update(previous["identities"])
     for name in arguments.decided:
         document = json.loads(Path(name).read_text(encoding="utf-8"))
         _load_reviewer(Path(name), rows_by_code)
@@ -711,11 +747,20 @@ def merge(arguments: argparse.Namespace) -> int:
             "catalogue_sha256": index["catalogue_sha256"],
             "identity_rules_sha256": index["identity_rules_sha256"],
             "review": "two blind reviewers per batch, disagreements adjudicated",
+            **(
+                {"rounds": [*previous["metadata"].get("rounds", []), REVIEW.name]}
+                if previous is not None
+                else {}
+            ),
         },
         "families": families,
         "identities": identities,
     }
     EurocodeDecisions.from_document(decisions, catalogue_codes=rows_by_code)
+    if previous is not None:
+        if previous["metadata"]["catalogue_sha256"] != index["catalogue_sha256"]:
+            raise SystemExit("the round was prepared against another catalogue")
+        _write_json(PRIVATE / f"decisions.before-{REVIEW.name}.json", previous)
     _write_json(PRIVATE / "decisions.json", decisions)
     print(json.dumps({"families": len(families), "identities": len(identities)}))
     return 0
@@ -753,9 +798,12 @@ def coverage(arguments: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--round", help="work in review/rounds/<name> instead of review/")
     commands = parser.add_subparsers(dest="command", required=True)
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--target", type=float, default=COVERAGE_TARGET)
+    prepare_parser.add_argument("--database", help="a candidate's evidence.sqlite3")
+    prepare_parser.add_argument("--only-undecided", action="store_true")
     validate_parser = commands.add_parser("validate")
     validate_parser.add_argument("output")
     compare_parser = commands.add_parser("compare")
@@ -768,6 +816,12 @@ def main(argv: list[str] | None = None) -> int:
     preview_parser.add_argument("output")
     preview_parser.add_argument("family", nargs="*", help="only families whose key contains this")
     arguments = parser.parse_args(argv)
+    global REVIEW
+    REVIEW = BASE_REVIEW
+    if arguments.round:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", arguments.round):
+            raise SystemExit("a round name is lower-case letters, digits and hyphens")
+        REVIEW = BASE_REVIEW / "rounds" / arguments.round
     handler = {
         "prepare": prepare,
         "validate": validate,
