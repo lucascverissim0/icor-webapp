@@ -9,7 +9,12 @@ or lost a release. Every other change is listed: an unexplained change is a
 regression until shown otherwise. Vehicles both snapshots plan are also checked
 for refolding (a different real identity).
 
+With --codes-only a new release explains nothing: only reason codes do. Use it
+when the added evidence is meant to touch nothing but the cohorts it labels
+(archived registrations), so any other change in its market is listed.
+
 usage: compare_snapshot_cohorts.py BEFORE.sqlite3 AFTER.sqlite3 [--horizon 2028]
+    [--codes-only]
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ EXPLAINING = frozenset(
         "registrations-include-model-recovered-by-type-approval",
         "eurostat-net-retention-calibrated",
         "observed-stock-labels-do-not-teach-vocabulary",
+        "archive-registrations-not-forecast",
     }
 )
 
@@ -64,6 +70,7 @@ def main() -> int:
     parser.add_argument("before", type=Path)
     parser.add_argument("after", type=Path)
     parser.add_argument("--horizon", type=int, default=2028)
+    parser.add_argument("--codes-only", action="store_true")
     args = parser.parse_args()
     before_db, after_db = _open(args.before), _open(args.after)
     try:
@@ -111,7 +118,7 @@ def main() -> int:
         kind = "added" if old is None else "removed" if new is None else "changed"
         market[kind] += 1
         codes = set((new or old)[4])
-        if geography in changed_sources or codes & EXPLAINING:
+        if (geography in changed_sources and not args.codes_only) or codes & EXPLAINING:
             continue
         delta = (new[3] if new else 0) - (old[3] if old else 0)
         market["unexplained"] += 1

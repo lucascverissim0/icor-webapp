@@ -12,8 +12,11 @@ from typing import Protocol
 
 from icor.domain.cohorts import CohortEstimate, OpportunityEstimate
 from icor.domain.evidence import (
+    ARCHIVE_REGISTRATIONS_FLAG,
+    ARCHIVE_REGISTRATIONS_REASON,
     MODEL_RECOVERED_FLAG,
     MODEL_RECOVERED_REASON,
+    REGISTRATIONS_VOCABULARY_EXCLUDED_REASON,
     STOCK_LOWER_BOUND_FLAG,
     STOCK_LOWER_BOUND_REASON,
     VOCABULARY_EXCLUDED_FLAG,
@@ -136,8 +139,11 @@ class GenerationPlanningService:
         release_buckets: dict[
             tuple[str, str, str, int, str], tuple[Decimal, list[str]]
         ] = {}
-        # Release buckets holding registrations named from their type approval.
+        # Release buckets holding registrations named from their type approval,
+        # archived before model-level monitoring, or whose labels must not teach.
         recovered_buckets: set[tuple[str, str, str, int, str]] = set()
+        archive_buckets: set[tuple[str, str, str, int, str]] = set()
+        silent_buckets: set[tuple[str, str, str, int, str]] = set()
         # Observed active fleet by cohort, kept only at each market's newest
         # stock date so memory holds one register snapshot per market.
         stock_dates: dict[str, date] = {}
@@ -155,7 +161,10 @@ class GenerationPlanningService:
                 observation.canonical_vehicle_id,
                 (observation.original_make, observation.original_model),
             )
-            if observation.measure is Measure.NEW_REGISTRATIONS:
+            if (
+                observation.measure is Measure.NEW_REGISTRATIONS
+                and VOCABULARY_EXCLUDED_FLAG not in observation.validation_flags
+            ):
                 teaching[observation.canonical_vehicle_id] += float(observation.value)
             if observation.measure is Measure.ACTIVE_FLEET:
                 _collect_stock(observation, assignment, stock_dates, stock_series)
@@ -176,6 +185,10 @@ class GenerationPlanningService:
             )
             if MODEL_RECOVERED_FLAG in observation.validation_flags:
                 recovered_buckets.add(key)
+            if ARCHIVE_REGISTRATIONS_FLAG in observation.validation_flags:
+                archive_buckets.add(key)
+            if VOCABULARY_EXCLUDED_FLAG in observation.validation_flags:
+                silent_buckets.add(key)
             value, identifiers = release_buckets.get(key, (Decimal(0), []))
             release_buckets[key] = (
                 value + observation.value,
@@ -248,10 +261,10 @@ class GenerationPlanningService:
                     ]
                 )
             )
-            recovered = any(
-                (generation_id, vehicle_id, geography, year, release_id) in recovered_buckets
+            selected = {
+                (generation_id, vehicle_id, geography, year, release_id)
                 for release_id in result.selected_input_ids
-            )
+            }
             series[generation_id, vehicle_id, geography][year] = _AnnualValue(
                 result.value,
                 observation_ids,
@@ -259,7 +272,13 @@ class GenerationPlanningService:
                 _coverage_reason_codes(
                     result.agreement, coverage_corroborators[geography, year]
                 )
-                + ((MODEL_RECOVERED_REASON,) if recovered else ()),
+                + ((MODEL_RECOVERED_REASON,) if selected & recovered_buckets else ())
+                + ((ARCHIVE_REGISTRATIONS_REASON,) if selected & archive_buckets else ())
+                + (
+                    (REGISTRATIONS_VOCABULARY_EXCLUDED_REASON,)
+                    if selected & silent_buckets
+                    else ()
+                ),
             )
 
         cohort_buffer: list[CohortEstimate] = []
@@ -367,11 +386,21 @@ class GenerationPlanningService:
             history_codes: tuple[str, ...] = ()
             observed_years = series.get(series_key)
             if observed_years:
-                short_history = len(observed_years) < 3
+                # Archived years add their own cohorts only: the history, the
+                # forecast and its inputs are those of the monitored years.
+                short_history = len(_monitored(observed_years)) < 3
                 end_year = _end_year(
                     generation, max(observed_years), ending_year[geography]
                 )
-                values = _fill_internal_gaps(observed_years, covered_years[geography])
+                monitored_years = _monitored(observed_years)
+                values = {
+                    **observed_years,
+                    **(
+                        _fill_internal_gaps(monitored_years, covered_years[geography])
+                        if monitored_years
+                        else {}
+                    ),
+                }
                 if end_year is not None:
                     values = {
                         year: annual for year, annual in values.items() if year <= end_year
@@ -381,16 +410,21 @@ class GenerationPlanningService:
                     history_codes = (
                         ("short-registration-history",) if short_history else ()
                     )
+                    monitored = _monitored(values)
                     all_input_ids = tuple(
                         sorted(
                             {
                                 identifier
-                                for annual in values.values()
+                                for annual in monitored.values()
                                 for identifier in annual.observation_ids
                             }
                         )
                     )
-                    forecast_method, forecasts = self._forecast(values, max(horizons))
+                    forecast_method, forecasts = (
+                        self._forecast(monitored, max(horizons))
+                        if monitored
+                        else (_ARCHIVE_ONLY_METHOD, {})
+                    )
                     if end_year is not None:
                         forecasts = {
                             year: value
@@ -699,6 +733,17 @@ class GenerationPlanningService:
 
 
 _STOCK_ONLY_METHOD = "observed-stock-only-v1"
+_ARCHIVE_ONLY_METHOD = "observed-archive-history-only-v1"
+
+
+def _monitored(values: Mapping[int, _AnnualValue]) -> dict[int, _AnnualValue]:
+    """The years outside archived registrations (`ARCHIVE_REGISTRATIONS_FLAG`)."""
+
+    return {
+        year: annual
+        for year, annual in values.items()
+        if ARCHIVE_REGISTRATIONS_REASON not in annual.extra_reason_codes
+    }
 
 
 def _last_complete_cohort(stock_date: date) -> int:

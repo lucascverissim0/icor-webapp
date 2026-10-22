@@ -69,6 +69,16 @@ VOCABULARY_EXCLUDED_REASON = "observed-stock-labels-do-not-teach-vocabulary"
 MODEL_RECOVERED_FLAG = "model-recovered-by-type-approval"
 #: Reason code on a cohort whose registrations include such observations.
 MODEL_RECOVERED_REASON = "registrations-include-model-recovered-by-type-approval"
+#: Validation flag on an archived national registration observation for years
+#: before model-level monitoring (KBA FZ10 2004-2009): it adds the cohorts of
+#: those years and nothing else. Its history never feeds a forecast, so the
+#: forecasts, inputs and reason codes of the years after it stay as they were.
+ARCHIVE_REGISTRATIONS_FLAG = "archive-registrations-not-forecast"
+#: Reason code on a cohort built from such observations.
+ARCHIVE_REGISTRATIONS_REASON = "archive-registrations-not-forecast"
+#: Reason code on a registration cohort whose labels must not teach the identity
+#: vocabulary (observations flagged `VOCABULARY_EXCLUDED_FLAG`).
+REGISTRATIONS_VOCABULARY_EXCLUDED_REASON = "registrations-labels-do-not-teach-vocabulary"
 
 _IDENTIFIER_PATTERN = r"[a-z0-9][a-z0-9._-]{0,79}"
 _SHA256_PATTERN = r"[0-9a-f]{64}"

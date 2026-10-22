@@ -6,8 +6,11 @@ from types import SimpleNamespace
 
 from icor.application.generation_planning import GenerationPlanningService
 from icor.domain.evidence import (
+    ARCHIVE_REGISTRATIONS_FLAG,
+    ARCHIVE_REGISTRATIONS_REASON,
     MODEL_RECOVERED_FLAG,
     MODEL_RECOVERED_REASON,
+    REGISTRATIONS_VOCABULARY_EXCLUDED_REASON,
     STOCK_LOWER_BOUND_FLAG,
     STOCK_LOWER_BOUND_REASON,
     VOCABULARY_EXCLUDED_FLAG,
@@ -991,3 +994,86 @@ def test_a_provisional_year_after_a_market_fall_is_complete() -> None:
     )
 
     assert _cohort_years(repository, "vehicle-volkswagen-golf-eu") == {2020, 2021, 2022}
+
+
+def _archive(repository, years_values, *, vehicle="vehicle-volkswagen-golf-eu") -> None:
+    """Add archived KBA registrations of the Golf for years before the EEA's."""
+
+    repository.releases = (
+        *repository.releases,
+        SimpleNamespace(
+            release_id="release-kba-archive",
+            dependency_group="kba-fz10-archive",
+            source_id="kba-fz10",
+            publication_status="final",
+        ),
+    )
+    observations = tuple(
+        SimpleNamespace(
+            observation_id=f"observation-archive-{vehicle}-{year}",
+            release_id="release-kba-archive",
+            canonical_vehicle_id=vehicle,
+            geography="DE",
+            registration_cohort_year=year,
+            period_start=date(year, 1, 1),
+            period_end=date(year, 12, 31),
+            measure=Measure.NEW_REGISTRATIONS,
+            validation_flags=(ARCHIVE_REGISTRATIONS_FLAG, VOCABULARY_EXCLUDED_FLAG),
+            original_make="VW",
+            original_model="GOLF, JETTA",
+            value=Decimal(value),
+        )
+        for year, value in years_values
+    )
+    generation = next(
+        item
+        for item in (repository.generation, *getattr(repository, "extra_generations", ()))
+        if item.canonical_vehicle_id == vehicle
+    )
+    repository.observations = (*repository.observations, *observations)
+    repository.assignments = (
+        *repository.assignments,
+        *(
+            SimpleNamespace(
+                observation_id=item.observation_id,
+                selected_generation_id=generation.generation_id,
+                confidence=ConfidenceBand.LOW,
+            )
+            for item in observations
+        ),
+    )
+
+
+def test_archived_registrations_add_their_cohorts_and_change_nothing_else() -> None:
+    """KBA's 2004-2009 tables add those cohorts; the monitored years stay as they were."""
+
+    baseline = Repository()
+    GenerationPlanningService().apply(baseline, horizons=(2028,), seed=20260827)
+    repository = Repository()
+    _archive(repository, ((2017, "80"), (2018, "90")))
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    before = {item.registration_cohort_year: item for item in baseline.cohorts}
+    after = {item.registration_cohort_year: item for item in repository.cohorts}
+    assert set(after) == set(before) | {2017, 2018}
+    for year, cohort in before.items():
+        assert after[year] == cohort
+    for year, value in ((2017, "80"), (2018, "90")):
+        assert after[year].registrations == Decimal(value)
+        assert ARCHIVE_REGISTRATIONS_REASON in after[year].reason_codes
+        assert REGISTRATIONS_VOCABULARY_EXCLUDED_REASON in after[year].reason_codes
+        assert "short-registration-history" not in after[year].reason_codes
+        assert after[year].input_observation_ids == (
+            f"observation-archive-vehicle-volkswagen-golf-eu-{year}",
+        )
+
+
+def test_a_vehicle_known_only_from_the_archive_is_never_forecast() -> None:
+    repository = Repository()
+    _add_vehicle(repository, "ritmo", ())
+    _archive(repository, ((2016, "40"), (2017, "30")), vehicle="vehicle-ritmo")
+
+    GenerationPlanningService().apply(repository, horizons=(2028,), seed=20260827)
+
+    assert _cohort_years(repository, "vehicle-ritmo") == {2016, 2017}

@@ -22,11 +22,16 @@ from __future__ import annotations
 
 import sqlite3
 
-from icor.domain.evidence import STOCK_LOWER_BOUND_REASON, VOCABULARY_EXCLUDED_REASON
+from icor.domain.evidence import (
+    REGISTRATIONS_VOCABULARY_EXCLUDED_REASON,
+    STOCK_LOWER_BOUND_REASON,
+    VOCABULARY_EXCLUDED_REASON,
+)
 from icor.evidence.vehicle_identity import VehicleIdentityIndex
 
 _LOWER_BOUND_CODE = f'"{STOCK_LOWER_BOUND_REASON}"'
 _EXCLUDED_CODE = f'"{VOCABULARY_EXCLUDED_REASON}"'
+_SILENT_REGISTRATIONS_CODE = f'"{REGISTRATIONS_VOCABULARY_EXCLUDED_REASON}"'
 
 _RANKABLE_VEHICLES = """FROM canonical_vehicle v
     JOIN (
@@ -90,7 +95,8 @@ def _vocabulary_volume(
     the bare word, merging different cars. A vehicle known only from such a
     register teaches nothing. Nor does a register whose labels were never
     reviewed for teaching (`labels-do-not-teach-vocabulary`): it must not
-    change how the vehicles already reviewed fold. Without either kind of
+    change how the vehicles already reviewed fold, and neither may archived
+    registrations flagged the same way. Without either kind of
     cohort this is every row's own volume, so other snapshots fold exactly as
     before.
     """
@@ -101,12 +107,14 @@ def _vocabulary_volume(
         vehicle_id: (float(volume or 0.0), only_lower_bound)
         for vehicle_id, volume, only_lower_bound in connection.execute(
             """SELECT canonical_vehicle_id,
-                SUM(CASE WHEN instr(reason_codes, ?) OR instr(reason_codes, ?) THEN 0
-                    ELSE CAST(registrations AS REAL) END),
-                MIN(instr(reason_codes, ?) > 0 OR instr(reason_codes, ?) > 0)
+                SUM(CASE WHEN instr(reason_codes, ?) OR instr(reason_codes, ?)
+                    OR instr(reason_codes, ?) THEN 0 ELSE CAST(registrations AS REAL) END),
+                MIN(instr(reason_codes, ?) > 0 OR instr(reason_codes, ?) > 0
+                    OR instr(reason_codes, ?) > 0)
             FROM cohort_estimate GROUP BY canonical_vehicle_id
-            HAVING MAX(instr(reason_codes, ?) > 0 OR instr(reason_codes, ?) > 0)""",
-            (_LOWER_BOUND_CODE, _EXCLUDED_CODE) * 3,
+            HAVING MAX(instr(reason_codes, ?) > 0 OR instr(reason_codes, ?) > 0
+                OR instr(reason_codes, ?) > 0)""",
+            (_LOWER_BOUND_CODE, _EXCLUDED_CODE, _SILENT_REGISTRATIONS_CODE) * 3,
         )
     }
     if not lower_bound:

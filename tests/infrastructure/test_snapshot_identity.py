@@ -80,3 +80,29 @@ def test_a_vehicle_known_only_from_an_untaught_register_does_not_teach_the_vocab
 
     assert index.identity_for("s3") == ("bmw", "serie 3")
     assert index.identity_for("serie") == ("bmw", "serie")
+
+
+_ARCHIVED = json.dumps(
+    [
+        "reconciled-registration-cohort",
+        "survival",
+        "archive-registrations-not-forecast",
+        "registrations-labels-do-not-teach-vocabulary",
+    ]
+)
+
+
+def test_archived_registrations_whose_labels_do_not_teach_change_no_fold():
+    index = load_identity_index(
+        _snapshot(
+            [
+                ("x5", "60000", _REGISTERED),
+                ("s3", "400", _REGISTERED),
+                ("serie", "40000", _ARCHIVED),
+                ("x5", "9000", _ARCHIVED),
+            ]
+        )
+    )
+
+    assert index.identity_for("s3") == ("bmw", "serie 3")
+    assert index.identity_for("serie") == ("bmw", "serie")
