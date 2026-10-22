@@ -22,7 +22,7 @@ from icor.domain.evidence import STOCK_LOWER_BOUND_REASON
 from icor.eurocodes.data_coverage import CountryComparison, FleetCell, FleetRange, OfficialStock
 from icor.eurocodes.runtime import identity_key
 from icor.evidence.eurostat_new_registrations import NewRegistrations, includes_used_imports
-from icor.forecasting.survival import CalibratedCohortSurvivalModel
+from icor.forecasting.survival import CalibratedCohortSurvivalModel, NetRetainedSurvivalModel
 from icor.infrastructure.snapshot_identity import load_identity_index
 
 STORED_HORIZON = 2028
@@ -52,9 +52,10 @@ class FleetRead:
 
 
 def _fleet(
-    survival: CalibratedCohortSurvivalModel,
+    survival: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel,
     stored: Decimal,
     *,
+    geography: str,
     cohort_year: int,
     year: int,
     stock_year: int | None,
@@ -73,12 +74,14 @@ def _fleet(
     if age < 0:
         return None
     if stock_year is None:
-        interval = survival.interval(stored, age_years=age)
+        interval = survival.interval(stored, age_years=age, geography=geography)
         return FleetRange(interval.p10, interval.p50, interval.p90)
     if year < stock_year:
         return FleetRange(stored, stored, stored)
-    at_stock = survival.interval(_SCALE, age_years=max(stock_year - cohort_year, 0))
-    at_year = survival.interval(_SCALE, age_years=age)
+    at_stock = survival.interval(
+        _SCALE, age_years=max(stock_year - cohort_year, 0), geography=geography
+    )
+    at_year = survival.interval(_SCALE, age_years=age, geography=geography)
     if min(at_stock.p10, at_stock.p50, at_stock.p90) <= 0:
         return None
     return FleetRange(
@@ -127,7 +130,7 @@ def _observed_sources(connection: sqlite3.Connection) -> dict[str, frozenset[str
 
 def read_fleet(
     connection: sqlite3.Connection,
-    survival: CalibratedCohortSurvivalModel,
+    survival: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel,
     *,
     year: int,
     comparison_years: Mapping[str, Collection[int]],
@@ -202,6 +205,7 @@ def read_fleet(
         recomputed = _fleet(
             survival,
             stored_value,
+            geography=geography,
             cohort_year=cohort_year,
             year=STORED_HORIZON,
             stock_year=stock_year,
@@ -221,7 +225,12 @@ def read_fleet(
         elif evidence in ("registrations", "stock"):
             cohort_evidence[geography][cohort_year].add(evidence)
         at_year = _fleet(
-            survival, stored_value, cohort_year=cohort_year, year=year, stock_year=stock_year
+            survival,
+            stored_value,
+            geography=geography,
+            cohort_year=cohort_year,
+            year=year,
+            stock_year=stock_year,
         )
         if at_year is not None:
             total = fleet.setdefault(key, [Decimal(0)] * 3)
@@ -231,6 +240,7 @@ def read_fleet(
             at_comparison = _fleet(
                 survival,
                 stored_value,
+                geography=geography,
                 cohort_year=cohort_year,
                 year=comparison_year,
                 stock_year=stock_year,

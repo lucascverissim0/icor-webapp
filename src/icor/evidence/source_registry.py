@@ -29,7 +29,7 @@ from icor.evidence.sources.uk_dft import (
     UKFirstRegistrationLoader,
     UKVehicleAgeLoader,
 )
-from icor.forecasting.survival import load_promoted_survival_model
+from icor.forecasting.survival import load_net_retained_survival_model
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
 
 OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
@@ -38,7 +38,7 @@ OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     reconciliation_method="single-coverage-corroboration-v2",
     confidence_method="source-evidence-v1",
     estimation_method="register-years-stock-anchored-cohorts-v5",
-    survival_method="uk-dft-licensed-stock-band-v1",
+    survival_method="uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1",
     hazard_method="france-insurance-windshield-hazard-v2",
     forecast_method="validated-recency-damped-ensemble-v2",
     uncertainty_method="quantile-matched-split-normal-propagation-v2",
@@ -89,7 +89,7 @@ def official_repository_finalizer(
     if result.unassigned_ids or result.assigned_count != result.usable_count:
         raise ValueError("official generation mapping is incomplete")
     planning = GenerationPlanningService(
-        survival=load_promoted_survival_model(),
+        survival=load_net_retained_survival_model(),
     ).apply(repository, seed=20260827)
     if planning.cohort_count == 0 or planning.opportunity_count == 0:
         raise ValueError("official generation planning is incomplete")

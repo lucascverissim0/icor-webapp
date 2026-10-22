@@ -41,7 +41,9 @@ def _registration_fleet(registrations: str, age: int) -> tuple[str, str, str]:
 
 def _register_fleet(stock: str, *, age: int, stock_age: int) -> tuple[str, str, str]:
     planner = GenerationPlanningService(survival=SURVIVAL)
-    interval = planner._conditional_fleet(Decimal(stock), age_years=age, stock_age_years=stock_age)
+    interval = planner._conditional_fleet(
+        Decimal(stock), age_years=age, stock_age_years=stock_age, geography="NL"
+    )
     return str(interval.p10), str(interval.p50), str(interval.p90)
 
 

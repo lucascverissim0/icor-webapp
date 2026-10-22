@@ -10,6 +10,7 @@ from icor.evidence.sources.uk_dft import (
     UKFirstRegistrationLoader,
     UKVehicleAgeLoader,
 )
+from icor.forecasting.survival import load_net_retained_survival_model
 
 
 def test_official_registry_contains_only_reviewed_parser_contracts() -> None:
@@ -57,7 +58,11 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
         OFFICIAL_SOURCE_VERSIONS.estimation_method
         == "register-years-stock-anchored-cohorts-v5"
     )
-    assert OFFICIAL_SOURCE_VERSIONS.survival_method == "uk-dft-licensed-stock-band-v1"
+    assert (
+        OFFICIAL_SOURCE_VERSIONS.survival_method
+        == "uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1"
+        == load_net_retained_survival_model().method
+    )
     assert (
         OFFICIAL_SOURCE_VERSIONS.hazard_method
         == "france-insurance-windshield-hazard-v2"

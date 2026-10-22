@@ -32,7 +32,11 @@ from icor.forecasting.reconciliation import (
 )
 from icor.forecasting.registration_forecast import RegistrationForecaster
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
-from icor.forecasting.survival import CohortSurvivalModel, SurvivalInterval
+from icor.forecasting.survival import (
+    NET_RETENTION_REASON,
+    CohortSurvivalModel,
+    SurvivalInterval,
+)
 from icor.forecasting.uncertainty import OpportunityUncertaintyModel
 
 _BATCH_SIZE = 20_000
@@ -391,27 +395,35 @@ class GenerationPlanningService:
                     age = horizon - cohort_year
                     if cohort_year in stock:
                         annual = stock[cohort_year]
+                        stock_age = stock_dates[geography].year - cohort_year
                         fleet = self._conditional_fleet(
                             annual.registrations,
                             age_years=age,
-                            stock_age_years=stock_dates[geography].year - cohort_year,
+                            stock_age_years=stock_age,
+                            geography=geography,
                         )
                         if fleet is None:
                             beyond_support_cohort_count += 1
                             continue
+                        retained = self.survival.retention(
+                            geography, age_years=age
+                        ) < self.survival.retention(geography, age_years=max(stock_age, 0))
                         cohort_codes = (
                             "observed-stock-anchored-cohort",
                             self.survival.reason_code(geography),
+                            *((NET_RETENTION_REASON,) if retained else ()),
                             *annual.extra_reason_codes,
                         )
                     else:
                         annual = values[cohort_year]
                         fleet = self.survival.interval(
-                            annual.registrations, age_years=age
+                            annual.registrations, age_years=age, geography=geography
                         )
+                        retained = self.survival.retention(geography, age_years=age) < 1
                         cohort_codes = (
                             f"{annual.status}-registration-cohort",
                             self.survival.reason_code(geography),
+                            *((NET_RETENTION_REASON,) if retained else ()),
                             *annual.extra_reason_codes,
                             *history_codes,
                         )
@@ -525,7 +537,7 @@ class GenerationPlanningService:
         )
 
     def _conditional_fleet(
-        self, stock: Decimal, *, age_years: int, stock_age_years: int
+        self, stock: Decimal, *, age_years: int, stock_age_years: int, geography: str
     ) -> SurvivalInterval | None:
         """Project cars observed on the road at one age to an older age.
 
@@ -536,8 +548,10 @@ class GenerationPlanningService:
 
         scale = Decimal(1_000_000)
         try:
-            at_stock = self.survival.interval(scale, age_years=max(stock_age_years, 0))
-            at_horizon = self.survival.interval(scale, age_years=age_years)
+            at_stock = self.survival.interval(
+                scale, age_years=max(stock_age_years, 0), geography=geography
+            )
+            at_horizon = self.survival.interval(scale, age_years=age_years, geography=geography)
         except ValueError:
             return None
         if min(at_stock.p10, at_stock.p50, at_stock.p90) <= 0:
@@ -607,6 +621,7 @@ class GenerationPlanningService:
                         surviving[vehicle(key[1])] += self.survival.interval(
                             annual.registrations,
                             age_years=stock_dates[geography].year - year,
+                            geography=geography,
                         ).p50
                 register_wins = {
                     identity

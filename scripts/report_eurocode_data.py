@@ -43,7 +43,7 @@ from icor.eurocodes.data_coverage import EVIDENCE_KINDS, build_report
 from icor.eurocodes.runtime import EurocodeMap
 from icor.evidence import eurostat_age_conventions, eurostat_car_stock, eurostat_new_registrations
 from icor.evidence.release_manifests import load_snapshot_manifest
-from icor.forecasting.survival import load_promoted_survival_model
+from icor.forecasting.survival import load_survival_model_for
 from icor.infrastructure.snapshot_data_coverage import country_comparisons, read_fleet
 from icor.infrastructure.snapshot_eurocodes import measure
 from icor.infrastructure.snapshot_store import SnapshotStore
@@ -254,9 +254,16 @@ def main(argv: list[str] | None = None) -> int:
         arguments.fetch_eurostat,
     )
 
-    survival = load_promoted_survival_model()
     connection = sqlite3.connect(f"{ledger_path.resolve().as_uri()}?mode=ro", uri=True)
     try:
+        methods = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT survival_method FROM cohort_estimate")
+        }
+        if len(methods) != 1:
+            print(f"The snapshot records {len(methods)} survival methods.", file=sys.stderr)
+            return 2
+        survival = load_survival_model_for(methods.pop())
         geographies = {
             row[0] for row in connection.execute("SELECT DISTINCT geography FROM cohort_estimate")
         }
@@ -298,8 +305,8 @@ def main(argv: list[str] | None = None) -> int:
         conventions[geography] = convention.convention if convention else None
     scale = Decimal(1_000_000)
 
-    def share(_geography: str, age: int) -> Decimal:
-        return survival.interval(scale, age_years=age).p50 / scale
+    def share(geography: str, age: int) -> Decimal:
+        return survival.interval(scale, age_years=age, geography=geography).p50 / scale
 
     countries = country_comparisons(fleet, official, registrations, conventions, share)
 
