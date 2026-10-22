@@ -227,7 +227,7 @@ class NetRetainedSurvivalModel:
         self.method = f"{base.method}+{method}"
         self.assumption_ids = (
             *base.assumption_ids,
-            f"survival-{method}-markets-{'-'.join(sorted(multipliers)) or 'none'}",
+            f"survival-{method}-markets-{'-'.join(sorted(multipliers)).lower() or 'none'}",
         )
 
     def retention(self, geography: str, *, age_years: int) -> Decimal:

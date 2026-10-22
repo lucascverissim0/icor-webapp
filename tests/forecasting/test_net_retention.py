@@ -196,3 +196,12 @@ def test_planning_names_the_retention_a_cohort_got():
     assert young is not None and crossing is not None and elsewhere is not None
     assert crossing.p50 == pytest.approx(elsewhere.p50 * Decimal("0.5"), abs=Decimal("0.0002"))
     assert young.p50 > crossing.p50
+
+
+def test_the_retained_model_assumption_ids_are_valid_identifiers():
+    from re import fullmatch
+
+    from icor.domain.cohorts import _IDENTIFIER
+
+    for item in load_net_retained_survival_model().assumption_ids:
+        assert fullmatch(_IDENTIFIER, item), item
