@@ -7789,3 +7789,80 @@ Make-alias spellings measured: 179 undecided spellings whose make embeds a known
 "magyar suzuki", "… carpol") hold 2,616 of 8,638,413 review-demand units (0.03%). Not worth an
 identity-rule change now (it would refold vehicles in every market); fold into a later identity
 release.
+
+## 2026-10-22 — Mission 4: estimating cars in countries without a free register (Claude Code)
+
+Lucas asked for the most precise estimate possible for countries without a free register ("mission
+critical, make no mistakes"). Approved plan (outside the repo):
+`~/.claude/plans/ok-for-the-countries-melodic-pine.md`.
+
+**Lucas's decisions (binding, 2026-10-22):**
+- Estimates go to model and Eurocode level in a **separate estimated layer** with P10–P90. They
+  appear on `/data-coverage` and behind a ranking toggle that is off by default. This **supersedes
+  the 2026-10-21 "country totals only" rule.** A country ships at model level only if hidden-register
+  backtests pass; otherwise it falls back to make level or totals.
+- Every first-registration year is in scope; cars over 20 years get their own band.
+- "All rights reserved" tables may be used as inputs, on Lucas's responsibility: Mobility Sweden,
+  Croatia's CVH, Portugal's ACAP, Cyprus's Cystat. Record each source's terms in `docs/DEVELOPMENT.md`.
+- Unchanged: observed numbers are never altered, net retention on observed cohorts stays
+  downward-only, local promotion is allowed once all gates pass, no push or deploy.
+
+**Findings (read-only measurements on `snapshot-2da7ed88f80510eabcb2` and the pinned Eurostat files):**
+1. **Band-edge defect.** Italy's Eurostat "2–5 years" band spans **4** registration years:
+   Y2-5 divided by carmot of t−5..t−2 is 0.99–1.03 for every year 2016–2025, against 1.26–1.49
+   under the 3-year reading. `eurostat_age_conventions.classify` tests only the youngest band, and
+   `data_coverage._band(age, shift)` moves every edge together, so it cannot express this layout.
+   About 2.1M of Italy's reported gap (Y2-5) is this artefact. Italy's rejected 5–10 net-retention
+   target is probably the same artefact.
+2. **The UK survival curve drives the old-car gap.** Its p50 is 0.50 at 15 years and 0.21 at 19.
+   Official 2023 stock divided by (carmot × UK p50): DE 1.00, SE 1.01, DK 1.09, AT 1.13, NO 1.25,
+   FR 1.31, IE 1.32, NL 1.37, IT 1.47, ES 1.67, SK 1.86, FI 2.22, CZ 2.23, BG 2.24, PT 2.3,
+   HR 2.33, PL 2.52, HU 2.7, GR 2.85, RO 3.38. Some countries have carmot gaps, so the
+   east/FI/CZ ratios are inflated. "Before sources" explains only 5.3M of IT's 18.6M old-car gap
+   and 4.4M of FR's.
+3. **Registered stock may not mean cars in use.** Italy's ACI/PRA, GR, RO, BG and PT likely keep
+   cars that were never deregistered, which create no glass demand. To be audited.
+4. **Code map.** An estimated car cannot enter today's cohort tables: every ranked cell needs an
+   identity, and `cohort_id` would collide. The schema is checked exactly (`_SCHEMA_VERSION = 7`).
+   Unknown reason codes raise in `read_fleet`. The estimated layer therefore needs its own table
+   (schema v8).
+5. **Verified free partial sources** (agents, 2026-10-22):
+   - DE KBA (DL-DE/BY-2.0):
+     - FZ10 new registrations make × model monthly from Jan 2004;
+     - FZ2 stock make × model (FZ2.2 down to type key) every 1 Jan 2007–2026. Drop 2007: the
+       definition changed in 2008;
+     - FZ15 stock by first-registration year, no make, 2010–22;
+     - FZ13.6 make × Euro class.
+   - IT (CC BY 4.0):
+     - ACI Autoritratto stock make × model × version every 31 Dec 2002–2025;
+     - ACI prime iscrizioni make/model/version from 2002;
+     - MIT per-vehicle 31/12/2019 file: make, kW, engine, fuel, Euro class, registration date, no
+       model.
+   - RO: DRPCIV stock make × model 2012–2025 (OGL-ROU, 17% blank model); INS age bands 2007–25;
+     used-import totals 2000–25.
+   - BG MVR (CC0): stock make × age; first registrations make × model × new/used, monthly. The live
+     portal gave 403; checked on the testdata mirror.
+   - HU KSH: stock by make 2002–25, mean age by make, first registrations by make (new + used)
+     2000+.
+   - NO SSB (CC BY 4.0): make × 6 age bands 2008–25 (08581); used imports monthly from 1995 (14020).
+     Vegvesen's bulk dataset is offline.
+   - SE: Mobility Sweden make × model year (©). HR: CVH inspections make × age band (©).
+   - AT (CC BY 4.0): new registrations by make from 2000; stock by first-registration year (no make).
+   - BE SPF Mobilité: registrations make × model × new/used × Euro norm 2013–25; stock × age
+     2002–25.
+   - IE CSO (CC BY 4.0): first-time licensed new and second-hand by make 1998+; new by model 2014+.
+   - GR: SEAA and ELSTAT by make. PT: INE age bands, used-import totals 2019+.
+   - ES DGT monthly microdata Dec 2014–Sep 2026: registrations and deregistrations, model
+     **unmasked**, CC BY 4.0 on datos.gob.es.
+   - Nothing at model level for FR, PT, GR, SK, CY, MT or IS. Iceland's register is sold, not free.
+
+**Plan phases:**
+- 0: per-band edges, age-definition and in-use audit, net retention recalibrated.
+- 1: validation harness on hidden registers.
+- 2: KBA FZ10 2004–09 and ACI 2002–09 as observed registrations.
+- 3: Spain's masked models from the flow files.
+- 4: country × cohort L1 model.
+- 5: make and model level.
+- 6: `estimated_cohort` table, report v3, ranking toggle.
+
+The acceptance gates are in the plan file.
