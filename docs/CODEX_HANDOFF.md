@@ -7585,3 +7585,79 @@ only.
 **CEPiK crawl:** running detached (`nohup … acquire_cepik_fleet.py crawl --state-dir
 .local/evidence/cepik-crawl --workers 2`). The state is resumable; rerun the same command if it
 stopped. Then run `aggregate`.
+
+### Progress, 2026-10-22 (Claude Code) — registers, net retention, provisional fix
+**Committed (local, not pushed), `77c4ff7`..`e4d3876`:**
+- `77c4ff7` `register_aggregate.py`: one counts-only CSV per register (`make,model,cohort,vehicles`,
+  sorted, sha256), streamed through `HashingReader`. `15b14cb` `sources/national_register.py`:
+  one loader (`national_register_cohorts_csv_v1`) with a reviewed `RegisterProfile` per source;
+  cohorts from 2006.
+- `e8d8844` EEA blank-model recovery (both loaders), observations flagged
+  `model-recovered-by-type-approval`, cohorts carry `registrations-include-model-recovered-by-type-approval`.
+- `43df4ab` **plan refinement:** a lower-bound register serves every cohort 2006+, but per folded
+  vehicle and cohort the planner keeps the register only where it holds more cars than the
+  surviving registrations, and the registrations otherwise (`_lower_bound_choices`). The plan's
+  "lower bound, 2006–2009 only" and the ±1-year recovery rung are dropped (the rung recovered
+  fewer cars).
+- `b2e95be` register observations carry `labels-do-not-teach-vocabulary`; their cohorts carry
+  `observed-stock-labels-do-not-teach-vocabulary`, and `snapshot_identity._vocabulary_volume`
+  leaves that volume out, so a register can never refold a reviewed vehicle.
+- `1684e78`, `fb81518` **LU, LT, EE integrated as complete anchors** (`OFFICIAL_SOURCES`
+  `lu-fleet`, `lt-fleet`, `ee-fleet`; bootstrap `SOURCE_KEYS` → 27 releases; staged in
+  `.local/evidence/releases`). LT and EE count cars as Eurostat does: LT includes `DAE_STATUSAS`
+  N (not in traffic), EE includes PEATATUD (suspended); `acquire_lt_fleet.py --with-not-in-traffic`
+  and `acquire_ee_fleet.py --with-suspended` write that aggregate as the pinned release.
+
+  | Release | Artifact sha256 | Cars | Accepted groups |
+  |---|---|---|---|
+  | `lu-snca-parc-automobile-20261006` | `b55b7142…` | 472,100 (Eurostat 2025 461,762) | 21,175 of 31,351 |
+  | `lt-regitra-tp-parkas-20261001` | `6628e4a7…` | 1,901,770 (Eurostat 2025 1,816,856) | 48,363 of 73,408 |
+  | `ee-transpordiamet-soidukid-20261001` | `ae80ef1d…` | 788,081 (97.4% of Eurostat 809,095) | 16,294 of 32,023 |
+
+  Gates (`scripts/measure_register_gates.py`, against b05d; names = register cars folding onto
+  identities the market's registrations hold / registrations named by the register):
+  - LU: masked 0.01%, names 98.5% / 99.7%, relative loss 1.3%, refold 0.
+  - EE: masked 0%, names 99.0% / 99.7%, relative loss 10.9%, refold 0.
+  - LT: masked 1.5% (`Nuasmeninta`), names 96.7% / 99.7%, relative loss 21%, refold 0.
+  The plain "loss" gate (stock < half the surviving registrations) fails everywhere because cars
+  leave these markets young (LU 2010 cohort: register 8,695 against 20,047 surviving). The
+  relative gate compares each vehicle with its market's own cohort ratio. EE's and LT's
+  relative losses are new cars registered and re-exported (LT Fiat 500: 45,288 registered, 562 on
+  the road; EE Clio 6,587 / 745), which a complete register must remove. LT is therefore complete,
+  not a lower bound; its masked cars are rare by construction. **Decision (mine, recorded):** a
+  register is complete when masked ≤ 1.5% and names ≥ 96.5%, the losses being explained export.
+- `e4bf798` **net retention, downward only** (`forecasting/net_retention.py`,
+  `scripts/calibrate_net_retention.py` → `survival_curves/eurostat_net_retention.json`, input
+  sha256 recorded). Per market except GB, unflagged cells, each market-year's band convention:
+  ratio official / (carmot × UK curve) per band, target = min(1, largest of the last 3 years),
+  1 within 3%. Curve through band midpoints (a band kept whole sits at its oldest age), projected
+  each iteration onto non-increasing (PAVA) and ≤ 1. A market is kept only if its curve fitted to
+  2022 predicts 2023–2025 better and no band is more than 2 points worse. **BE** (backtest error
+  25.5% → 5.2%) and **LU** (65.7% → 4.4%) pass; AT, DE and IT are rejected (DE's old cars exceed
+  the curve, so a non-increasing curve makes them worse); DK and SI pool to no change. In-sample
+  2025: BE 5–10 and 10–20 match exactly; LU 2–5 is 6% over (the 3-year max is conservative).
+  Build survival method: `uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1`; lowered
+  cohorts carry `eurostat-net-retention-calibrated`; `load_survival_model_for(method)` lets the
+  report verify a snapshot built with either model. A recalibration must bump the method name.
+- `07e1bc8` **incomplete provisional year:** snapshot b05d 2025 registrations against carmot are
+  within ±6% everywhere except PL (440,859 / 600,504 = 73%). A provisional market-year below 90% of
+  the final year before it no longer ends the vehicles absent from it, and those are forecast for
+  it.
+- `e4d3876` `eurocode_review.py --round <name> prepare --database <ledger> --only-undecided`,
+  and `merge` within a round adds to `decisions.json` (backup `decisions.before-<round>.json`).
+  On b05d the decided identities already cover 99.001% of 2028 demand.
+
+**Verification:** `uv run pytest -q` 1326 passed, 7 skipped, 4 xfailed (after `07e1bc8`); ruff
+check clean on every touched file.
+
+**State at this checkpoint:**
+- Candidate build B (27 releases, HEAD `e4d3876`'s code via worktree
+  `.local/worktrees/build-b1`) running detached, log `.local/evidence/build-b1.log`.
+- CEPiK crawl still running (PID 78564; 2 of 176 slices done by 06:20Z on 2026-10-22, after an
+  overnight network outage; one slice failed after 12 attempts and is retried on rerun). At this
+  pace PL will take days.
+- CZ, SI, DK acquisition agents died in the outage and were resumed; their untracked files
+  (`*_fleet_acquisition.py` for cz/si/dk, scripts, tests) are not committed yet. DK's own process
+  (PID 3885) survived and was at 42% of the 7.1 GB zip.
+- Old candidate `snapshot-581241df1ba0aa0dfd19` (DGT-only) is superseded; delete it once the new
+  build succeeds.
