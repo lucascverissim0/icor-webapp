@@ -7785,3 +7785,7 @@ are still undecided.
 Result: 814 families, 1,722 identities; coverage 0.99016; report regenerated (tier A 485, B 300,
 C 624 codes; outside 109,663, unassignable 1,315,026, unreviewed 2,430,661 cars). Remaining
 follow-up: make-alias spellings (e.g. "Ford Werke", "Magyar Suzuki") belong in identity rules.
+Make-alias spellings measured: 179 undecided spellings whose make embeds a known make ("ford werke",
+"magyar suzuki", "… carpol") hold 2,616 of 8,638,413 review-demand units (0.03%). Not worth an
+identity-rule change now (it would refold vehicles in every market); fold into a later identity
+release.
