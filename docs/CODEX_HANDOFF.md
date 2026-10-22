@@ -7661,3 +7661,89 @@ check clean on every touched file.
   (PID 3885) survived and was at 42% of the 7.1 GB zip.
 - Old candidate `snapshot-581241df1ba0aa0dfd19` (DGT-only) is superseded; delete it once the new
   build succeeds.
+
+### Promoted `snapshot-2da7ed88f80510eabcb2` (2026-10-22, Claude Code) — registers live locally
+
+**Commits after `e4d3876` (local, not pushed):** `4100348` SI register (OPSI 2023-06-30,
+`si-fleet`); `cfb9e96` CZ and DK registers (`cz-fleet`, `dk-fleet`; default plan 30 releases);
+`4dde21f` net-retention assumption id lower-cased (the first candidate build failed on
+`_IDENTIFIER` with "BE-LU"; a test now checks the ids); `2250731` then `dc7ad98` incomplete
+provisional year; `1188540` SI/CZ/DK licence notes in `docs/DEVELOPMENT.md`.
+
+**Register facts.** `.local/pinned-artifacts/` keeps each aggregate and `.profile.json`; raw
+extracts were streamed, never stored.
+- CZ `cz-rsv-vypis-vozidel-20261001`: aggregate sha256 `6f6e5eb8…`, 4,203,416 B; source extract
+  7,471,817,357 gzip B, sha256 `4bd4a0e4…`. M1 + `PROVOZOVANÉ` = 6,933,157 cars (+2.3% on Eurostat
+  2025; with `VYŘAZENO Z PROVOZU` 7,396,622, too high, file deleted). "." is the missing marker
+  (profile masks "." and "---"). Gates: masked 0.1%, names 99.0% / 97.2% (EEA's "KODA" for
+  ŠKODA), relative loss 6.7% (re-exports: Fiesta 35,933 registered, 13,355 on the road), refold 0.
+- DK `dk-dmr-statistikudtraek-20261020`: aggregate sha256 `15112314…`, 1,083,018 B; zip
+  `ESStatistikListeModtag-20261020-122157.zip` over anonymous FTP. Personbil, `Registreret`, first
+  record per `KoeretoejIdent` (leasing periods repeat a vehicle) = 2,973,464 (98.5% of Eurostat).
+  Used imports carry their foreign first-registration date (93.2% of customs-inspected imports were
+  first registered > 180 days before). Gates: masked 0%, names 97.1% / 97.6%, relative loss 16.5%,
+  refold 0. Most DK "loss" is labels: "Ny Clio", "C-Klasse", "A-Klasse", "YARIS" vs "yaris
+  hybrid". Register labels never teach the vocabulary, so these fold onto their own identities;
+  the review round below decided every identity needed for 99%.
+  `OfficialSource.url` for DK is `ftp://`; `validate_source_url` (https-only) is only enforced for
+  direct downloads, and the test skips it for `dk-fleet`.
+- SI `si-opsi-registrirana-vozila-20230630`: sha256 `6302c8dc…`, cohorts ≤ 2022 anchored, later
+  from EEA.
+
+**Incomplete provisional year — final rule (`dc7ad98`).** The earlier year-before ratio was wrong
+both ways: PL EEA 2025 is 82% of its 2024 but 73.4% of Eurostat; MT is 85% of 2024 but 96.8% of
+Eurostat (a real market fall). Planning now compares a provisional newest year's named
+registrations with Eurostat `road_eqr_carmot` (committed `src/icor/evidence/
+eurostat_registration_totals.json`, written by `scripts/pin_eurostat_registration_totals.py`,
+input sha256 recorded) and flags < 85%. Measured 2025: PL 0.734, FI 0.679; every other market
+≥ 0.927 (IS 0.927, SE 0.942). No total → complete. Re-pin after a new carmot fetch.
+
+**Review round `r2-registers`** (`eurocode_review.py --round r2-registers`): 93 new identities in 5
+batches, two blind reviewers + adjudicator (private `review/rounds/r2-registers/`,
+`adjudication/decide_r2.py`). Unit agreement: bmw* 100%, mixed-04 96.6%, mixed-05 80.5%; 8
+differences adjudicated (300 D W124-only; GS 450h two generations; Terrano vs Terrano II split;
+Vectra B / Astra G / Astra G Caravan generation-only families; Samurai and Renault 4 TL get
+full-catalogue codes). Merged: 805 families, 1,683 identities; coverage 0.99001 of 2028 demand.
+**Tooling defect found, not fixed:** `prepare` batch rows omit catalogue codes whose rows all start
+before 1985 and are open-ended or end before 1988 (hid the Samurai SJ, Renault 4 and Marbella
+codes). Fix before the next round; earlier decided notes (e.g. renault 5 "no code") may be affected.
+
+**Candidate gates (all passed) before promotion:**
+- `compare_snapshot_cohorts.py` re-keyed by (vehicle, market, cohort year): every change outside
+  the 8 source-changed markets is explained — recovery code, net retention, or the incomplete-year
+  forecasts (PL 2025 forecast cohorts; PL +108k and FI +17.7k in 2026–28 forecasts for vehicles
+  absent from the incomplete year). Residual: 7 DE and 3 IT forecast cohorts (−7, −11 cars) whose
+  histories changed by recovery.
+- Forecast cohorts inside reported market-years: only PL 2025 (410).
+- Refold: 788 vehicles, 635,397 cars (0.32% of 2028), all from EEA recovered labels (registers
+  teach nothing); 10,592 cars move from decided to undecided identities, included in the 99.0%.
+- Report: every market at or below Eurostat in the under-20 band; EE 100.1% (register 2026-10 vs
+  Eurostat 2025). Under 20, model / official: LT 88.2% (was 26.9%), EE 100.1% (53.5%), SI 89.3%
+  (65.7%), DK 95.7% (87.6%), ES 84.8% (68.9%), BE 91.0% (was over 100%), LU 93.8% (was 137% total),
+  NL 99.2%, GB 99.1%. CZ has no under-20 figure (Eurostat's last band is open-ended); CZ total
+  69.5% because cars older than 2006 are out of scope.
+
+**Promotion:** `build_evidence_snapshot.py promote --snapshot snapshot-2da7ed88f80510eabcb2`,
+`verify`, `mark-verified` (root `.local/evidence`): database sha256 `325c313f…84e5`, 2,026,094
+observations, 785,328 cohorts at 2028 recomputed exactly. Report regenerated
+(`.local/private/eurocode/reports/data-coverage-snapshot-2da7ed88f80510eabcb2.*`). Planner service
+restarted with `ICOR_EVIDENCE_ACTIVE_ROOT=$PWD/.local/evidence uv run python
+scripts/planner_service.py start`; `/data-coverage` shows the new snapshot at 1440 px, no console
+errors, no horizontal overflow.
+Deleted: old active `snapshot-b05d…`, candidate copies, worktree `.local/worktrees/build-b1`
+(rebuild from git if ever needed).
+
+**Verification:** `uv run pytest -q` 1329 passed, 7 skipped, 4 xfailed; ruff check clean on touched
+files. Web: typecheck, lint ok; Vitest 142 passed; build and `VITE_ICOR_CLIENT_RELEASE=verified`
+build ok; `openapi:check` ok; Playwright 32 passed (includes the 390 px data-coverage test).
+
+**Running processes:** planner service (web :5173, API :8000, detached; stop with
+`planner_service.py stop`). CEPiK crawl (detached, resumable): 69 of 176 slices at 11:17Z.
+
+**Next actions:**
+1. When the CEPiK crawl ends: rerun it once to retry failed slices, then `acquire_cepik_fleet.py
+   aggregate`; measure gates (`measure_register_gates.py --geography PL`); integrate `pl-fleet`
+   like CZ (profile, `OFFICIAL_SOURCES`, bootstrap, tests); stage; build a candidate in a new
+   worktree; run the gates above; review round for new identities; promote.
+2. Fix the `prepare` pre-1985 catalogue-row filter, then re-check affected decided notes.
+3. Open question for Lucas: none blocking. Push/deploy not authorized.
