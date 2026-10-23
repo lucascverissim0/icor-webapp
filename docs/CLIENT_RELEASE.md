@@ -93,8 +93,12 @@ the private folder after promoting the client snapshot:
 It writes `.local/client-eurocode/` with exactly two files: `catalog.json`, trimmed to
 codes, row numbers and the source hash (no catalogue description, make or rejected
 source row), and `decisions.json`, keeping every family and every reviewed identity
-the client snapshot forecasts. It refuses a map that does not describe the same codes
-as the private one, or that was reviewed for another snapshot. A client snapshot is
+the client snapshot forecasts, re-serialised from the fields the loader reads
+(`icor.eurocodes.client_map`): a reviewer's note, rationale (`why`) or any other key
+is not copied, and the preflight below refuses a map that carries one. It refuses a
+map that does not describe the same codes as the private one, or that was reviewed for
+another snapshot, and a `--destination` that is, holds or lies inside the source or
+`.local/private`. A client snapshot is
 recognised as its reviewed full snapshot by recomputing that snapshot's id from its
 own release table (`reviewed_snapshot_id`).
 
@@ -108,6 +112,9 @@ Prove both artifacts before paying for an upload:
 
     uv run python scripts/preflight_client_evidence.py .local/client-evidence
     uv run python scripts/verify_client_release.py --local --username <name>
+
+The local proof loads `.local/client-eurocode` (or `--eurocode-dir`), whatever
+`ICOR_EUROCODE_DIR` the shell holds.
 
 The image builds the bundle itself with `VITE_ICOR_CLIENT_RELEASE=verified`, and
 fails the build if the baked snapshot is not client-scoped, or if the map was not

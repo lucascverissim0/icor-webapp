@@ -104,3 +104,62 @@ def test_files_github_would_reject_are_refused(
 
     with pytest.raises(backup.BackupError, match="larger"):
         backup.back_up(source, remote, is_private=_private)
+
+
+def _head(remote: str) -> str | None:
+    completed = subprocess.run(
+        ["git", f"--git-dir={remote}", "rev-parse", "--verify", "-q", "main"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else None
+
+
+def test_a_nested_gitignore_that_would_hide_a_file_stops_the_backup_before_the_push(
+    folders: tuple[Path, str],
+) -> None:
+    source, remote = folders
+    backup.back_up(source, remote, is_private=_private)
+    pushed = _head(remote)
+    # The throwaway index starts empty, so a hidden file would be deleted remotely.
+    (source / "eurocode" / "review" / ".gitignore").write_text("batch.bin\n", encoding="utf-8")
+
+    with pytest.raises(backup.BackupError, match="committed tree"):
+        backup.back_up(source, remote, is_private=_private)
+
+    assert _head(remote) == pushed
+    assert backup.verify(source, remote)["matches"] is False
+
+
+def test_a_first_backup_with_a_hidden_file_pushes_nothing(folders: tuple[Path, str]) -> None:
+    source, remote = folders
+    (source / ".gitignore").write_text("*.json\n", encoding="utf-8")
+
+    with pytest.raises(backup.BackupError, match="2 missing"):
+        backup.back_up(source, remote, is_private=_private)
+
+    assert _head(remote) is None
+
+
+def test_a_gitattributes_file_that_rewrites_line_endings_stops_the_backup(
+    folders: tuple[Path, str],
+) -> None:
+    source, remote = folders
+    (source / ".gitattributes").write_text("*.txt text\n", encoding="utf-8")
+    (source / "notes.txt").write_bytes(b"a\r\nb\r\n")
+
+    with pytest.raises(backup.BackupError, match="1 altered"):
+        backup.back_up(source, remote, is_private=_private)
+
+    assert _head(remote) is None
+
+
+def test_the_reported_counts_are_those_of_the_committed_tree(folders: tuple[Path, str]) -> None:
+    source, remote = folders
+
+    result = backup.back_up(source, remote, is_private=_private)
+    unchanged = backup.back_up(source, remote, is_private=_private)
+
+    assert result["files"] == unchanged["files"] == 3
+    assert result["bytes"] == unchanged["bytes"] == 2560 + len('{"rows": []}\n') + len("{}\n")

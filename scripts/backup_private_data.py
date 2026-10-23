@@ -11,6 +11,11 @@ the temporary folder, so no second copy of the data is kept on this machine.
     uv run python scripts/backup_private_data.py           # back up
     uv run python scripts/backup_private_data.py --verify  # compare with GitHub
 
+Before pushing, the committed tree is compared with the folder's own file list:
+a ``.gitignore`` or ``.gitattributes`` inside the folder can make git drop or
+rewrite a file, and the throwaway index starts empty, so the push would delete it
+from the backup. The counts reported are those of the committed tree.
+
 ``--verify`` clones the remote's last commit into a temporary folder, compares
 every file's sha256 with the local folder and deletes the clone.
 
@@ -160,6 +165,38 @@ def _git(
     return completed
 
 
+def _committed_tree(git_dir: Path) -> dict[str, int]:
+    """Every file in the last commit by path, with the size git stored for it."""
+
+    listing = _git(["ls-tree", "-r", "-l", "-z", "HEAD"], git_dir=git_dir).stdout
+    tree: dict[str, int] = {}
+    for entry in filter(None, listing.split("\0")):
+        meta, path = entry.split("\t", 1)
+        _, kind, _, size = meta.split()
+        # A submodule entry has no size and is never a file of the folder.
+        tree[path] = int(size) if kind == "blob" else -1
+    return tree
+
+
+def _check_committed_tree(source: Path, files: dict[str, str], tree: dict[str, int]) -> None:
+    """Refuse a commit that does not hold exactly the folder's files, at their sizes.
+
+    Counts only: a path or its name is the folder's own data.
+    """
+
+    missing = set(files) - set(tree)
+    extra = set(tree) - set(files)
+    altered = {
+        path for path in set(files) & set(tree) if tree[path] != (source / path).stat().st_size
+    }
+    if missing or extra or altered:
+        raise BackupError(
+            "refusing to push: the committed tree is not the folder "
+            f"({len(missing)} missing, {len(extra)} extra, {len(altered)} altered); "
+            "a .gitignore or .gitattributes inside the folder may be hiding or rewriting files"
+        )
+
+
 def _remote_has_branch(remote: str, git_dir: Path, options: Sequence[str]) -> bool:
     completed = _git(["ls-remote", "--heads", remote, BRANCH], git_dir=git_dir, options=options)
     return bool(completed.stdout.strip())
@@ -213,6 +250,9 @@ def back_up(
                 work_tree=source,
                 options=options,
             )
+        tree = _committed_tree(git_dir)
+        _check_committed_tree(source, files, tree)
+        if not unchanged:
             _git(
                 ["push", "-q", remote, f"HEAD:refs/heads/{BRANCH}"],
                 git_dir=git_dir,
@@ -220,8 +260,8 @@ def back_up(
             )
         commit = _git(["rev-parse", "--short", "HEAD"], git_dir=git_dir).stdout.strip()
     return {
-        "files": len(files),
-        "bytes": sum((source / path).stat().st_size for path in files),
+        "files": len(tree),
+        "bytes": sum(tree.values()),
         "manifest_sha256": manifest_digest(files),
         "commit": commit,
         "pushed": not unchanged,

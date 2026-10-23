@@ -73,6 +73,7 @@ def _eurocode_failures(directory: Path, manifest: object, database: Path) -> lis
     """The image's build-time Eurocode assertions, plus what the folder may hold."""
 
     from icor.application.client_snapshot import reviewed_snapshot_id
+    from icor.eurocodes.client_map import foreign_keys
     from icor.eurocodes.runtime import EurocodeMap
     from icor.evidence.vehicle_identity import identity_rules_sha256
 
@@ -89,6 +90,14 @@ def _eurocode_failures(directory: Path, manifest: object, database: Path) -> lis
     except (OSError, ValueError, KeyError) as error:
         return [f"the client Eurocode map does not load ({type(error).__name__})"]
     problems = []
+    # A reviewer's note or rationale must not ship; report where, never what.
+    foreign = foreign_keys(json.loads((directory / "decisions.json").read_text(encoding="utf-8")))
+    if foreign:
+        found = ", ".join(f"{level}: {count}" for level, count in sorted(foreign.items()))
+        problems.append(
+            f"the client decisions carry keys outside the allowlist ({found}); "
+            "rebuild the map with scripts/build_client_eurocodes.py"
+        )
     if metadata.get("snapshot_id") != reviewed_snapshot_id(manifest, database):  # type: ignore[arg-type]
         problems.append("the Eurocode decisions were reviewed for another snapshot")
     if metadata.get("identity_rules_sha256") != identity_rules_sha256():

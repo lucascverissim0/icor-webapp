@@ -324,14 +324,16 @@ def _check_sign_out(checker: Checker) -> None:
     checker.record("smoke7:sign-out-revokes-access", status == 401, str(status))
 
 
-def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
+def _local_app(username: str, eurocode_dir: Path | None = None) -> tuple[Any, str, dict[str, Any]]:
     """The real client preview, built in process over the real artifacts.
 
     Generates its own throwaway credential, so a local pre-flight needs no
     stored secret and no deployed environment, and reads nothing from stdin.
     Runs the same `validate_runner` preflight the container entrypoint runs --
     building the app directly would skip it, and skipping it is how a local
-    run starts proving less than it appears to.
+    run starts proving less than it appears to. The Eurocode map is the client
+    one (or ``eurocode_dir``), never an ``ICOR_EUROCODE_DIR`` left in the
+    shell: the private map would pass here and prove nothing about the image.
     """
 
     import secrets
@@ -354,9 +356,7 @@ def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
         os.environ.get("ICOR_COVERAGE_DB", str(ROOT / ".local" / "production-coverage.sqlite3"))
     )
 
-    eurocode_dir = Path(
-        os.environ.get("ICOR_EUROCODE_DIR", str(ROOT / ".local" / "client-eurocode"))
-    )
+    eurocode_dir = eurocode_dir or ROOT / ".local" / "client-eurocode"
     password = secrets.token_urlsafe(32)
     environment = {
         **os.environ,
@@ -461,10 +461,17 @@ def main(argv: list[str] | None = None) -> int:
         help="pre-flight the real local artifacts in process (not a substitute)",
     )
     parser.add_argument("--username", required=True)
+    parser.add_argument(
+        "--eurocode-dir",
+        type=Path,
+        help="with --local, the Eurocode map to load (default: .local/client-eurocode)",
+    )
     args = parser.parse_args(argv)
+    if args.eurocode_dir is not None and not args.local:
+        parser.error("--eurocode-dir applies only with --local")
 
     if args.local:
-        app, password, target = _local_app(args.username)
+        app, password, target = _local_app(args.username, args.eurocode_dir)
         with _AsgiTransport(app) as transport:
             checker = Checker(transport.base_url, transport=transport)
             _run(checker, args.username, password)
