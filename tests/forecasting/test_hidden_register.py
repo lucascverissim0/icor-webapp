@@ -6,11 +6,18 @@ import pytest
 
 from icor.forecasting.hidden_register import (
     Cell,
+    band_level_factors,
+    coarse_names,
     code_scores,
     cohort_errors,
+    donor_mix,
+    drop_cells,
     l1_gate,
     make_scores,
     per_code,
+    per_code_certain,
+    perturb_cells,
+    pre_profile_share,
     project,
     registrations_times_survival,
     rescale_to_cohorts,
@@ -135,3 +142,59 @@ def test_code_scores_measure_large_codes_bias_rank_and_interval_coverage() -> No
     # Q101 is inside its interval, Q102 is not.
     assert scores["coverage_large"] == pytest.approx(0.5)
     assert scores["spearman_top"] == pytest.approx(1.0)
+
+
+def test_certain_units_never_split_a_shared_registration() -> None:
+    certain, other = per_code_certain(
+        [(("Q1",), "single", 10.0), (("Q1", "Q2"), "shared", 6.0), ((), "outside", 4.0)]
+    )
+
+    assert certain == {"Q1": 10.0}
+    assert other == {"shared": 6.0, "outside": 4.0}
+
+
+def test_pre_profile_share_counts_production_years_before_the_profile() -> None:
+    assert pre_profile_share(2005, 2014, profile_first_year=2010, year=2026) == 0.5
+    assert pre_profile_share(2012, None, profile_first_year=2010, year=2026) == 0.0
+    assert pre_profile_share(2000, 2005, profile_first_year=2010, year=2026) == 1.0
+    assert pre_profile_share(2030, None, profile_first_year=2010, year=2026) == 0.0
+
+
+def test_band_factors_use_only_bands_the_profile_holds_whole() -> None:
+    layout = (("Y_LT2", 0, 1), ("Y2-5", 2, 4), ("Y5-10", 5, 9), ("Y10-20", 10, 19))
+    predicted = {year: 100.0 for year in range(2010, 2026)}
+
+    result = band_level_factors(
+        {"Y_LT2": 300.0, "Y2-5": 300.0, "Y5-10": 600.0, "Y10-20": 9999.0},
+        layout,
+        predicted,
+        band_year=2024,
+        profile_first_year=2010,
+    )
+
+    factor = result["factor"]
+    assert factor[2024] == factor[2023] == 1.5
+    assert factor[2021] == 1.0
+    assert factor[2016] == 1.2
+    # 2005-2014 reaches before the profile: its cohorts take the next younger band.
+    assert factor[2012] == 1.2
+    # Registered after the office's count: the youngest band.
+    assert factor[2025] == 1.5
+
+
+def test_donor_mix_leaves_the_target_out_and_weighs_countries_equally() -> None:
+    shares = {"AA": {"Q1": 1.0}, "BB": {"Q2": 1.0}, "CC": {"Q1": 0.5, "Q2": 0.5}}
+
+    assert donor_mix(shares, "CC") == {"Q1": 0.5, "Q2": 0.5}
+
+
+def test_degradations_are_deterministic_and_keep_the_cells_they_should() -> None:
+    cells = {Cell(f"make|m{i}", "make", f"Model {i} Sport", 2015): 100.0 for i in range(400)}
+
+    dropped = drop_cells(cells, 0.17, seed="s")
+    perturbed = perturb_cells(cells, 0.05, seed="s")
+
+    assert dropped == drop_cells(cells, 0.17, seed="s")
+    assert 0.10 < 1 - len(dropped) / len(cells) < 0.24
+    assert all(95.0 <= units <= 105.0 for units in perturbed.values())
+    assert {cell.model for cell in coarse_names(cells)} == {"Model"}

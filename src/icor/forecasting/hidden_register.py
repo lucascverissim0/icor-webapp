@@ -19,9 +19,10 @@ error in the mix of vehicles from the error in the level.
 
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 #: (p10, p50, p90).
@@ -242,7 +243,139 @@ def code_scores(
         if len(ranked) > 1
         else 0.0,
         "coverage_large": len(inside) / len(large) if large else 0.0,
-        "unallocated_truth": sum(
-            units for code, units in truth.items() if code.startswith("(")
-        ),
+        "unallocated_truth": sum(units for code, units in truth.items() if code.startswith("(")),
     }
+
+
+def per_code_certain(
+    allocated: Iterable[tuple[tuple[str, ...], str, float]],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Units each Eurocode certainly carries, and every other unit under its outcome.
+
+    This is how the ranking counts a code: a registration that may carry
+    several codes is never split between them. The second mapping holds the
+    shared units (``shared``) and those no code takes, under their status.
+    """
+
+    certain: dict[str, float] = defaultdict(float)
+    other: dict[str, float] = defaultdict(float)
+    for codes, status, units in allocated:
+        if len(codes) == 1:
+            certain[codes[0]] += units
+        else:
+            other["shared" if codes else status] += units
+    return dict(certain), dict(other)
+
+
+def pre_profile_share(
+    first_year: int, last_year: int | None, *, profile_first_year: int, year: int
+) -> float:
+    """The share of a code's production years up to ``year`` before the profile starts.
+
+    It is known from the catalogue alone, so it can describe a code wherever a
+    range is applied. A code still in production is counted to the year before
+    ``year``, whose registrations are complete.
+    """
+
+    end = min(last_year if last_year is not None else year - 1, year - 1)
+    if end < first_year:
+        return 0.0
+    before = max(0, min(end, profile_first_year - 1) - first_year + 1)
+    return before / (end - first_year + 1)
+
+
+def band_level_factors(
+    official: Mapping[str, float],
+    layout: Iterable[tuple[str, int, int | None]],
+    predicted_by_cohort: Mapping[int, float],
+    *,
+    band_year: int,
+    profile_first_year: int,
+) -> dict[str, Any]:
+    """Each cohort's level correction from official cars by age band.
+
+    A register-less country still has its statistics office's count of cars by
+    age band, which holds the used imports and the scrapping its new-car
+    registrations never show. Within a band every cohort is scaled by the
+    official count over the estimate's count at ``band_year``. A band whose
+    cohorts reach before the profile is not used, since the estimate holds only
+    part of it; its cohorts take the nearest younger usable band's factor, and
+    cohorts registered after ``band_year`` take the youngest band's.
+    """
+
+    usable: list[tuple[int, int, float]] = []
+    for name, low, high in layout:
+        if high is None or name not in official:
+            continue
+        cohorts = range(band_year - high, band_year - low + 1)
+        if cohorts.start < profile_first_year:
+            continue
+        estimate = sum(predicted_by_cohort.get(cohort, 0.0) for cohort in cohorts)
+        if estimate > 0:
+            usable.append((cohorts.start, cohorts.stop - 1, official[name] / estimate))
+    if not usable:
+        return {"bands": [], "factor": {}}
+    usable.sort()
+    factors: dict[int, float] = {}
+    for cohort in predicted_by_cohort:
+        inside = [factor for first, last, factor in usable if first <= cohort <= last]
+        if inside:
+            factors[cohort] = inside[0]
+        elif cohort > usable[-1][1]:
+            factors[cohort] = usable[-1][2]
+        else:
+            factors[cohort] = usable[0][2]
+    return {
+        "bands": [
+            {"first_cohort": first, "last_cohort": last, "factor": factor}
+            for first, last, factor in usable
+        ],
+        "factor": factors,
+    }
+
+
+def donor_mix(shares: Mapping[str, Mapping[str, float]], target: str) -> dict[str, float]:
+    """Baseline (iii): the other countries' share of cars per code, each country weighing one."""
+
+    donors = [country for country in shares if country != target]
+    mix: dict[str, float] = defaultdict(float)
+    for country in donors:
+        for code, share in shares[country].items():
+            mix[code] += share / len(donors)
+    return dict(mix)
+
+
+def _unit_interval(*parts: object) -> float:
+    digest = hashlib.sha256("|".join(map(str, parts)).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / 2**64
+
+
+def drop_cells(
+    registrations: Mapping[Cell, float], share: float, *, seed: str
+) -> dict[Cell, float]:
+    """Degradation: lose whole vehicles' registrations, as a blank model label does."""
+
+    return {
+        cell: units for cell, units in registrations.items() if _unit_interval(seed, cell) >= share
+    }
+
+
+def perturb_cells(
+    registrations: Mapping[Cell, float], spread: float, *, seed: str
+) -> dict[Cell, float]:
+    """Degradation: each cell off by up to ``spread`` either way, as two publishers disagree."""
+
+    return {
+        cell: units * (1 + spread * (2 * _unit_interval(seed, cell) - 1))
+        for cell, units in registrations.items()
+    }
+
+
+def coarse_names(registrations: Mapping[Cell, float]) -> dict[Cell, float]:
+    """Degradation: a publisher that names only the model's first word."""
+
+    coarse: dict[Cell, float] = defaultdict(float)
+    for cell, units in registrations.items():
+        words = cell.model.split()
+        coarse[replace(cell, model=words[0] if words else cell.model)] += units
+    return dict(coarse)
