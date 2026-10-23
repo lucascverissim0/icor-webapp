@@ -40,7 +40,6 @@ class UniverseGroup:
 @dataclass(frozen=True, slots=True)
 class OpportunityUniverse:
     group_by: OpportunityGroupBy
-    needs_model_year: bool
     groups: tuple[UniverseGroup, ...] = field(repr=False)
     population: int
     basis: str = WHOLE_MARKET_BASIS
@@ -52,7 +51,6 @@ class OpportunityUniverse:
         grouped_cte: str,
         *,
         group_by: OpportunityGroupBy,
-        needs_model_year: bool,
     ) -> OpportunityUniverse:
         """Group the whole snapshot at one level and rank what it holds.
 
@@ -83,7 +81,6 @@ class OpportunityUniverse:
         )
         return cls(
             group_by=group_by,
-            needs_model_year=needs_model_year,
             groups=groups,
             population=demand.size,
         )

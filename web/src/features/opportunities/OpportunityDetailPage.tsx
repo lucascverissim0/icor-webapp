@@ -7,6 +7,7 @@ import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
 import { serializeOpportunitySearch, type OpportunitySearch } from '../../lib/opportunity-search'
 import type { components } from '../../lib/api/schema'
+import { ordinal } from '../../lib/ordinal'
 import { EurocodeTable } from '../eurocodes/EurocodeBreakdown'
 import { driveText, eurocodeGroupTitle, sharedWithText, type EurocodeGroup } from '../eurocodes/eurocode-text'
 import { OpportunitiesWorkbench } from './OpportunitiesPage'
@@ -166,7 +167,7 @@ export function OpportunityDetailView({
         <div className="score-bars">
           <div><div><strong>Demand</strong><span>{row.score.demand_points.toFixed(1)} / 100</span></div><progress aria-label="Demand score" max="100" value={row.score.demand_points} /><p>{row.score.demand_rank === null || row.score.demand_population === 0
             ? 'No forecast demand to rank against the market.'
-            : `${Math.round(row.score.demand_percentile * 100)}th percentile of all ${format(row.score.demand_population)} ranked ${group ? 'Eurocodes' : 'vehicles'} in the market — rank #${format(row.score.demand_rank)}.`}</p></div>
+            : `${ordinal(Math.round(row.score.demand_percentile * 100))} percentile of all ${format(row.score.demand_population)} ranked ${group ? 'Eurocodes' : 'vehicles'} in the market — rank #${format(row.score.demand_rank)}.`}</p></div>
         </div>
       </section>
 
@@ -182,6 +183,7 @@ export function OpportunityDetailView({
           <div><dt>Vehicle-year fallback</dt><dd>{format(row.fallback_covered_base_units)}</dd></div>
           <div><dt>Uncovered</dt><dd>{format(row.uncovered_base_units)}</dd></div>
         </dl>
+        <p className="detail-note">Shown for information. ICOR’s coverage is not part of the score.</p>
       </section>
 
       <section aria-labelledby="contributions-title" className="detail-section">

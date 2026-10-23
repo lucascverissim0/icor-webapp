@@ -143,11 +143,10 @@ class SnapshotOpportunityRepository:
         self._identity_index: VehicleIdentityIndex | None = None
         self._facets: tuple[tuple[str, ...], tuple[int, ...]] | None = None
         # The snapshot is immutable and opened read-only, so a population built
-        # from it never goes stale on its own. Production coverage is the one
-        # mutable input, and the fingerprint below is what notices it moving.
-        self._universes: dict[
-            tuple[OpportunityGroupBy, bool], OpportunityUniverse
-        ] = {}
+        # from it never goes stale. Production coverage is the one mutable
+        # input, and it is not part of any population; the fingerprint below
+        # notices it moving for the cached pages that do carry it.
+        self._universes: dict[OpportunityGroupBy, OpportunityUniverse] = {}
         self._coverage_fingerprint: tuple[object, ...] | None = None
         with sqlite3.connect(
             f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
@@ -170,7 +169,7 @@ class SnapshotOpportunityRepository:
             if cached is not None:
                 return cached
         include_coverage = has_manual_coverage or bool(self._worked_models.records)
-        universe = self._universe(query.group_by, include_coverage)
+        universe = self._universe(query.group_by)
         with self._connect(universe) as connection:
             reading = (
                 None
@@ -299,7 +298,7 @@ class SnapshotOpportunityRepository:
                     if cached_row is not None:
                         return cached_row
         include_coverage = has_coverage or bool(self._worked_models.records)
-        universe = self._universe(query.group_by, include_coverage)
+        universe = self._universe(query.group_by)
         with self._connect(universe) as connection:
             cte, parameters = self._scored_cte(
                 query, include_coverage=include_coverage
@@ -614,21 +613,18 @@ class SnapshotOpportunityRepository:
         gives its health check a grace period can pay it at boot instead.
         """
 
-        has_manual_coverage = self._refresh_for_coverage()
         if group_by is OpportunityGroupBy.EUROCODE:
             self._eurocode_view(OpportunityQuery(group_by=group_by))
             return
-        self._universe(
-            group_by, has_manual_coverage or bool(self._worked_models.records)
-        )
+        self._universe(group_by)
 
     def _refresh_for_coverage(self) -> bool:
         """Report manual coverage, and drop what a change to it invalidates.
 
-        Coverage is not part of the score, so the whole-market populations stay
-        valid; they are keyed on whether coverage exists at all, because that
-        decides where a group's units come from. Cached pages carry coverage
-        units and statuses, so they have to go.
+        Coverage is not part of the score and never decides where a group's
+        units come from, so the whole-market populations stay valid. Cached
+        pages and Eurocode views carry coverage units and statuses, so they
+        have to go.
 
         Read through its own connection rather than the snapshot's, so a cached
         page can be served without opening the snapshot at all.
@@ -652,14 +648,11 @@ class SnapshotOpportunityRepository:
             self._coverage_fingerprint = fingerprint
         return int(count) > 0
 
-    def _universe(
-        self, group_by: OpportunityGroupBy, include_coverage: bool
-    ) -> OpportunityUniverse:
+    def _universe(self, group_by: OpportunityGroupBy) -> OpportunityUniverse:
         """The market this grouping is ranked against.
 
-        Keyed on ``include_coverage`` as well as the grouping level because it
-        decides where a group's units come from — summed cohort attribution or a
-        rounded opportunity quantile — and the two are not interchangeable.
+        Keyed on the grouping level alone. ICOR's coverage is never part of a
+        population, so it is never asked for here.
 
         Built on a connection of its own the first time, because the population
         has to exist before the connection that will join against it can be set
@@ -667,25 +660,19 @@ class SnapshotOpportunityRepository:
         already being spent, and none afterwards.
         """
 
-        key = (group_by, include_coverage)
-        universe = self._universes.get(key)
+        universe = self._universes.get(group_by)
         if universe is not None:
             return universe
         grouped, parameters = self._grouped_cte(
             group_by=group_by,
-            include_coverage=include_coverage,
+            include_coverage=False,
             predicates=_WHOLE_MARKET,
             atoms_name="universe_atoms",
         )
         assert not parameters, "the whole market binds no filter"
         with self._connect() as connection:
-            universe = OpportunityUniverse.read(
-                connection,
-                grouped,
-                group_by=group_by,
-                needs_model_year=self._needs_model_year(group_by, include_coverage),
-            )
-        self._universes[key] = universe
+            universe = OpportunityUniverse.read(connection, grouped, group_by=group_by)
+        self._universes[group_by] = universe
         return universe
 
     @staticmethod
@@ -748,17 +735,6 @@ class SnapshotOpportunityRepository:
             atom_parameters=tuple(parameters),
         )
 
-    def _needs_model_year(
-        self, group_by: OpportunityGroupBy, include_coverage: bool
-    ) -> bool:
-        return (
-            include_coverage
-            or group_by is OpportunityGroupBy.MODEL_YEAR
-            or group_by is OpportunityGroupBy.EUROCODE
-            or self._verified_only
-            or self._model_year_catalog
-        )
-
     def _grouped_cte(
         self,
         *,
@@ -776,10 +752,12 @@ class SnapshotOpportunityRepository:
         canonical identity folding that makes ten spellings of Volkswagen one
         brand.
 
-        A snapshot without a materialized attribution table computes the
-        attribution inline, which binds the estimate-scoped predicates a second
-        time; the parameters are returned beside the text so that no caller can
-        get that count wrong.
+        Every grouping reads each estimate's cohort attribution, whatever ICOR's
+        coverage is: coverage only fills the columns that report it, so it can
+        never choose a group's units. A snapshot without a materialized
+        attribution table computes the attribution inline, which binds the
+        estimate-scoped predicates a second time; the parameters are returned
+        beside the text so that no caller can get that count wrong.
 
         ``cells`` adds what a Eurocode allocation reads to each atom (the raw
         vehicle and its label, the market, the horizon); the default statement
@@ -795,42 +773,28 @@ class SnapshotOpportunityRepository:
             group_columns.append("model_year")
         groups = ", ".join(group_columns)
         parameters = predicates.atom_parameters
-        if self._needs_model_year(group_by, include_coverage):
-            if self._materialized_attribution:
-                cte_prefix = "WITH "
-            else:
-                cte_prefix = (
-                    f"WITH {_cohort_attribution_ctes(predicates.estimates)}, "
-                )
-                parameters = (
-                    *predicates.estimate_parameters,
-                    *predicates.atom_parameters,
-                )
-            model_year = "attribution.registration_cohort_year"
-            lineage_joins = (
-                "JOIN "
-                + (
-                    "opportunity_cohort_attribution"
-                    if self._materialized_attribution
-                    else "cohort_attribution"
-                )
-                + " attribution "
-                "ON attribution.opportunity_id = o.opportunity_id"
-            )
-            downside_units = "attribution.downside_units"
-            base_units = "attribution.base_units"
-            upside_units = "attribution.upside_units"
-        else:
+        if self._materialized_attribution:
             cte_prefix = "WITH "
-            model_year = "NULL"
-            lineage_joins = ""
-            downside_units = (
-                "CAST(ROUND(CAST(o.p10 AS NUMERIC), 0) AS INTEGER)"
+        else:
+            cte_prefix = f"WITH {_cohort_attribution_ctes(predicates.estimates)}, "
+            parameters = (
+                *predicates.estimate_parameters,
+                *predicates.atom_parameters,
             )
-            base_units = "CAST(ROUND(CAST(o.p50 AS NUMERIC), 0) AS INTEGER)"
-            upside_units = (
-                "CAST(ROUND(CAST(o.p90 AS NUMERIC), 0) AS INTEGER)"
+        model_year = "attribution.registration_cohort_year"
+        lineage_joins = (
+            "JOIN "
+            + (
+                "opportunity_cohort_attribution"
+                if self._materialized_attribution
+                else "cohort_attribution"
             )
+            + " attribution "
+            "ON attribution.opportunity_id = o.opportunity_id"
+        )
+        downside_units = "attribution.downside_units"
+        base_units = "attribution.base_units"
+        upside_units = "attribution.upside_units"
         coverage_status = (
             f"""CASE
                     WHEN EXISTS (

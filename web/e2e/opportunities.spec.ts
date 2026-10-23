@@ -162,6 +162,10 @@ test('exact coverage create, edit, and delete refetches committed ranking', asyn
   // lands on no Eurocode row's certain units; read the model-year ranking.
   await page.goto('/opportunities?groupBy=model_year')
   await expect(page.getByText('Prioritized model and generation opportunities')).toBeVisible()
+  // ICOR's coverage is shown beside the score and never moves it.
+  const scores = page.locator('.opportunity-card').locator('.opportunity-score strong')
+  await expect(scores.first()).toBeVisible()
+  const scoresBefore = await scores.allTextContents()
   await page.getByText('Manage ICOR worked-model coverage').click()
   await selectVehicle(page)
   await page.getByLabel('Exact configuration / SKU').selectOption(
@@ -174,6 +178,7 @@ test('exact coverage create, edit, and delete refetches committed ranking', asyn
     hasText: 'Exact ICOR coverage',
   })
   await expect(exactSummary.getByRole('definition')).toHaveText('250')
+  expect(await scores.allTextContents()).toEqual(scoresBefore)
 
   await page.getByRole('button', { name: /Edit Aurora Mobility A1 Horizon/ }).click()
   await page.getByLabel('Planner note').fill('E2E edit confirmation')
@@ -182,10 +187,11 @@ test('exact coverage create, edit, and delete refetches committed ranking', asyn
   await expect(page.getByText('E2E edit confirmation')).toBeVisible()
 
   await page.getByRole('button', { name: /Delete Aurora Mobility A1 Horizon/ }).click()
-  await expect(page.getByText(/ranking refreshes only after deletion/i)).toBeVisible()
+  await expect(page.getByText(/coverage figures refresh after deletion/i)).toBeVisible()
   await page.getByRole('button', { name: /Confirm delete Aurora Mobility/ }).click()
   await expect(page.getByText('Production coverage deleted.')).toBeVisible()
   await expect(exactSummary.getByRole('definition')).toHaveText('0')
+  expect(await scores.allTextContents()).toEqual(scoresBefore)
 })
 
 test('fallback coverage requires confirmation and shows lower precision', async ({ page }) => {

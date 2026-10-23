@@ -22,6 +22,7 @@ from icor.application.ranking import DemandScoreV2, demand_percentile_rank
 from icor.application.worked_models import IcorWorkedModelCatalog
 from icor.domain.evidence import ConfidenceBand
 from icor.domain.generations import GenerationIdentityKind
+from icor.domain.opportunities import CoverageMatchType, ProductionCoverage
 from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeSearch
@@ -547,6 +548,134 @@ def test_sqlite_opportunity_shows_icor_worked_without_scoring_it(
     assert worked_only.total + not_worked.total == page.total
 
 
+def _coverage_record(
+    coverage_id: str,
+    match_type: CoverageMatchType,
+    model: str,
+    configuration_id: str | None = None,
+) -> ProductionCoverage:
+    timestamp = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
+    return ProductionCoverage(
+        coverage_id=coverage_id,
+        match_type=match_type,
+        configuration_id=configuration_id,
+        brand="Volkswagen",
+        model=model,
+        model_year=2020,
+        sku=None,
+        note=None,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+
+
+@pytest.mark.parametrize("materialized", [False, True], ids=["inline", "materialized"])
+def test_icor_coverage_never_moves_a_score_or_a_unit(
+    sqlite_repository: SnapshotPlannerRepository,
+    tmp_path: Path,
+    materialized: bool,
+) -> None:
+    """ICOR's records are shown beside the score; they never choose what it is.
+
+    Three states of those records — none at all, the worked-model list, manual
+    exact and fallback coverage — must rank every grouping identically, on an
+    inline and on a materialized ledger. Only the coverage columns may differ.
+
+    The Up's estimate has no cohort inputs, which snapshot validation rejects on
+    a promoted snapshot. It is the one place where reading rounded quantiles and
+    reading cohort attribution disagree, and coverage used to choose between them.
+    """
+
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "INSERT INTO canonical_vehicle VALUES ('vehicle-up', 'Volkswagen', 'Up')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_estimate VALUES "
+            "('opportunity-up', 'generation-golf', 'vehicle-up', 'DE', 2028, "
+            "'4', '5', '7', '9', 'hazard-v1', 'forecast-v1', 'uncertainty-v1', "
+            "'low', '[\"assumption\"]', '[\"reason\"]')"
+        )
+    planner = _baked(sqlite_repository, tmp_path) if materialized else sqlite_repository
+    worked = tmp_path / "worked.txt"
+    worked.write_text('{\n  "vw golf": {2020: "G8"}\n}\n', encoding="utf-8")
+    manual_coverage = SQLiteCoverageRepository(tmp_path / "manual-coverage.sqlite3")
+    manual_coverage.create(
+        _coverage_record(
+            "coverage-golf",
+            CoverageMatchType.EXACT_CONFIGURATION,
+            "Golf",
+            configuration_id="opportunity-golf",
+        )
+    )
+    manual_coverage.create(
+        _coverage_record("coverage-polo", CoverageMatchType.VEHICLE_YEAR_FALLBACK, "Polo")
+    )
+    states = {
+        "none": SnapshotOpportunityRepository(
+            planner,
+            SQLiteCoverageRepository(tmp_path / "empty-coverage.sqlite3"),
+            DemandScoreV2(),
+            eurocodes=_fictional_eurocodes(),
+        ),
+        "worked list": SnapshotOpportunityRepository(
+            planner,
+            SQLiteCoverageRepository(tmp_path / "listed-coverage.sqlite3"),
+            DemandScoreV2(),
+            worked_models=IcorWorkedModelCatalog.from_path(worked),
+            eurocodes=_fictional_eurocodes(),
+        ),
+        "manual": SnapshotOpportunityRepository(
+            planner, manual_coverage, DemandScoreV2(), eurocodes=_fictional_eurocodes()
+        ),
+    }
+
+    for group_by in OpportunityGroupBy:
+        query = OpportunityQuery(group_by=group_by)
+        pages = {state: repository.search(query) for state, repository in states.items()}
+        ranked = {
+            state: (
+                page.demand_population,
+                page.summary.base_units,
+                tuple(
+                    (
+                        row.group_id,
+                        row.score,
+                        row.demand,
+                        row.contributing_configuration_count,
+                    )
+                    for row in page.items
+                ),
+            )
+            for state, page in pages.items()
+        }
+        assert ranked["worked list"] == ranked["none"], group_by
+        assert ranked["manual"] == ranked["none"], group_by
+        for state, repository in states.items():
+            for row in pages[state].items:
+                assert repository.get(row.group_id, query) == row, (state, group_by)
+
+    # The records did reach the rows they describe, as coverage and nothing else.
+    by_year = {
+        state: {row.model: row for row in repository.search(
+            OpportunityQuery(group_by=OpportunityGroupBy.MODEL_YEAR)
+        ).items}
+        for state, repository in states.items()
+    }
+    assert by_year["none"]["Golf"].exact_covered_base_units == 0
+    assert by_year["worked list"]["Golf"].icor_worked is True
+    assert by_year["manual"]["Golf"].exact_covered_base_units == 13
+    assert by_year["manual"]["Polo"].fallback_covered_base_units == 8
+    (code_row,) = (
+        row
+        for row in states["manual"].search(
+            OpportunityQuery(group_by=OpportunityGroupBy.EUROCODE)
+        ).items
+        if row.eurocode is not None and row.eurocode.code == "Q601"
+    )
+    assert code_row.exact_covered_base_units == code_row.demand.base_units == 13
+
+
 def test_verified_only_opportunities_exclude_unreviewed_models(
     sqlite_repository: SnapshotPlannerRepository,
     tmp_path: Path,
@@ -573,11 +702,14 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Every grouping reads cohort attribution, which a promoted snapshot carries
+    # as a table; that is the ledger whose cost this test pins.
     repository = SnapshotOpportunityRepository(
-        sqlite_repository,
+        _baked(sqlite_repository, tmp_path),
         SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
         DemandScoreV2(),
     )
+    assert repository._materialized_attribution is True
     statements: list[str] = []
     connect = repository._connect
 
@@ -612,8 +744,14 @@ def test_sqlite_opportunity_search_scores_once_without_bulk_lineage_grouping(
         "), atoms AS", 1
     )[0]
     assert "opportunity_input" not in base_atoms
+    assert "opportunity_cohort_attribution" in base_atoms
 
-    model_year_cte, unused = repository._scored_cte(
+    inline = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "inline-coverage.sqlite3"),
+        DemandScoreV2(),
+    )
+    model_year_cte, unused = inline._scored_cte(
         OpportunityQuery(
             group_by=OpportunityGroupBy.MODEL_YEAR, page=1, page_size=1
         ),
@@ -893,6 +1031,14 @@ def test_sqlite_ranking_groups_publisher_spellings_into_one_vehicle(
                 "low", '["assumption"]', '["reason"]',
             ),
         )
+        connection.execute(
+            "INSERT INTO cohort_estimate VALUES "
+            "('cohort-golf-vw', 2020, '80', '90', '95', 'survival-v1')"
+        )
+        connection.execute(
+            "INSERT INTO opportunity_input (opportunity_id, cohort_id) "
+            "VALUES ('opportunity-golf-vw', 'cohort-golf-vw')"
+        )
 
     repository = _opportunity_repository(sqlite_repository, tmp_path)
     page = repository.search(
@@ -901,6 +1047,24 @@ def test_sqlite_ranking_groups_publisher_spellings_into_one_vehicle(
 
     assert page.total == 1
     assert page.items[0].demand.base_units == 18
+
+
+def _baked(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> SnapshotPlannerRepository:
+    """A copy of the ledger with cohort attribution materialized, as a promoted snapshot has it."""
+
+    baked_path = tmp_path / "baked.sqlite3"
+    shutil.copyfile(sqlite_repository._ledger.path, baked_path)
+    with contextlib.closing(sqlite3.connect(baked_path)) as connection:
+        connection.execute(
+            "CREATE TABLE opportunity_cohort_attribution AS "
+            f"WITH {_cohort_attribution_ctes('1 = 1')} "
+            "SELECT opportunity_id, cohort_id, registration_cohort_year, "
+            "downside_units, base_units, upside_units FROM cohort_attribution"
+        )
+        connection.commit()
+    return SnapshotPlannerRepository(SQLiteLedger(baked_path), _manifest())
 
 
 def test_the_universe_is_the_same_whether_attribution_is_materialized(
@@ -923,26 +1087,16 @@ def test_the_universe_is_the_same_whether_attribution_is_materialized(
     )
     assert inline._materialized_attribution is False
 
-    baked_path = tmp_path / "baked.sqlite3"
-    shutil.copyfile(sqlite_repository._ledger.path, baked_path)
-    with contextlib.closing(sqlite3.connect(baked_path)) as connection:
-        connection.execute(
-            "CREATE TABLE opportunity_cohort_attribution AS "
-            f"WITH {_cohort_attribution_ctes('1 = 1')} "
-            "SELECT opportunity_id, cohort_id, registration_cohort_year, "
-            "downside_units, base_units, upside_units FROM cohort_attribution"
-        )
-        connection.commit()
     baked = SnapshotOpportunityRepository(
-        SnapshotPlannerRepository(SQLiteLedger(baked_path), _manifest()),
+        _baked(sqlite_repository, tmp_path),
         SQLiteCoverageRepository(tmp_path / "baked-coverage.sqlite3"),
         DemandScoreV2(),
     )
     assert baked._materialized_attribution is True
 
     for group_by in OpportunityGroupBy:
-        assert inline._universe(group_by, True).groups == baked._universe(
-            group_by, True
+        assert inline._universe(group_by).groups == baked._universe(
+            group_by
         ).groups, group_by
 
 
@@ -962,7 +1116,7 @@ def test_the_universe_percentile_matches_the_single_value_definition(
         DemandScoreV2(),
     )
 
-    universe = repository._universe(OpportunityGroupBy.MODEL_YEAR, True)
+    universe = repository._universe(OpportunityGroupBy.MODEL_YEAR)
 
     ranked = sorted(
         group.base_units for group in universe.groups if group.base_units > 0

@@ -652,7 +652,7 @@ body {
 
 @media (min-width: 1100px) {
   .opportunity-card__body {
-    grid-template-columns: minmax(0, 1.35fr) minmax(7.25rem, 0.9fr) minmax(0, 1fr) minmax(7.75rem, 0.8fr) auto;
+    grid-template-columns: minmax(0, 1.35fr) minmax(7.25rem, 0.9fr) minmax(7.75rem, 0.8fr) minmax(0, 1fr) auto;
   }
 
   .opportunity-card__body > button {

@@ -1319,10 +1319,11 @@ export interface components {
          * OpportunitySort
          * @description The orders a ranking may be read in.
          *
-         *     Score is the product's own ranking and stays the default. Demand answers
-         *     "which is the biggest", which the score deliberately does not, because it
-         *     mixes demand with readiness. Vehicle is for finding a known car rather than
-         *     discovering one.
+         *     Score is the product's own ranking and stays the default: whole-market
+         *     demand, whatever the view is filtered to. Demand orders rows by the units
+         *     the current view carries, which answers "which is the biggest here" once a
+         *     market or horizon is filtered. Vehicle is for finding a known car rather
+         *     than discovering one.
          * @enum {string}
          */
         OpportunitySort: "score" | "demand" | "vehicle";

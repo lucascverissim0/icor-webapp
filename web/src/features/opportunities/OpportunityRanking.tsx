@@ -3,6 +3,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { EurocodeSummary } from '../eurocodes/EurocodeBreakdown'
 import { eurocodeGroupTitle, eurocodeYears, sharedWithText, VEHICLE_LIMIT, type EurocodeGroup } from '../eurocodes/eurocode-text'
 import type { components } from '../../lib/api/schema'
+import { ordinal } from '../../lib/ordinal'
 
 
 type OpportunityRow = components['schemas']['OpportunityRowResponse']
@@ -46,11 +47,29 @@ function EurocodeVehicles({ group }: { group: EurocodeGroup }) {
   )
 }
 
-export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode = null }: {
+/** ICOR's own position on a row: shown for information, never part of the score. */
+function IcorPosition({ row }: { row: OpportunityRow }) {
+  return (
+    <div aria-label="ICOR position, not part of the score" className="icor-position" role="group">
+      <p className="icor-position__label">ICOR · not scored</p>
+      <div className="coverage-composition" aria-label="Base demand coverage composition">
+        <span className={`coverage-status coverage-status--${row.coverage_status}`}>{row.coverage_status.replaceAll('_', ' ')}</span>
+        <span>Exact {format(row.exact_covered_base_units)}</span>
+        <span>Fallback {format(row.fallback_covered_base_units)}</span>
+        <span>Uncovered {format(row.uncovered_base_units)}</span>
+      </div>
+      {row.icor_worked && <p className="icor-experience">ICOR worked</p>}
+    </div>
+  )
+}
+
+export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode = null, firstRank = 1 }: {
   rows: OpportunityRow[]
   selectedGroup: string | null
   onSelect: (groupId: string) => void
   searchedCode?: string | null
+  /** The position of the first row in the whole ranking, so later pages keep counting. */
+  firstRank?: number
 }) {
   return (
     <section aria-labelledby="ranking-title" className="opportunity-ranking">
@@ -58,12 +77,12 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode
         <div><p className="eyebrow">Ranked decision set</p><h2 id="ranking-title">Replacement opportunities</h2></div>
         <p>Score = whole-market demand percentile × 100</p>
       </div>
-      <ol className="opportunity-list">
+      <ol className="opportunity-list" start={firstRank}>
         {rows.map((row, index) => {
           const descriptionId = `score-${row.group_id}`
           return (
             <li className={selectedGroup === row.group_id ? 'opportunity-card opportunity-card--selected' : 'opportunity-card'} key={row.group_id}>
-              <span className="opportunity-rank" aria-label={`Rank ${index + 1}`}>{index + 1}</span>
+              <span className="opportunity-rank" aria-label={`Rank ${firstRank + index}`}>{firstRank + index}</span>
               <div className="opportunity-card__body">
                 <div className="opportunity-card__heading">
                   <div>
@@ -73,8 +92,8 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode
                       : <h3>{label(row)}</h3>}
                     {!row.eurocode && <p className="generation-name">{row.generation_name ?? 'Generation review pending'}</p>}
                     <p>{row.contributing_configuration_count} contributing configurations</p>
+                    {row.eurocode && <EurocodeVehicles group={row.eurocode} />}
                   </div>
-                  <span className={`coverage-status coverage-status--${row.coverage_status}`}>{row.coverage_status.replaceAll('_', ' ')}</span>
                 </div>
                 <div className="opportunity-demand">
                   {row.eurocode
@@ -82,22 +101,16 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode
                     : <strong className="opportunity-demand__base">{format(row.demand.base_units)} replacements</strong>}
                   <span>{format(row.demand.downside_units)}–{format(row.demand.upside_units)} range</span>
                 </div>
-                {row.eurocode && <EurocodeVehicles group={row.eurocode} />}
-                <div className="coverage-composition" aria-label="Base demand coverage composition">
-                  <span>Exact {format(row.exact_covered_base_units)}</span>
-                  <span>Fallback {format(row.fallback_covered_base_units)}</span>
-                  <span>Uncovered {format(row.uncovered_base_units)}</span>
-                </div>
-                {row.icor_worked && <p className="icor-experience">ICOR worked</p>}
                 <div className="opportunity-score">
                   <strong aria-describedby={descriptionId}>Score {row.score.total_points.toFixed(1)}</strong>
                   <span id={descriptionId}>
-                    {Math.round(row.score.demand_percentile * 100)}th demand percentile
+                    {ordinal(Math.round(row.score.demand_percentile * 100))} demand percentile
                     {row.score.demand_rank !== null && row.score.demand_population > 0
                       ? ` · #${format(row.score.demand_rank)} of ${format(row.score.demand_population)} in the market`
                       : ' · no forecast demand to rank'}
                   </span>
                 </div>
+                <IcorPosition row={row} />
                 <button
                   aria-expanded={selectedGroup === row.group_id}
                   aria-label={`View ${label(row)} details`}

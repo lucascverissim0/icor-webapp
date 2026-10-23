@@ -123,7 +123,7 @@ export function CoverageManager({ apiClient = plannerApi, opportunityQuery }: Co
               <div><strong>{row.brand} {row.model} · {row.model_year}</strong><span>{row.sku ?? 'Vehicle-year fallback'} · {row.match_type.replaceAll('_', ' ')}</span></div>
               {row.note && <p>{row.note}</p>}
               <div className="coverage-list__actions"><button onClick={() => edit(row)} type="button">Edit {row.brand} {row.model}</button><button onClick={() => setDeleteId(row.coverage_id)} type="button">Delete {row.brand} {row.model}</button></div>
-              {deleteId === row.coverage_id && <div className="delete-confirmation" role="alert"><p>Delete this coverage record? The ranking refreshes only after deletion is confirmed.</p><button disabled={remove.isPending} onClick={() => remove.mutate(row.coverage_id)} type="button">Confirm delete {row.brand} {row.model}</button><button onClick={() => setDeleteId(null)} type="button">Keep coverage</button></div>}
+              {deleteId === row.coverage_id && <div className="delete-confirmation" role="alert"><p>Delete this coverage record? Coverage figures refresh after deletion is confirmed; scores never change.</p><button disabled={remove.isPending} onClick={() => remove.mutate(row.coverage_id)} type="button">Confirm delete {row.brand} {row.model}</button><button onClick={() => setDeleteId(null)} type="button">Keep coverage</button></div>}
             </article>
           ))}
         </div>

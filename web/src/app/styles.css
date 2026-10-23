@@ -1029,6 +1029,26 @@ a {
   font-weight: 750;
 }
 
+/* ICOR's own position: grouped apart from the score, which it never enters. */
+.icor-position {
+  display: grid;
+  align-content: start;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.icor-position__label {
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.icor-position .coverage-composition {
+  margin: 0;
+}
+
 .opportunity-demand__base {
   margin-top: 0.65rem;
   font-size: clamp(1.25rem, 4vw, 1.8rem);
@@ -2058,10 +2078,28 @@ a {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  /* Beside the navigation rail the card has 470–670px: two columns, the score
+     before ICOR's position. Five columns start at 1100px. */
   .opportunity-card__body {
-    grid-template-columns: minmax(13rem, 1.5fr) minmax(11rem, 1fr) minmax(11rem, 1fr) auto;
-    align-items: center;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    align-items: start;
     column-gap: 1rem;
+    row-gap: 0.75rem;
+  }
+
+  .opportunity-score {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .icor-position {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .opportunity-card__body > button {
+    grid-column: 1 / -1;
+    grid-row: 3;
   }
 
   .opportunity-card__heading,
@@ -2078,9 +2116,6 @@ a {
     margin: 0;
   }
 
-  .coverage-manager__layout {
-    grid-template-columns: minmax(18rem, 0.85fr) minmax(20rem, 1.15fr);
-  }
 
   .drilldown-row {
     grid-template-columns: minmax(15rem, 1fr) minmax(22rem, 1.25fr);
@@ -2859,7 +2894,7 @@ button:hover:not(:disabled) {
 
 @media (min-width: 1100px) {
   .opportunity-card__body {
-    grid-template-columns: minmax(13rem, 1.35fr) minmax(10rem, 0.9fr) minmax(12rem, 1fr) minmax(11rem, 0.8fr) auto;
+    grid-template-columns: minmax(13rem, 1.35fr) minmax(10rem, 0.9fr) minmax(11rem, 0.8fr) minmax(12rem, 1fr) auto;
     column-gap: 1.15rem;
   }
 
@@ -2873,12 +2908,13 @@ button:hover:not(:disabled) {
     grid-row: 1;
   }
 
-  .coverage-composition {
+  .opportunity-score {
     grid-column: 3;
     grid-row: 1;
   }
 
-  .opportunity-score {
+  /* After the score, never before it: the score does not read it. */
+  .icor-position {
     grid-column: 4;
     grid-row: 1;
   }
@@ -2888,9 +2924,9 @@ button:hover:not(:disabled) {
     grid-row: 1;
   }
 
-  .opportunity-card__body > .icor-experience {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  /* Its 38rem of columns fit beside the navigation rail only from here. */
+  .coverage-manager__layout {
+    grid-template-columns: minmax(18rem, 0.85fr) minmax(20rem, 1.15fr);
   }
 }
 

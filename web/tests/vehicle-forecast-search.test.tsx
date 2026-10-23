@@ -190,7 +190,7 @@ describe('VehicleForecastSearch', () => {
       ...forecast,
       european_coverage: { contributing_markets: ['BE', 'FR'], missing_markets: ['DE', 'ES'] },
       demand_rank: {
-        percentile: 0.92, demand_points: 73.6, rank: 41, population: 500,
+        percentile: 0.92, demand_points: 92, rank: 41, population: 500,
         basis: 'european_opportunity_p50_at_horizon',
       },
     }
@@ -213,7 +213,7 @@ describe('VehicleForecastSearch', () => {
     expect(await screen.findByText('EU27 fleet estimate')).toBeVisible()
     expect(screen.getByText('Windshield replacements')).toBeVisible()
     expect(screen.getByText('#41')).toBeVisible()
-    expect(screen.getByText(/92th percentile/)).toBeVisible()
+    expect(screen.getByText(/92nd percentile/)).toBeVisible()
     // A partial EU sum must name the members it leaves out.
     expect(screen.getByText(/does not include/i)).toHaveTextContent('DE, ES')
   })

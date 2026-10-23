@@ -2736,7 +2736,7 @@
         "type": "object"
       },
       "OpportunitySort": {
-        "description": "The orders a ranking may be read in.\n\nScore is the product's own ranking and stays the default. Demand answers\n\"which is the biggest\", which the score deliberately does not, because it\nmixes demand with readiness. Vehicle is for finding a known car rather than\ndiscovering one.",
+        "description": "The orders a ranking may be read in.\n\nScore is the product's own ranking and stays the default: whole-market\ndemand, whatever the view is filtered to. Demand orders rows by the units\nthe current view carries, which answers \"which is the biggest here\" once a\nmarket or horizon is filtered. Vehicle is for finding a known car rather\nthan discovering one.",
         "enum": [
           "score",
           "demand",

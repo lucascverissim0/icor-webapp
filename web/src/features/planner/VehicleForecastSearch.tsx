@@ -5,6 +5,7 @@ import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
 import { EurocodeCompact } from '../eurocodes/EurocodeBreakdown'
 import { eurocodeReadingText } from '../eurocodes/eurocode-text'
 import type { components } from '../../lib/api/schema'
+import { ordinal } from '../../lib/ordinal'
 
 type VehicleForecast = components['schemas']['VehicleForecastResponse']
 type VehicleOption = components['schemas']['VehicleOptionResponse']
@@ -66,7 +67,7 @@ function EuropeanHeadline({ result }: { result: VehicleForecast }) {
           <p className="eu-headline__value">#{units(rank.rank)}</p>
           <p className="eu-headline__note">
             of {units(rank.population)} forecastable vehicles ·{' '}
-            {Math.round(rank.percentile * 100)}th percentile
+            {ordinal(Math.round(rank.percentile * 100))} percentile
           </p>
         </div>
       )}

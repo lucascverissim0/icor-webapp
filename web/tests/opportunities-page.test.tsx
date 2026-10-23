@@ -62,6 +62,38 @@ describe('OpportunitiesWorkbench', () => {
     expect(availableData).toHaveTextContent('10,800,000 registrations represented')
   })
 
+  it('keeps ICOR\'s position apart from the score and says it is not scored', async () => {
+    renderOpportunities(successFetcher())
+
+    expect(await screen.findByText('2,150 replacements')).toBeVisible()
+    const position = screen.getByRole('group', { name: 'ICOR position, not part of the score' })
+    expect(within(position).getByText('ICOR · not scored')).toBeVisible()
+    expect(within(position).getByText('mixed')).toBeVisible()
+    expect(within(position).getByText('Exact 250')).toBeVisible()
+    expect(within(position).getByText('Uncovered 1,900')).toBeVisible()
+    expect(within(position).getByText('ICOR worked')).toBeVisible()
+    expect(within(position).queryByText(/Score/)).not.toBeInTheDocument()
+    // Read after the score, never inside or before it.
+    expect(
+      screen.getByText('Score 100.0').compareDocumentPosition(position) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(screen.getByText('High demand not covered by ICOR')).toBeVisible()
+  })
+
+  it('keeps counting ranks on later pages', async () => {
+    const fetcher = successFetcher()
+    const fallback = fetcher.getMockImplementation()!
+    fetcher.mockImplementation((input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.includes('/opportunities?')) return Promise.resolve(json({ ...opportunities, page: 2 }))
+      return fallback(input, init)
+    })
+    renderOpportunities(fetcher)
+
+    expect(await screen.findByLabelText('Rank 2')).toHaveTextContent('2')
+    expect(screen.queryByLabelText('Rank 1')).not.toBeInTheDocument()
+  })
+
   it('leads each card with its Eurocode and reports the status coverage', async () => {
     renderOpportunities(successFetcher())
 

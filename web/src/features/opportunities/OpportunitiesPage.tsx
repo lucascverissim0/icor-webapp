@@ -440,7 +440,7 @@ export function OpportunitiesWorkbench({
           <dl aria-label="Opportunity summary" className="opportunity-summary">
             <div><span aria-hidden="true" className="opportunity-summary__icon"><ChartNoAxesCombined size={21} /></span><dt>{search.groupBy === 'eurocode' ? 'Certain replacements' : 'Forecast replacements'}</dt><dd>{ranking.data.summary.base_units.toLocaleString('en-US')}</dd></div>
             <div><span aria-hidden="true" className="opportunity-summary__icon"><BadgeCheck size={21} /></span><dt>Exact ICOR coverage</dt><dd>{ranking.data.summary.exact_covered_base_units.toLocaleString('en-US')}</dd></div>
-            <div><span aria-hidden="true" className="opportunity-summary__icon"><TriangleAlert size={21} /></span><dt>High-demand gap</dt><dd>{ranking.data.summary.high_demand_uncovered_base_units.toLocaleString('en-US')}</dd></div>
+            <div title="Forecast replacements in rows ranked in the top quarter of whole-market demand that ICOR has not covered. Shown for information; not part of the score."><span aria-hidden="true" className="opportunity-summary__icon"><TriangleAlert size={21} /></span><dt>High demand not covered by ICOR</dt><dd>{ranking.data.summary.high_demand_uncovered_base_units.toLocaleString('en-US')}</dd></div>
           </dl>
           {search.groupBy === 'eurocode' && ranking.data.eurocode_totals && <EurocodeTotals totals={ranking.data.eurocode_totals} />}
           {ranking.data.integrity_warnings.map((warning) => <p className="integrity-warning" key={warning} role="alert">{warning}</p>)}
@@ -466,6 +466,7 @@ export function OpportunitiesWorkbench({
                 }
                 onOpenDetails(groupId)
               }}
+              firstRank={(ranking.data.page - 1) * ranking.data.page_size + 1}
               rows={ranking.data.items}
               searchedCode={ranking.data.eurocode_search?.label ? ranking.data.eurocode_search.code : null}
               selectedGroup={selectedGroup}
