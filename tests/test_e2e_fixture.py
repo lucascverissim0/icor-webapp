@@ -107,6 +107,8 @@ def test_browser_runner_never_shares_its_own_stdio_with_the_children(
     monkeypatch.setattr(run_e2e_dev, "_guard", lambda process: None)
     # The fake pid is not ours; never signal whatever group really has it.
     monkeypatch.setattr(run_e2e_dev.os, "killpg", lambda pid, sig: None)
+    # Nor change this test process's own signal handling.
+    monkeypatch.setattr(run_e2e_dev, "_ignore_termination", lambda: None)
 
     run_e2e_dev.run(api_port=18999, web_port=19999)
 
@@ -207,3 +209,75 @@ def test_browser_runner_children_die_when_the_runner_is_killed_outright(
     finally:
         with __import__("contextlib").suppress(ProcessLookupError):
             os.killpg(child, signal.SIGKILL)
+
+
+def test_browser_runner_teardown_is_not_cut_short_by_a_second_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Playwright can signal twice; a second interrupt inside `finally` skipped the reaping."""
+
+    import signal
+
+    from scripts import run_e2e_dev
+
+    events: list[str] = []
+
+    class _FakeProcess:
+        pid = 4321
+        stdout = None
+
+        def poll(self) -> int | None:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            events.append("wait")
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    handlers: dict[int, object] = {}
+    monkeypatch.setattr(run_e2e_dev.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(run_e2e_dev.subprocess, "Popen", lambda command, **_: _FakeProcess())
+    monkeypatch.setattr(
+        run_e2e_dev, "prepare_environment", lambda environment, **_: dict(environment)
+    )
+    monkeypatch.setattr(run_e2e_dev, "_install_termination_handlers", lambda: None)
+    monkeypatch.setattr(run_e2e_dev, "_pump", lambda process, label: None)
+    monkeypatch.setattr(run_e2e_dev, "_guard", lambda process: None)
+    monkeypatch.setattr(
+        run_e2e_dev.signal, "signal", lambda signum, handler: handlers.__setitem__(signum, handler)
+    )
+
+    def killpg(pid: int, sig: int) -> None:
+        events.append("killpg")
+        # A second signal now would hit whatever handler is installed.
+        assert handlers.get(signal.SIGTERM) is signal.SIG_IGN
+        assert handlers.get(signal.SIGINT) is signal.SIG_IGN
+
+    monkeypatch.setattr(run_e2e_dev.os, "killpg", killpg)
+
+    run_e2e_dev.run(api_port=18999, web_port=19999)
+
+    assert events[:2] == ["killpg", "killpg"]
+    assert "wait" in events
+
+
+def test_browser_runner_interrupts_once_however_many_signals_arrive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import signal
+
+    from scripts import run_e2e_dev
+
+    handlers: dict[int, object] = {}
+    monkeypatch.setattr(
+        run_e2e_dev.signal, "signal", lambda signum, handler: handlers.__setitem__(signum, handler)
+    )
+    run_e2e_dev._install_termination_handlers()
+    handler = handlers[signal.SIGTERM]
+
+    with pytest.raises(KeyboardInterrupt):
+        handler(signal.SIGTERM, None)  # type: ignore[operator]
+    handler(signal.SIGINT, None)  # type: ignore[operator]
+    handlers[signal.SIGINT](signal.SIGINT, None)  # type: ignore[operator]

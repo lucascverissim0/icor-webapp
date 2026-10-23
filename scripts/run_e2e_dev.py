@@ -135,13 +135,29 @@ def _install_termination_handlers() -> None:
     the children are orphaned.
     """
 
+    interrupted = False
+
     def raise_interrupt(_signum: int, _frame: object) -> None:
+        # Playwright sends more than one signal at once. Only the first may
+        # interrupt; a second one raised inside the teardown would abort it.
+        nonlocal interrupted
+        if interrupted:
+            return
+        interrupted = True
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, raise_interrupt)
     signal.signal(signal.SIGTERM, raise_interrupt)
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, raise_interrupt)
+
+
+def _ignore_termination() -> None:
+    """Let the teardown finish: Playwright may signal again while it runs."""
+
+    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), signal.SIG_IGN)
 
 
 def run(api_port: int, web_port: int) -> int:
@@ -206,6 +222,7 @@ def run(api_port: int, web_port: int) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
+        _ignore_termination()
         # Signal every child before waiting on any, so the whole teardown fits
         # inside Playwright's grace period instead of one wait per child.
         if os.name != "nt":
