@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" 2>/dev/null; if [ -f tools/hooks/mac_load_guard.py ]; then PY=$(command -v python3 || command -v python); if [ -n \"$PY\" ]; then \"$PY\" tools/hooks/mac_load_guard.py; fi; fi",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

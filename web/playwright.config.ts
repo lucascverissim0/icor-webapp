@@ -13,8 +13,9 @@ const coverageDatabase = fileURLToPath(
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
-  // One shared webServer plus serial tests makes extra workers pure variance.
-  workers: process.env.CI || process.env.ICOR_E2E_EVIDENCE_CANDIDATE ? 1 : undefined,
+  // One shared webServer plus serial tests makes extra workers pure variance, and locally
+  // each extra worker is another Chromium heating the shared Mac (MAC-COOL).
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   // A stray test.only must fail CI rather than quietly green-light it.
   forbidOnly: !!process.env.CI,

@@ -1,6 +1,6 @@
 # ICOR Web App — Durable Handoff
 
-Last updated: 2026-10-21
+Last updated: 2026-10-23
 
 ## Project objective
 
@@ -8489,3 +8489,276 @@ Scratch scripts are in this session's scratchpad (`partA/`, `partB/`). They are 
    - a private backup of `.local/private/eurocode/`;
    - whether the client release may carry the Eurocode map;
    - revoke and rotate the OpenAI key.
+
+## 2026-10-23 (afternoon) — push, private backup, Eurocodes in the client release, measured-range gate (Claude Code)
+
+**Lucas asked:**
+- proceed with the next steps thoroughly ("make no mistakes");
+- push all local commits;
+- keep a private backup of the Eurocode data on GitHub, with nothing extra on the Mac;
+- the client release carries the Eurocodes;
+- an overview of coverage per country and per Eurocode;
+- "how good our ML Engine really is".
+
+**His answers:**
+- **Scope:** Part B step 2 plus the remaining Phase 1 harness items now; Mission 4 Phase 4 is next session.
+- **Backup:** a new private repo. The working copy stays because the app reads it; no other local copies.
+- **Client:** the Eurocode ranking as the default, search by code, per-code breakdowns. `/data-coverage` stays internal.
+- **Overview:** a private claude.ai page that shows no real code.
+- **Leak found before the push:** rewrite only the never-pushed commits.
+
+Plan (outside the repo): `~/.claude/plans/pasted-content-id-22c6-ok-proceed-twinkling-book.md`.
+Not authorized: deploy, `main`, key rotation, changing repo visibility.
+
+### Hygiene
+- **Root cause of the e2e orphans** (22 `uv run uvicorn scripts.e2e_app` groups, and sometimes vite).
+  - When the runner was SIGKILLed, its `finally` never ran.
+  - `_guard` in `scripts/run_e2e_dev.py` now starts a detached watchdog per child that killpg's the child's group once the runner is reparented.
+  - A real-subprocess test SIGKILLs a runner and requires the child to die within 10 s.
+  - Two older tests were signalling the real process groups 4321 and 777; `os.killpg` is now monkeypatched there.
+- **Later in the session (`48d4d59`):** Playwright signals the runner twice at once, and the second `KeyboardInterrupt` aborted the teardown. Now only the first signal interrupts, and the teardown ignores any further signals. Four Playwright runs: 0 tracebacks, 0 orphans, 0 reapers left.
+- **By design, not a bug:** `.local/e2e-fixture-<api>-<web>` and `e2e-coverage-*.sqlite3` are never deleted. They are reused per port pair. Delete them after a run if disk matters.
+- `report_eurocode_data.py` now accepts a relative `--out-dir` (`_written_label`, tested).
+
+### Push (authorized)
+- **The leak scan found 2 real catalogue description strings** in comments in `catalog.py`, from the unpushed `6d29778`.
+- **History rewrite (Lucas authorized):** `git filter-branch --tree-filter` over the unpushed range only.
+  - It replaced them with fictional strings.
+  - The first fictional number chosen was a real code, so the filter ran a second time. 9193 is checked not to be a code.
+- **Verified:** only 4 lines differ, 0 description hits, 0 credential hits, a fast-forward. Pushed `c52bfe3..da4d87a`.
+- The backup branch and `refs/original` were deleted.
+- **Collisions, not leaks:** 3,706 of 4,590 codes are bare 4-digit numbers, so years, pids and similar numbers match "codes". Any hit must be read in context.
+- **CI runs only** on `pull_request` and on pushes to `development/windshield-demand-platform`. A push to this branch starts no run.
+
+### Private backup
+- **Repo:** `lucascverissim0/icor-private-data`, **PRIVATE** (checked with `gh repo view` before any push).
+- **Script:** `scripts/backup_private_data.py`, with 5 tests.
+  - It uses a throwaway git directory in a temp folder and the repo-local credential helper. It fetches depth 1, commits on top and pushes `main`, so history exists only on GitHub.
+  - It refuses a non-private repo, an empty folder or a file over 95 MB.
+  - It prints counts and a manifest sha256 only.
+  - `--verify` makes a temporary shallow clone and compares every file's sha256.
+- **First backup:** 442 files, 118,657,950 bytes, commit 7d5daef. Verify: 0 missing, 0 extra, 0 different.
+- **Restore:** `git clone https://github.com/lucascverissim0/icor-private-data .local/private`.
+- The active `gh` account stays `lverissimo-01`.
+
+### Fresh measurements on `snapshot-b75d917…` (scratch outputs, read-only)
+- **Registrations per series** (`benchmark_registration_forecasts.py`):
+  - WAPE 0.6136 against 0.7255 for the old method (15.42% better), 19,102 series;
+  - today's revised data, so not an as-of test.
+- **Market totals** (`backtest_market_totals.py`, origin 2023 → 2024–25, 22 markets):
+  - summed: bias +1.96%, WAPE 5.81%;
+  - direct: bias −3.98%, WAPE 6.43%.
+- **Survival** (`benchmark_survival_calibration.py`, UK file of the 2026 Q2 vintage, leave one cohort out): WAPE 0.0064 against 0.1497 for a constant rate.
+  - Its report's stale `research_challenger_only` is now `"role"`, which names the promoted curve (3982020).
+- **`audit_forecast_promotion.py`** exits 3: `insufficient_as_of_publication_vintages`.
+- **Coverage report regenerated.** Model cars as a share of Eurostat: DE 90.7%, FR 65.7%, IT 51.0%, ES 76.8%, PL 23.5%, GB 98.4%, NL 98.4%, RO 17.3%.
+
+### Client release carries Eurocodes (ebb8cf1, 61ce084, 3f51da4, 3257ece)
+- **API.** In client mode the API serves `EUROCODE` and `MODEL_YEAR` only (`CLIENT_RELEASE_GROUPINGS`). Brand and model return 422.
+  - The middleware admits `GET /api/v1/eurocodes/status`.
+  - `/data-coverage` and `/api/v1/eurocodes/data-coverage` stay 404, with tests.
+  - At boot it warms EUROCODE and MODEL_YEAR.
+- **Snapshot identity.** `reviewed_snapshot_id()` recomputes a client snapshot's full-scope id from its own `source_release` table, so the map reviewed for `b75d917` loads with no warning.
+- **Map.** `scripts/build_client_eurocodes.py` writes `.local/client-eurocode/` with exactly 2 files:
+  - `catalog.json`, trimmed by `runtime_document()`: no description, make or rejected row;
+  - `decisions.json`, holding the identities the client snapshot ranks.
+  - It refuses a map that differs from the private one, or one reviewed for another snapshot.
+  - Result: 1,424 codes, 1,738 identities.
+  - It leaves out 3 reviewed identities that `b75d917` never forecasts: 2 exist only as LU registrations, 1 nowhere. The internal app still warns about them; that is review hygiene, with no units at stake.
+- **Image.**
+  - **Pre-existing boot crash fixed:** `data/vehicle_identity.json` was not copied into the image.
+  - `.dockerignore` re-admits exactly `.local/client-eurocode`, and a test asserts that no rule mentions `.local/private`.
+  - The image gets `COPY` to `/srv/icor/eurocode` and `ENV ICOR_EUROCODE_DIR`.
+  - The build asserts that the map was reviewed for the baked snapshot and the image's identity rules.
+  - The container runner refuses to start without the map.
+  - **A deploy stores the trimmed map in Fly's builder and registry** (stated in `docs/CLIENT_RELEASE.md`).
+- **Web.** The client opens on Eurocodes, and the grouping control shows only "Eurocodes" and "Model years" (`groupingsFor`, `DEFAULT_GROUPING = 'eurocode'`).
+- **Artifacts built.**
+  - `.local/client-evidence` holds `snapshot-a67095097dbf9b4a0c72` (3.93 GB).
+  - `.local/client-eurocode` holds the map; `.local/client-release` holds the verified bundle.
+  - Preflight: `ready: true`.
+- **`verify_client_release.py --local`:** 33 passed, 0 failed.
+  - Boot 49.9 s against a 120 s grace, max RSS ≈ 688 MB.
+  - Eurocode outcomes sum to the model-year base units (difference 0).
+- **Load.** Over 32 distinct views: max RSS 686 MB, slowest first view 11.9 s, Eurocode median 3.7 s. This is on the Mac; Fly will be slower.
+- **Visual check** of the unauthenticated loopback composition at 1440 and 390 px:
+  - Eurocode ranking by default, exactly two groupings, no status warning;
+  - 0 px horizontal overflow at 390.
+  - Screenshots and the scratch app were deleted.
+
+### Part B step 2: a measured 80% range — **gate FAILED for the app's estimate; not shipped** (71af60f)
+**Method.** `scripts/backtest_code_ranges.py`, with `src/icor/forecasting/range_calibration.py` and new helpers in `hidden_register.py`, all pure and tested.
+- **Hidden registers.** Each of NL, FI, LU, LT, EE, CZ, DK and SI is hidden in turn and estimated the register-less way: EEA registrations from 2010 × the base survival curve. LU's own net retention is not used for LU.
+- **Scoring.** At each register's own date (ageing both sides to a horizon adds nothing), per code on certain (single-code) units only.
+- **Ranges.** Learned leave-one-country-out, each country weighted equally. Bins are fixed in advance: predicted size <5k / 5–20k / ≥20k, × pre-2010 life share ≥25%, with ≥50 donor codes per bin, else the pooled table.
+- **Gate.** Codes predicted ≥1,000; pooled 72–88% and ≥60% in every register.
+- **Outputs (private).**
+  - `.local/private/backtests/code-ranges-<snapshot>.json` and its `-records.json`;
+  - the status document `.local/private/eurocode/calibration/range-calibration-<snapshot>.json`, with status `failed`, `table: null` and the alternatives.
+  - The app has no range plumbing, and the image does not copy the status document.
+
+**Results** (share of codes inside the held-out range):
+
+| Estimator | Pooled | CZ | DK | EE | FI | LT | LU | NL | SI | Gate |
+|---|---|---|---|---|---|---|---|---|---|---|
+| raw (what the app shows) | 75.3% | 77 | 82 | 87 | 90 | **57** | **54** | 66 | 89 | FAIL |
+| anchored to Eurostat age bands | 77.6% | 75 | 74 | 73 | 94 | 69 | 90 | 73 | 74 | PASS |
+| oracle true level | 79.3% | 79 | 74 | 79 | 94 | **53** | 83 | 79 | 79 | FAIL |
+
+- **What anchored means.** Each cohort is scaled by Eurostat `road_eqs_carage` band count ÷ the estimate's count at the band year, with the measured office convention. A band reaching before 2010 is not used; its cohorts take the nearest younger band.
+  - It is a real estimator for any EU market, but **the app does not compute it**.
+  - Its range is ×0.62 to ×2.05 of the estimate, pooled: calibrated but wide.
+- **Today's card range** (survival band) holds only 1.5–16.6% of codes per register, against 80% intended.
+- **Per-code WAPE** on codes with ≥1,000 true cars:
+
+  | Estimator | CZ | DK | EE | FI | LT | LU | NL | SI |
+  |---|---|---|---|---|---|---|---|---|
+  | raw | .44 | .33 | .53 | .47 | .78 | .40 | .46 | .50 |
+  | anchored | .39 | .34 | .51 | .39 | .69 | .17 | .37 | .50 |
+  | donor-mix baseline (iii) | .67 | .73 | .68 | .63 | .80 | .59 | .67 | .61 |
+
+  - The estimate beats baseline (iii) in 8 of 8 registers, but by only 2% in LT.
+  - Anchoring is better in 6 of 8.
+- **Missed codes** (≥1,000 true cars, predicted under 1,000; mostly codes built before 2010): NL 232, CZ 176, LT 147, FI 142, SI 76, EE 60, DK 51, LU 3. These get no range at all.
+- **Degraded profiles** (anchored, ranges learned undegraded), pooled:
+  - 17% of vehicles lost: 69.2%, which fails;
+  - 5% publisher mismatch: 77.7%;
+  - first-word model names: 77.5%.
+- **Spain, one-sided.** DGT's unmasked 2010–2024 stock is a lower bound per code; 23.3% of that stock is masked. 3.1% of 479 codes are certainly above P90, against ≤10% if calibrated, so consistent.
+- **GB stock kind.** The 2019 stock aged to 2025 against the 2025 stock: WAPE 10.2%, bias −6.1%, 565 codes. The survival band held 66%. In-sample: the curve was fitted on GB.
+- **Forecast kind.** The production forecaster from 2023, per code × market:
+  - pooled coverage 79.6% one year ahead and 75.8% two years ahead;
+  - it fails only in IS, which has few codes;
+  - **the app forecasts 3–6 years ahead, which is not measured.**
+- **Not run, recorded in the report:**
+  - baseline (ii) (needs lineages the snapshot lacks);
+  - IT MIT 2019 (make × date only, cannot score a code);
+  - PL (crawl unfinished).
+- **Leakage, stated in the report:**
+  - the identity vocabulary includes the registers' stock;
+  - the constants were fixed after v1's aggregate errors, not per-code ones;
+  - the registration series are revised values;
+  - the GB check is in-sample.
+- **Run:** `uv run python scripts/backtest_code_ranges.py` (about 20 s, RSS 650 MB), deterministic: two runs gave identical numbers.
+
+**Decision taken (mine; reversible):** the gate decides on the estimate the app shows, so no measured range ships. Shipping the anchored range around the app's unanchored P50 would claim a calibration the app's figures do not have. The anchored pass is the evidence for the next step.
+
+### Overview page (private)
+- https://claude.ai/artifact/W9WkqZeXJUrF1HA5rSrJRn ("ICOR coverage and accuracy", Dashboard type). It is private until Lucas shares it.
+- **Contents:** headline figures, an accuracy scorecard with a verdict per layer, the range-gate chart and table, coverage for 30 markets, and the Eurocode tiers, assignment, observed-life and evidence mix.
+- **Data.** Seven fixed JSON datasets built by a scratch script from the files above: counts, shares and markets only, no code or catalogue text. They were scanned against the private catalogue; the only matches were the years 2028 and 2031.
+- **The type's automatic check document never appeared** (5 reads). The page was not rendered or checked further.
+
+### Verification (fresh, at 48d4d59)
+| Gate | Result |
+|---|---|
+| `uv run pytest -q` | 1428 passed, 6 skipped, 4 xfailed (before the two e2e tests were added: `tests/test_e2e_fixture.py` 7 passed after) |
+| ruff on the CI list (now including `backtest_code_ranges.py`) | clean |
+| web lint / tsc / Vitest / build / verified build | 0 problems / clean / 151 passed / pass / pass |
+| `openapi:check` | no diff |
+| Playwright | 32 passed (×5); 0 orphans afterwards |
+| leak scan `da4d87a..HEAD` | 0 descriptions, 0 credentials; 2 non-year token collisions (a fake pid and a ruff rule name) |
+
+### Next actions
+1. **Mission 4 Phase 4:** per-country level by age, anchored to Eurostat, which is what made the gate pass here.
+   - Put it into the app's register-less estimate, rebuild the snapshot, then rerun `backtest_code_ranges.py`.
+   - If `raw` then passes, ship `measured_range` as a separate optional field. It is not a `DemandRange`, the score is unchanged and P10s are never summed.
+   - The card would read "likely A–B (80% range, measured on 8 registers; replacement rate assumed)".
+2. **Forecast kind at the app's horizons (3–6 years)** needs as-of vintages. Blocked by the promotion audit.
+3. **PL register** when the crawl ends (91/176 slices on 2026-10-23, with 429/504 retries).
+4. **Replacement rate:** ICOR's replacement history by Eurocode × country (Lucas to ask). It is the weakest unmeasured link.
+5. **Review hygiene:** 3 reviewed identities no longer exist in `b75d917`.
+6. **Lucas:** revoke and rotate the OpenAI key; share the overview page if others should see it; the client deploy is still unauthorized.
+
+### Running processes (end of session)
+- **Planner service,** restarted at 48d4d59 with `ICOR_EVIDENCE_ACTIVE_ROOT=$PWD/.local/evidence uv run python scripts/planner_service.py start`. API :8000 (pid 55803) and web :5173 (pid 55800), detached, on `snapshot-b75d917…`.
+  - Eurocode status: loaded, 1 warning (the 3 reviewed identities above).
+- **CEPiK crawl** (pids 78564/78567) continues, resumable.
+
+### Lucas's question at the end (2026-10-23): "not enough to be trustworthy yet — how do we improve the database and the engine?"
+Answered in chat. The recommended order:
+1. ICOR replacement history (Lucas). It measures the only fully assumed layer, the replacement rate.
+2. Phase 4 anchoring in the app, then the range gate again, then measured ranges.
+3. Pre-2010 and large-market sources: PL CEPiK; ES DGT monthly MATRABA flows to recover masked models; old KBA FZ10 years already downloaded.
+4. Archive every source release as published, so as-of backtests (the promotion audit) become possible.
+5. Only then learned corrections (survival or import factors by make, segment and age), validated leave-one-register-out on the existing harness, and top-down share forecasting for registrations (per-series WAPE 61% against market totals 5.8%).
+
+## 2026-10-23 (evening) — MAC-COOL: heavy jobs queue Mac-wide and wait for a cool Mac (Claude Code)
+
+**Lucas asked:** the Mac must never again be pushed into constant heat by tests or similar jobs. Reuse Friday's Mac
+management pipe ("Friday" = `~/PEBLE`, MAC-COOL-1). He called it critical.
+
+**Measured before the change (read-only):**
+- Four Claude sessions share the Mac: two in `~/ICOR`, two in PEBLE.
+- The other ICOR session runs long single-core jobs back to back: `build_evidence_snapshot.py build` at 100 % for 45 min, then two
+  `promote` runs.
+- Nothing serialised ICOR's jobs with each other or with Friday's.
+- Playwright locally had `workers: undefined`, so up to 7 Chromiums at once.
+- Spotlight peaked at about 70 % CPU, from Chrome and VS Code Application Support files, not ICOR. ICOR has 22 k indexed items, nearly all
+  `web/node_modules`; `.local`, `.venv` and `.git` are not indexed. Moving ICOR to `*.noindex` was therefore not done.
+- Thermal pressure can be read without sudo: `notifyutil -g com.apple.system.thermalpressurelevel`. It read 0.
+
+**Changes (uncommitted):**
+- **`tools/heavy.sh`**, adapted from Friday's:
+  - the same Mac-wide lock `/tmp/epsa-heavy.lock` with the same `pid` and `cmd` files, so ICOR and Friday jobs queue behind each other
+    and the mac-health status line shows ICOR jobs too;
+  - **new:** it waits with no time limit while thermal pressure is above 0;
+  - load gate below 80 % of the cores, at most 10 min, then it starts anyway as the only heavy job;
+  - runs the job under `nice -n 10`;
+  - portable probes for CI;
+  - test-only `HEAVY_TEST_LOCK`, `HEAVY_TEST_LOAD_WAIT_MAX` and `HEAVY_TEST_THERMAL`.
+- **`tools/hooks/mac_load_guard.py` + `.claude/settings.json`:** a PreToolUse Bash hook that refuses, unless run through `tools/heavy.sh`:
+  - full pytest and full Vitest;
+  - `npm run build` / `vite build`;
+  - any Playwright run;
+  - `scripts/build_*`, `rebuild_*`, `benchmark_*`, `backtest_*`, `calibrate_*`, `measure_*`, `verify_client_release`,
+    `compare_snapshot_cohorts` and `report_snapshot_completeness`.
+  - It also refuses `git worktree add` into a folder Spotlight indexes.
+  - Allowed: targeted tests, `-k`, lint, tsc, `acquire_*` crawlers and `planner_service`.
+  - **Fixed against Friday's parser:**
+    - it unwraps `uv run`;
+    - it understands `npm --prefix`;
+    - it inspects `bash|sh|zsh -c` recursively;
+    - a single `&` separates commands;
+    - redirections are stripped before tokenising;
+    - only the segment actually run by `heavy.sh` is exempt, where Friday exempted any command mentioning it.
+  - It fails open, and it runs on `/usr/bin/python3` 3.9 and on 3.12.
+- **`tools/mac-health.sh`** (read-only; the plugin's `/mac` runs it) reports:
+  - load and thermal pressure;
+  - the top CPU users and the Spotlight CPU;
+  - the lock holder;
+  - ICOR dev servers on :8000, :5173 and the e2e ports;
+  - ✗ for orphaned e2e servers and for indexed worktrees;
+  - ICOR processes running over 30 min.
+- **`web/playwright.config.ts`:** `workers: 1` always.
+- **`AGENTS.md`:** startup step 5 (`tools/mac-health.sh`) and a "Mac load (MAC-COOL)" section that binds Codex by hand.
+- **`.github/workflows/ci.yml`:** the hook is added to the ruff list.
+- **Tests:** `tests/tools/test_mac_load_guard.py` and `tests/tools/test_heavy_sh.py`.
+
+**Verification:**
+
+| Check | Result |
+|---|---|
+| `uv run pytest tests/tools -q` | 85 passed (collection was red before the hook existed) |
+| hook tables under `/usr/bin/python3` 3.9 | 42 heavy and 30 light commands, 0 mismatches |
+| ruff check | clean |
+| web lint and tsc | clean |
+| live hook in this session | `npx vite build --help` refused before running |
+| `tools/heavy.sh uv run pytest -q` | 1561 passed, 6 skipped, 4 xfailed in 23 s |
+| `tools/heavy.sh npm --prefix web run e2e` | 32 passed in 13.4 s, 1 worker |
+| second `tools/heavy.sh true` during pytest | printed "waiting 0s — busy with: uv run pytest -q"; stopping the waiter left the holder's lock intact |
+| `tools/mac-health.sh` afterwards | exit 0, no orphans, lock released |
+
+**Residual risks:**
+- If only the wrapper is SIGKILLed, its child can outlive the lock. Friday has the same risk.
+- `kill -0` on a reused pid keeps a stale lock until that pid dies.
+- `vite build --help` is refused (a harmless false positive).
+- Codex has no hook.
+- **The other ICOR session, and any session started before this change, may not apply the hook until it restarts.**
+
+**Processes:** none started by this work is still running. The CEPiK crawl (pid 78567) continues. The other ICOR session's jobs were
+not touched.
+
+**Next:**
+- Lucas: restart the other ICOR Claude session so it picks up the hook.
+- Commit when Lucas asks. Stage `.claude/settings.json` alone: `.claude/scheduled_tasks.lock` is session state and stays out.

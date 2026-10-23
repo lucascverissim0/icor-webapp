@@ -50,6 +50,7 @@ jobs:
           scripts/verify_client_release.py
           scripts/backup_private_data.py scripts/report_eurocode_data.py
           scripts/build_client_eurocodes.py scripts/backtest_code_ranges.py scripts/calibrate_age_anchor.py
+          tools/hooks/mac_load_guard.py
       - run: uv run pytest
 
   planner-web:

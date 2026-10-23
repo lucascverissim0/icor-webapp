@@ -17,6 +17,25 @@ Before investigating, planning, editing, or running the application:
 2. Read `docs/CODEX_HANDOFF.md` completely.
 3. Inspect `git status` and preserve all existing changes.
 4. Continue from the recorded checkpoint instead of repeating completed investigation.
+5. Run `tools/mac-health.sh` (read-only) and act on any ✗ before starting work.
+
+## Mac load (MAC-COOL)
+
+The Mac is shared with other sessions, Friday (`~/PEBLE`) among them, and must never be pushed into
+constant heat.
+
+- Heavy jobs run only as `tools/heavy.sh <command>`, in the background. Heavy means:
+  - the full pytest suite and the full Vitest suite;
+  - `npm run build` and any Playwright run;
+  - the long data jobs: `scripts/build_*`, `rebuild_*`, `benchmark_*`, `backtest_*`, `calibrate_*`,
+    `measure_*`, `verify_client_release`, `compare_snapshot_cohorts` and `report_snapshot_completeness`.
+- `tools/heavy.sh` queues each job behind the one Mac-wide lock that Friday shares. It waits while macOS
+  reports thermal pressure or the load is above 80 % of the cores, then runs the job under `nice`.
+- A Claude Code `PreToolUse` hook (`tools/hooks/mac_load_guard.py`) refuses these commands unwrapped.
+  Codex has no hook, so it must follow this rule by hand.
+- Targeted tests (named files or `-k`), lint and `tsc` stay free. Prefer them while iterating.
+- Never raise test or browser parallelism above one worker.
+- Stop the servers and browser tabs you started before ending the session.
 
 ## Durable continuity
 
