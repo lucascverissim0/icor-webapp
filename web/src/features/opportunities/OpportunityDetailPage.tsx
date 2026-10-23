@@ -5,11 +5,12 @@ import { useNavigate } from '@tanstack/react-router'
 import { opportunityDetailRoute } from '../../app/router'
 import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
+import { ASSUMPTION_RANGE_NOTE } from '../../lib/assumption-range'
 import { serializeOpportunitySearch, type OpportunitySearch } from '../../lib/opportunity-search'
 import type { components } from '../../lib/api/schema'
 import { ordinal } from '../../lib/ordinal'
 import { EurocodeTable } from '../eurocodes/EurocodeBreakdown'
-import { driveText, eurocodeGroupTitle, sharedWithText, type EurocodeGroup } from '../eurocodes/eurocode-text'
+import { driveText, eurocodeGroupTitle, evidenceShares, sharedWithText, type EurocodeGroup } from '../eurocodes/eurocode-text'
 import { OpportunitiesWorkbench } from './OpportunitiesPage'
 
 
@@ -84,6 +85,33 @@ function EurocodeVehicleTable({ group }: { group: EurocodeGroup }) {
   )
 }
 
+/** What the code's certain units rest on, kind by kind; nothing when the source does not record it. */
+function EvidenceTable({ group, baseUnits }: { group: EurocodeGroup; baseUnits: number }) {
+  const shares = evidenceShares(group.evidence)
+  if (shares.length === 0) return null
+  return (
+    <section aria-labelledby="evidence-title" className="detail-section">
+      <div className="detail-section__heading"><p className="eyebrow">Evidence behind the forecast</p><h2 id="evidence-title">What the {format(baseUnits)} certain units rest on</h2></div>
+      <div aria-label={`What the certain units of ${group.code} rest on`} className="eurocode-table-wrap" role="region" tabIndex={0}>
+        <table className="eurocode-table">
+          <thead><tr><th scope="col">Evidence</th><th scope="col">Certain units</th><th scope="col">Share</th><th scope="col">What it means</th></tr></thead>
+          <tbody>
+            {shares.map((share) => (
+              <tr key={share.key}>
+                <th scope="row">{share.label[0].toUpperCase() + share.label.slice(1)}</th>
+                <td>{format(share.units)}</td>
+                <td>{share.percent}</td>
+                <td>{share.meaning}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="detail-note">Every kind is then multiplied by the same assumed replacement rate. Register counts are the firmest evidence; forecast registrations the least firm.</p>
+    </section>
+  )
+}
+
 function ProblemState({ error, retry, back }: { error: Error; retry: () => void; back: string }) {
   return (
     <section className="opportunity-state" role="alert">
@@ -144,14 +172,16 @@ export function OpportunityDetailView({
       <section aria-labelledby="demand-title" className="detail-section">
         <div className="detail-section__heading"><p className="eyebrow">Forecast outcome</p><h2 id="demand-title">Replacement demand behind the rank</h2></div>
         <dl className="detail-metrics">
-          <div><dt>Downside</dt><dd>{format(row.demand.downside_units)}</dd></div>
+          <div><dt>Assumption low</dt><dd>{format(row.demand.downside_units)}</dd></div>
           <div className="detail-metrics__primary"><dt>{group ? 'Certain units (base forecast)' : 'Base forecast'}</dt><dd>{format(row.demand.base_units)}</dd></div>
-          <div><dt>Upside</dt><dd>{format(row.demand.upside_units)}</dd></div>
+          <div><dt>Assumption high</dt><dd>{format(row.demand.upside_units)}</dd></div>
           <div><dt>Contributing forecasts</dt><dd>{format(row.contributing_configuration_count)}</dd></div>
         </dl>
         <p className="detail-note">Replacement estimates use the validated snapshot and remain planning estimates, not observed future claims.</p>
+        <p className="detail-note" role="note">{ASSUMPTION_RANGE_NOTE}</p>
       </section>
 
+      {group && <EvidenceTable baseUnits={row.demand.base_units} group={group} />}
       {group && <EurocodeVehicleTable group={group} />}
 
       {row.eurocodes && !group && (
@@ -193,7 +223,7 @@ export function OpportunityDetailView({
         {contributions.data && <div className="detail-contribution-list">{contributions.data.map((item) => (
           <article className="detail-contribution" key={item.configuration_id}>
             <div><h3>{item.market} · {item.forecast_horizon}</h3><p>{group ? `Certain units of ${group.code}` : `${item.generation} · ${item.body_style}`}</p></div>
-            <dl><div><dt>Base demand</dt><dd>{format(item.demand.base_units)}</dd></div><div><dt>Range</dt><dd>{format(item.demand.downside_units)}–{format(item.demand.upside_units)}</dd></div></dl>
+            <dl><div><dt>Base demand</dt><dd>{format(item.demand.base_units)}</dd></div><div><dt>Assumption range</dt><dd>{format(item.demand.downside_units)}–{format(item.demand.upside_units)}</dd></div></dl>
           </article>
         ))}</div>}
       </section>

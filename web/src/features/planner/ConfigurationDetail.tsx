@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 
 import { configurationRoute } from '../../app/router'
 import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
+import { ASSUMPTION_RANGE_NOTE } from '../../lib/assumption-range'
 import type { components } from '../../lib/api/schema'
 import { serializePlannerSearch } from '../../lib/planner-search'
 import { PlannerWorkbench } from './PlannerPage'
@@ -110,7 +111,7 @@ function DetailContent({ configuration, backHref, onBack }: { configuration: Con
         <h2 id="demand-heading">Opportunity composition</h2>
         <div className="demand-highlight">
           <div><span>P50 opportunity</span><strong>{formatUnits(configuration.demand.base_units)}</strong></div>
-          <div><span>Downside–upside</span><strong>{new Intl.NumberFormat('en-US').format(configuration.demand.downside_units)}–{formatUnits(configuration.demand.upside_units)}</strong></div>
+          <div><span title={ASSUMPTION_RANGE_NOTE}>Assumption range</span><strong>{new Intl.NumberFormat('en-US').format(configuration.demand.downside_units)}–{formatUnits(configuration.demand.upside_units)}</strong></div>
         </div>
         <dl className="fact-grid assumptions">
           <div><dt>Vehicle exposure</dt><dd>{new Intl.NumberFormat('en-US').format(configuration.vehicle_exposure_units)} vehicles</dd></div>

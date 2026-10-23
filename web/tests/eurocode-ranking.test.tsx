@@ -20,6 +20,7 @@ const group = {
     { brand: 'Meridian Motors', model: 'M5 Vector', certain_units: 50, shared_units: 0 },
     { brand: 'Velora Works', model: 'V3 Current', certain_units: 10, shared_units: 0 },
   ],
+  evidence: { stock: 135, registrations: 900, interpolated: 0, forecast: 465, unknown: 0 },
 } as const
 
 const eurocodeRow = {
@@ -95,6 +96,20 @@ describe('Eurocode ranking', () => {
     expect(within(card).queryByText('Generation review pending')).not.toBeInTheDocument()
     expect(within(card).queryByRole('group', { name: 'Eurocodes' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View Q201 · Aurora Mobility A1 Horizon I · 2020–2025 details' })).toBeVisible()
+    // What the certain units rest on sits with them, beside the assumption range.
+    expect(within(card).getByText('1,300–1,700 assumption range')).toBeVisible()
+    expect(within(card).getByText(
+      'Rests on: 9% national registers · 60% new-car registrations × survival · 31% forecast registrations',
+    )).toBeVisible()
+    expect(screen.getByText(/assumed replacement rate of 4.3% a year ±20%.*not measured errors/)).toBeVisible()
+  })
+
+  it('says nothing about evidence a source does not record', async () => {
+    const row = { ...eurocodeRow, eurocode: { ...group, evidence: { ...group.evidence, stock: 0, registrations: 0, forecast: 0, unknown: 1500 } } }
+    renderEurocodes(fetcherFor({ ...eurocodePage, items: [row] }))
+
+    expect(await screen.findByText('1,500 certain replacements')).toBeVisible()
+    expect(screen.queryByText(/Rests on/)).not.toBeInTheDocument()
   })
 
   it('says a shared-only partner without a code, and shows the totals strip', async () => {
@@ -163,6 +178,15 @@ describe('Eurocode detail', () => {
     expect(screen.getByRole('row', { name: /Aurora Mobility A1 Horizon.*1,500.*\+300/ })).toBeVisible()
     expect(screen.getByRole('row', { name: /Meridian Motors M5 Vector.*50.*—/ })).toBeVisible()
     expect(screen.getByText('Certain units (base forecast)')).toBeVisible()
+    expect(screen.getByText('Assumption low')).toBeVisible()
+    expect(screen.getByText('Assumption high')).toBeVisible()
+    expect(screen.getByText(/Ranges show only the survival-curve band.*backtests show real errors are larger/)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'What the 1,500 certain units rest on' })).toBeVisible()
+    const evidence = screen.getByRole('region', { name: 'What the certain units of Q201 rest on' })
+    expect(within(evidence).getByRole('row', { name: /National registers 135 9% Counted on the road by a national vehicle register/ })).toBeVisible()
+    expect(within(evidence).getByRole('row', { name: /New-car registrations × survival 900 60%/ })).toBeVisible()
+    expect(within(evidence).getByRole('row', { name: /Forecast registrations 465 31%/ })).toBeVisible()
+    expect(within(evidence).queryByText(/Interpolated|Not recorded/)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Estimated active fleet' })).not.toBeInTheDocument()
     expect(screen.queryByText('Total estimated fleet')).not.toBeInTheDocument()
     expect(screen.getByText('The surviving fleet is not broken down by Eurocode yet.')).toBeVisible()

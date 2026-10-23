@@ -27,7 +27,7 @@ from icor.domain.planner import PlannerQuery
 from icor.domain.snapshots import SnapshotManifest, SnapshotStatus, SnapshotVersions
 from icor.eurocodes.annotation import EurocodeBreakdown, EurocodeSearch
 from icor.eurocodes.catalog import parse_rows
-from icor.eurocodes.grouping import EurocodeVehicle
+from icor.eurocodes.grouping import EurocodeVehicle, EvidenceMix
 from icor.eurocodes.runtime import EurocodeMap
 from icor.evidence.vehicle_identity import identity_rules_sha256
 from icor.infrastructure.snapshot_eurocodes import measure
@@ -144,6 +144,13 @@ class SQLiteLedger(Ledger):
         self.path = path
 
 
+#: A cohort row without its reason codes, which default to registrations.
+_COHORT_INSERT = (
+    "INSERT INTO cohort_estimate (cohort_id, registration_cohort_year, active_fleet_p10, "
+    "active_fleet_p50, active_fleet_p90, survival_method) VALUES "
+)
+
+
 @pytest.fixture
 def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
     path = tmp_path / "planner.sqlite3"
@@ -161,7 +168,8 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
             CREATE TABLE cohort_estimate (
                 cohort_id TEXT PRIMARY KEY, registration_cohort_year INTEGER,
                 active_fleet_p10 TEXT, active_fleet_p50 TEXT, active_fleet_p90 TEXT,
-                survival_method TEXT
+                survival_method TEXT,
+                reason_codes TEXT NOT NULL DEFAULT '["reconciled-registration-cohort"]'
             );
             CREATE TABLE opportunity_estimate (
                 opportunity_id TEXT PRIMARY KEY, generation_id TEXT,
@@ -198,7 +206,7 @@ def sqlite_repository(tmp_path: Path) -> SnapshotPlannerRepository:
                 ),
             )
             connection.execute(
-                "INSERT INTO cohort_estimate VALUES "
+                _COHORT_INSERT +
                 "(?, 2020, '80', '90', '95', 'survival-v1')",
                 (cohort_id,),
             )
@@ -392,7 +400,7 @@ def test_model_year_opportunities_allocate_and_reconcile_every_input_cohort(
     path = sqlite_repository._ledger.path
     with sqlite3.connect(path) as connection:
         connection.execute(
-            "INSERT INTO cohort_estimate VALUES "
+            _COHORT_INSERT +
             "('cohort-golf-2021', 2021, '20', '30', '40', 'survival-v1')"
         )
         connection.execute(
@@ -887,7 +895,7 @@ def test_cohorts_disagreeing_about_the_curve_are_reported_as_mixed(
             ("constant-annual-retention-v1", cohort_id),
         )
         connection.execute(
-            "INSERT INTO cohort_estimate VALUES "
+            _COHORT_INSERT +
             "('cohort-mixed', 2021, '10', '20', '30', 'uk-dft-licensed-stock-band-v1')"
         )
         connection.execute(
@@ -1032,7 +1040,7 @@ def test_sqlite_ranking_groups_publisher_spellings_into_one_vehicle(
             ),
         )
         connection.execute(
-            "INSERT INTO cohort_estimate VALUES "
+            _COHORT_INSERT +
             "('cohort-golf-vw', 2020, '80', '90', '95', 'survival-v1')"
         )
         connection.execute(
@@ -1185,7 +1193,7 @@ def _with_golf_2021_cohort(sqlite_repository: SnapshotPlannerRepository) -> None
 
     with sqlite3.connect(sqlite_repository._ledger.path) as connection:
         connection.execute(
-            "INSERT INTO cohort_estimate VALUES "
+            _COHORT_INSERT +
             "('cohort-golf-2021', 2021, '20', '30', '40', 'survival-v1')"
         )
         connection.execute(
@@ -1344,7 +1352,7 @@ def _with_a_name_that_spells_a_code(sqlite_repository: SnapshotPlannerRepository
             "'[\"estimated\"]', '[\"obs\"]')"
         )
         connection.execute(
-            "INSERT INTO cohort_estimate VALUES "
+            _COHORT_INSERT +
             "('cohort-gust', 2020, '80', '90', '95', 'survival-v1')"
         )
         connection.execute(
@@ -1500,6 +1508,76 @@ def test_the_eurocode_ranking_ranks_each_codes_certain_units(
     searched = repository.search(replace(query, text="q602")).items
     assert [row.eurocode.code for row in searched if row.eurocode] == ["Q602"]
     assert len(repository.search(replace(query, text="golf")).items) == 2
+
+
+@pytest.mark.parametrize("materialized", [False, True], ids=["inline", "materialized"])
+def test_a_eurocode_row_says_what_its_certain_units_rest_on(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path, materialized: bool
+) -> None:
+    """Golf: 13 units in DE from a register's count, 5 in FR from forecast registrations."""
+
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "UPDATE cohort_estimate SET reason_codes = ? WHERE cohort_id = 'cohort-golf'",
+            ('["observed-stock-anchored-cohort", "uk-survival"]',),
+        )
+        connection.execute(
+            "INSERT INTO cohort_estimate VALUES "
+            "('cohort-golf-fr', 2020, '40', '50', '60', 'survival-v1', ?)",
+            ('["forecast-registration-cohort"]',),
+        )
+        connection.execute(
+            "INSERT INTO opportunity_estimate VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "opportunity-golf-fr", "generation-golf", "vehicle-golf", "FR", 2028,
+                "4", "5", "7", "50", "hazard-v1", "forecast-v1", "uncertainty-v1",
+                "low", '["assumption"]', '["reason"]',
+            ),
+        )
+        connection.execute(
+            "INSERT INTO opportunity_input VALUES ('opportunity-golf-fr', 'cohort-golf-fr', 0)"
+        )
+    planner = _baked(sqlite_repository, tmp_path) if materialized else sqlite_repository
+    repository = SnapshotOpportunityRepository(
+        planner,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+    assert repository._materialized_attribution is materialized
+    query = OpportunityQuery(group_by=OpportunityGroupBy.EUROCODE)
+
+    (row,) = repository.search(query).items
+    assert row.eurocode is not None
+    assert row.eurocode.evidence == EvidenceMix(stock=13, forecast=5)
+    assert row.eurocode.evidence.total == row.demand.base_units == 18
+    assert repository.get(row.group_id, query) == row
+    (france,) = repository.search(replace(query, markets=("FR",))).items
+    assert france.eurocode is not None
+    assert france.eurocode.evidence == EvidenceMix(forecast=5)
+    assert france.demand.base_units == 5
+
+
+def test_a_cohort_evidence_no_build_writes_is_refused_by_name(
+    sqlite_repository: SnapshotPlannerRepository, tmp_path: Path
+) -> None:
+    with sqlite3.connect(sqlite_repository._ledger.path) as connection:
+        connection.execute(
+            "UPDATE cohort_estimate SET reason_codes = '[\"guessed-cohort\"]' "
+            "WHERE cohort_id = 'cohort-polo'"
+        )
+    repository = SnapshotOpportunityRepository(
+        sqlite_repository,
+        SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        DemandScoreV2(),
+        eurocodes=_fictional_eurocodes(),
+    )
+
+    with pytest.raises(ValueError, match="unknown cohort evidence 'guessed-cohort'"):
+        repository.search(OpportunityQuery(group_by=OpportunityGroupBy.EUROCODE))
+    # The other groupings never read it.
+    assert repository.search(OpportunityQuery(group_by=OpportunityGroupBy.MODEL)).total == 2
 
 
 def test_the_eurocode_ranking_reads_inline_attribution_and_needs_the_map(

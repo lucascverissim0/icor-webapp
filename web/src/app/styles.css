@@ -1133,6 +1133,8 @@ a {
 
 .opportunity-detail-page {
   display: grid;
+  /* One track no wider than the page: a wide table scrolls inside its own region. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
 }
 
@@ -3206,6 +3208,7 @@ button:hover:not(:disabled) {
 }
 
 .score-method__scope {
+  grid-column: 1 / -1;
   margin: 0.9rem 0 0;
   padding: 0.7rem 0.85rem;
   border-left: 3px solid var(--brand-cyan);
@@ -3214,6 +3217,10 @@ button:hover:not(:disabled) {
   color: var(--ink-muted);
   font-size: 0.86rem;
   line-height: 1.55;
+}
+
+.score-method__scope + .score-method__scope {
+  margin-top: 0;
 }
 
 .eurocode-summary {

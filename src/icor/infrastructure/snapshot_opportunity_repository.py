@@ -36,7 +36,7 @@ from icor.application.ranking import (
     demand_explanation,
 )
 from icor.application.worked_models import IcorWorkedModelCatalog
-from icor.domain.evidence import CanonicalVehicle
+from icor.domain.evidence import COHORT_EVIDENCE_KINDS, CanonicalVehicle
 from icor.domain.opportunities import CoverageStatus, OpportunityScore
 from icor.domain.planner import DemandRange, EvidenceStatus
 from icor.eurocodes.annotation import (
@@ -71,6 +71,8 @@ _GENERATION_REGISTRY = "public-generation-registry-v2"
 _EUROCODE_CACHE_SIZE = 4096
 #: Eurocode rankings kept, one per market/horizon view; each takes seconds to build.
 _EUROCODE_VIEW_CACHE_SIZE = 16
+#: The evidence kinds a Eurocode row reports, by the index ``temp.cohort_kind`` stores.
+_EVIDENCE_KINDS = ("stock", "registrations", "interpolated", "forecast")
 
 
 @dataclass(frozen=True, slots=True)
@@ -760,8 +762,9 @@ class SnapshotOpportunityRepository:
         beside the text so that no caller can get that count wrong.
 
         ``cells`` adds what a Eurocode allocation reads to each atom (the raw
-        vehicle and its label, the market, the horizon); the default statement
-        is left exactly as it was.
+        vehicle and its label, the market, the horizon) and the evidence kind of
+        its cohort, from ``temp.cohort_kind``; the default statement is left
+        exactly as it was.
         """
 
         model = "model" if group_by is not OpportunityGroupBy.BRAND else "NULL"
@@ -844,10 +847,16 @@ class SnapshotOpportunityRepository:
             model_expression = "reviewed.canonical_model"
         cell_columns = (
             ", o.canonical_vehicle_id vehicle_id, v.model raw_model, "
-            "o.geography geography, o.horizon_year horizon, o.rowid estimate_key"
+            "o.geography geography, o.horizon_year horizon, o.rowid estimate_key, "
+            "evidence.kind evidence_kind"
             if cells
             else ""
         )
+        if cells:
+            lineage_joins += (
+                " LEFT JOIN temp.cohort_kind evidence"
+                " ON evidence.cohort_id = attribution.cohort_id"
+            )
         cte = f"""{cte_prefix}{atoms_name} AS MATERIALIZED (
             SELECT o.opportunity_id, {brand_expression} brand,
                 {model_expression} model,
@@ -959,7 +968,7 @@ class SnapshotOpportunityRepository:
         return self._facets
 
     def _connect(
-        self, universe: OpportunityUniverse | None = None
+        self, universe: OpportunityUniverse | None = None, *, cohort_kinds: bool = False
     ) -> sqlite3.Connection:
         connection = sqlite3.connect(
             f"{self._snapshot_path.resolve().as_uri()}?mode=ro", uri=True
@@ -1019,6 +1028,8 @@ class SnapshotOpportunityRepository:
             # Before the pragma: a temp table is a write, even though it never
             # touches the snapshot. Only the two methods that score pay for it.
             universe.materialize(connection)
+        if cohort_kinds:
+            _materialize_cohort_kinds(connection)
         connection.execute("PRAGMA query_only = ON")
         return connection
 
@@ -1249,13 +1260,13 @@ class SnapshotOpportunityRepository:
             atoms_name="eurocode_atoms",
             cells=True,
         )
-        with self._connect() as connection:
+        with self._connect(cohort_kinds=True) as connection:
             identity_of = self._vehicle_identities(connection)
             cursor = connection.execute(
                 f"""{cte}
                 SELECT vehicle_id, model_year, geography, raw_model, brand, model,
                     horizon, estimate_key, downside_units, base_units, upside_units,
-                    coverage_status, icor_worked
+                    coverage_status, icor_worked, evidence_kind
                 FROM atoms""",
                 parameters,
             )
@@ -1274,6 +1285,7 @@ class SnapshotOpportunityRepository:
                         demand=DemandRange(int(row[8]), int(row[9]), int(row[10])),
                         coverage_status=row[11],
                         icor_worked=bool(row[12]),
+                        evidence=None if row[13] is None else _EVIDENCE_KINDS[row[13]],
                     )
                     for row in cursor
                 ),
@@ -1446,6 +1458,37 @@ class SnapshotOpportunityRepository:
 
 def _row_key(row: sqlite3.Row) -> tuple[str, str | None, int | None]:
     return row["brand"], row["model"], row["model_year"]
+
+
+def _materialize_cohort_kinds(connection: sqlite3.Connection) -> None:
+    """Each cohort's evidence kind, as an index into ``_EVIDENCE_KINDS``.
+
+    One pass over the cohorts. A first reason code no build writes is stored as
+    -1 and then refused by name, never counted as some kind.
+    """
+
+    cases = " ".join("WHEN ? THEN ?" for _code in COHORT_EVIDENCE_KINDS)
+    connection.execute(
+        "CREATE TEMP TABLE cohort_kind "
+        "(cohort_id TEXT PRIMARY KEY, kind INTEGER NOT NULL) WITHOUT ROWID"
+    )
+    connection.execute(
+        f"""INSERT INTO temp.cohort_kind
+        SELECT cohort_id, CASE json_extract(reason_codes, '$[0]') {cases} ELSE -1 END
+        FROM cohort_estimate""",
+        tuple(
+            value
+            for code, kind in COHORT_EVIDENCE_KINDS.items()
+            for value in (code, _EVIDENCE_KINDS.index(kind))
+        ),
+    )
+    unknown = connection.execute(
+        """SELECT json_extract(c.reason_codes, '$[0]')
+        FROM temp.cohort_kind k JOIN cohort_estimate c ON c.cohort_id = k.cohort_id
+        WHERE k.kind = -1 LIMIT 1"""
+    ).fetchone()
+    if unknown is not None:
+        raise ValueError(f"unknown cohort evidence {unknown[0]!r}")
 
 
 def _escape_like(value: str) -> str:

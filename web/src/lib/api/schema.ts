@@ -804,6 +804,7 @@ export interface components {
             code: string;
             /** Drive */
             drive: string;
+            evidence: components["schemas"]["EvidenceMixResponse"];
             /** First Year */
             first_year: number;
             /** Label */
@@ -921,6 +922,27 @@ export interface components {
             contributing_markets: string[];
             /** Missing Markets */
             missing_markets: string[];
+        };
+        /**
+         * EvidenceMixResponse
+         * @description A Eurocode row's certain units by what their cohorts rest on; they add up to its base units.
+         *
+         *     stock: counted by a national register. registrations: published new-car
+         *     registrations aged by the survival curve. interpolated: registrations estimated
+         *     between published years. forecast: registrations not published yet. unknown:
+         *     a source that does not record it.
+         */
+        EvidenceMixResponse: {
+            /** Forecast */
+            forecast: number;
+            /** Interpolated */
+            interpolated: number;
+            /** Registrations */
+            registrations: number;
+            /** Stock */
+            stock: number;
+            /** Unknown */
+            unknown: number;
         };
         /** EvidenceObservationPageResponse */
         EvidenceObservationPageResponse: {

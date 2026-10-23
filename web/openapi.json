@@ -1262,6 +1262,9 @@
             "title": "Drive",
             "type": "string"
           },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceMixResponse"
+          },
           "first_year": {
             "title": "First Year",
             "type": "integer"
@@ -1318,7 +1321,8 @@
           "shared_units",
           "shared_with",
           "shared_with_uncoded",
-          "vehicles"
+          "vehicles",
+          "evidence"
         ],
         "title": "EurocodeGroupResponse",
         "type": "object"
@@ -1631,6 +1635,41 @@
           "missing_markets"
         ],
         "title": "EuropeanCoverageResponse",
+        "type": "object"
+      },
+      "EvidenceMixResponse": {
+        "additionalProperties": false,
+        "description": "A Eurocode row's certain units by what their cohorts rest on; they add up to its base units.\n\nstock: counted by a national register. registrations: published new-car\nregistrations aged by the survival curve. interpolated: registrations estimated\nbetween published years. forecast: registrations not published yet. unknown:\na source that does not record it.",
+        "properties": {
+          "forecast": {
+            "title": "Forecast",
+            "type": "integer"
+          },
+          "interpolated": {
+            "title": "Interpolated",
+            "type": "integer"
+          },
+          "registrations": {
+            "title": "Registrations",
+            "type": "integer"
+          },
+          "stock": {
+            "title": "Stock",
+            "type": "integer"
+          },
+          "unknown": {
+            "title": "Unknown",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stock",
+          "registrations",
+          "interpolated",
+          "forecast",
+          "unknown"
+        ],
+        "title": "EvidenceMixResponse",
         "type": "object"
       },
       "EvidenceObservationPageResponse": {

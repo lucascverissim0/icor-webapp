@@ -5,6 +5,7 @@ import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
 import { EurocodeCompact } from '../eurocodes/EurocodeBreakdown'
 import { eurocodeReadingText } from '../eurocodes/eurocode-text'
 import type { components } from '../../lib/api/schema'
+import { ASSUMPTION_RANGE_NOTE } from '../../lib/assumption-range'
 import { ordinal } from '../../lib/ordinal'
 
 type VehicleForecast = components['schemas']['VehicleForecastResponse']
@@ -58,7 +59,7 @@ function EuropeanHeadline({ result }: { result: VehicleForecast }) {
         <p className="eyebrow">Windshield replacements</p>
         <p className="eu-headline__value">{units(europe.replacements.base_units)}</p>
         <p className="eu-headline__note">
-          P10–P90 {units(europe.replacements.downside_units)}–{units(europe.replacements.upside_units)}
+          Assumption range {units(europe.replacements.downside_units)}–{units(europe.replacements.upside_units)}
         </p>
       </div>
       {rank && (
@@ -101,7 +102,7 @@ function MarketRows({ markets }: { markets: MarketForecast[] }) {
           <thead>
             <tr>
               <th>Market</th><th>Registration cohorts</th><th>Surviving fleet P50</th>
-              <th>Replacements P50</th><th>Replacement range P10–P90</th>
+              <th>Replacements P50</th><th>Assumption range</th>
               {hasEurocodes && <th>Registrations by Eurocode</th>}
             </tr>
           </thead>
@@ -159,7 +160,8 @@ function ForecastResults({ result, clientRelease }: { result: VehicleForecast; c
       </details>
       <div className="forecast-method-note">
         <strong>Calculation chain</strong>
-        <span>Registration cohorts → surviving fleet at {result.horizon} → age/geography hazard → P10/P50/P90 replacement forecast.</span>
+        <span>Registration cohorts → surviving fleet at {result.horizon} → one replacement rate for every age and market → P50 replacement forecast and its assumption range.</span>
+        <span>{ASSUMPTION_RANGE_NOTE}</span>
         <span>This remains assumption-led until proprietary fitment and replacement-history calibration are available.</span>
         <span>Methods used for these figures: survival <code>{result.survival_method}</code>, hazard <code>{result.hazard_method}</code>, uncertainty <code>{result.uncertainty_method}</code>.</span>
         {result.demand_rank && <span>The demand rank is the {result.demand_rank.basis.replace(/_/g, ' ')}; it uses the same 0–100 demand scale as the opportunity score.</span>}

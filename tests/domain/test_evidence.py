@@ -17,6 +17,7 @@ from icor.domain.evidence import (
     PublishedValue,
     ReleaseManifest,
     ValueStatus,
+    cohort_evidence_kind,
 )
 
 
@@ -400,3 +401,13 @@ def test_canonical_vehicle_requires_a_complete_identity() -> None:
 def test_observation_replace_revalidates_contracts() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         replace(make_observation(), value=Decimal("-1"))
+
+
+def test_a_cohort_rests_on_the_evidence_its_first_reason_code_names() -> None:
+    assert cohort_evidence_kind("observed-stock-anchored-cohort") == "stock"
+    assert cohort_evidence_kind("observed-registration-cohort") == "registrations"
+    assert cohort_evidence_kind("reconciled-registration-cohort") == "registrations"
+    assert cohort_evidence_kind("estimated-registration-cohort") == "interpolated"
+    assert cohort_evidence_kind("forecast-registration-cohort") == "forecast"
+    with pytest.raises(ValueError, match="unknown cohort evidence 'uk-survival'"):
+        cohort_evidence_kind("uk-survival")

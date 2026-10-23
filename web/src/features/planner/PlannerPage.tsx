@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { ApiProblem, PlannerApiClient, plannerApi } from '../../lib/api/client'
+import { ASSUMPTION_RANGE_NOTE } from '../../lib/assumption-range'
 import type { components } from '../../lib/api/schema'
 import { parsePlannerSearch, type PlannerSearch } from '../../lib/planner-search'
 import { VehicleForecastSearch } from './VehicleForecastSearch'
@@ -93,9 +94,9 @@ function Filters({ options, search, onApply }: {
 function Summary({ summary }: { summary: components['schemas']['PlannerSummaryResponse'] }) {
   const metrics = [
     ['Candidates', String(summary.candidate_count)],
-    ['Downside', formatUnits(summary.downside_units)],
+    ['Assumption low', formatUnits(summary.downside_units)],
     ['Base demand', formatUnits(summary.base_units)],
-    ['Upside', formatUnits(summary.upside_units)],
+    ['Assumption high', formatUnits(summary.upside_units)],
   ]
   return <dl className="summary-strip" aria-label="Planner summary">{metrics.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
 }
@@ -111,7 +112,7 @@ function ConfigurationRow({ configuration, onSelect }: { configuration: Configur
       <div role="cell">
         <span className="cell-label">P50 opportunity</span>
         <strong>{formatUnits(configuration.demand.base_units)}</strong>
-        <span>{new Intl.NumberFormat('en-US').format(configuration.demand.downside_units)}–{formatUnits(configuration.demand.upside_units)}</span>
+        <span title={ASSUMPTION_RANGE_NOTE}>Assumption range {new Intl.NumberFormat('en-US').format(configuration.demand.downside_units)}–{formatUnits(configuration.demand.upside_units)}</span>
       </div>
       <div role="cell">
         <span className="cell-label">Evidence</span>
@@ -194,8 +195,8 @@ export function PlannerWorkbench({ apiClient = plannerApi, invalidKeys = [], onS
               value={canonicalSearch.sort}
             >
               <option value="base_demand">Base demand</option>
-              <option value="downside_demand">Downside demand</option>
-              <option value="upside_demand">Upside demand</option>
+              <option value="downside_demand">Assumption range, low end</option>
+              <option value="upside_demand">Assumption range, high end</option>
               <option value="brand">Brand</option>
               <option value="model">Model</option>
               <option value="identity_confidence">Identity confidence</option>

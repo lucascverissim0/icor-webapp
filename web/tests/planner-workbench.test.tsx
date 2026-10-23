@@ -160,7 +160,7 @@ describe('PlannerWorkbench', () => {
     renderWorkbench()
 
     expect(await screen.findAllByText('1,240 units')).not.toHaveLength(0)
-    expect(screen.getAllByText('980–1,510 units')).not.toHaveLength(0)
+    expect(screen.getAllByText('Assumption range 980–1,510 units')).not.toHaveLength(0)
     expect(screen.getAllByText('Demonstration')).not.toHaveLength(0)
     expect(screen.getAllByText('Identity confidence: Medium')).not.toHaveLength(0)
     expect(screen.getByRole('heading', { name: 'Search vehicle forecasts' })).toBeVisible()

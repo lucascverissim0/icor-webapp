@@ -362,7 +362,7 @@ function SortHeader({ column, search, onSort }: {
 
 function CodeRow({ row }: { row: CoverageRow }) {
   const range = row.carsP10 !== null && row.carsP90 !== null
-    ? `Range ${format(row.carsP10)}–${format(row.carsP90)} (P10–P90)`
+    ? `Survival-curve assumption range ${format(row.carsP10)}–${format(row.carsP90)}`
     : undefined
   const markets = row.observedMarkets.join(', ')
   return (

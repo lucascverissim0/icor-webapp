@@ -18,7 +18,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from icor.domain.evidence import STOCK_LOWER_BOUND_REASON
+from icor.domain.evidence import STOCK_LOWER_BOUND_REASON, cohort_evidence_kind
 from icor.eurocodes.data_coverage import CountryComparison, FleetCell, FleetRange, OfficialStock
 from icor.eurocodes.runtime import identity_key
 from icor.evidence.eurostat_new_registrations import NewRegistrations, includes_used_imports
@@ -27,12 +27,6 @@ from icor.infrastructure.snapshot_identity import load_identity_index
 
 STORED_HORIZON = 2028
 
-_EVIDENCE = {
-    "reconciled-registration-cohort": "registrations",
-    "observed-stock-anchored-cohort": "stock",
-    "estimated-registration-cohort": "interpolated",
-    "forecast-registration-cohort": "forecast",
-}
 _QUANTUM = Decimal("0.0001")
 _SCALE = Decimal(1_000_000)
 
@@ -192,10 +186,7 @@ def read_fleet(
         (STORED_HORIZON,),
     ):
         codes = json.loads(reason_codes)
-        first_code = codes[0]
-        evidence = _EVIDENCE.get(first_code)
-        if evidence is None:
-            raise ValueError(f"unknown cohort evidence {first_code!r}")
+        evidence = cohort_evidence_kind(codes[0])
         stock_year = None
         if evidence == "stock":
             stock_year = stock_years.get(geography)

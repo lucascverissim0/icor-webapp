@@ -62,3 +62,65 @@ export function driveText(drive: string): string {
 export function eurocodeGroupTitle(group: EurocodeGroup): string {
   return `${group.code} · ${group.label} · ${eurocodeYears(group)}`
 }
+
+export type EvidenceMix = components['schemas']['EvidenceMixResponse']
+
+/** What a code's certain units can rest on, strongest evidence first. */
+export const EVIDENCE_KINDS = [
+  {
+    key: 'stock',
+    label: 'national registers',
+    meaning: 'Counted on the road by a national vehicle register, then aged to the forecast year with the survival curve.',
+  },
+  {
+    key: 'registrations',
+    label: 'new-car registrations × survival',
+    meaning: 'Published new-car registrations, times the share of each year’s cars the survival curve keeps on the road.',
+  },
+  {
+    key: 'interpolated',
+    label: 'interpolated registrations',
+    meaning: 'New-car registrations estimated between two published years, times the survival curve.',
+  },
+  {
+    key: 'forecast',
+    label: 'forecast registrations',
+    meaning: 'Registrations of years not published yet, forecast from earlier years, times the survival curve.',
+  },
+  {
+    key: 'unknown',
+    label: 'not recorded',
+    meaning: 'The source does not record what these units rest on.',
+  },
+] as const
+
+export type EvidenceShare = (typeof EVIDENCE_KINDS)[number] & { units: number; percent: string }
+
+/**
+ * Each kind's share of the certain units, as whole percentages that add up to 100
+ * (largest remainder). A kind with units but too few to reach 1% reads "<1%"; a
+ * kind with none is left out. Nothing is returned when no kind is recorded.
+ */
+export function evidenceShares(mix: EvidenceMix): EvidenceShare[] {
+  const total = EVIDENCE_KINDS.reduce((sum, kind) => sum + mix[kind.key], 0)
+  if (total === 0 || mix.unknown === total) return []
+  const exact = EVIDENCE_KINDS.map((kind) => (mix[kind.key] * 100) / total)
+  const whole = exact.map(Math.floor)
+  let left = 100 - whole.reduce((sum, value) => sum + value, 0)
+  const byRemainder = exact
+    .map((value, index) => ({ index, remainder: value - whole[index] }))
+    .sort((first, second) => second.remainder - first.remainder || first.index - second.index)
+  for (const { index } of byRemainder) {
+    if (left === 0) break
+    whole[index] += 1
+    left -= 1
+  }
+  return EVIDENCE_KINDS.flatMap((kind, index) => mix[kind.key] > 0
+    ? [{ ...kind, units: mix[kind.key], percent: whole[index] === 0 ? '<1%' : `${whole[index]}%` }]
+    : [])
+}
+
+/** "Rests on: 9% national registers · 60% new-car registrations × survival · 31% forecast registrations". */
+export function evidenceText(shares: EvidenceShare[]): string {
+  return `Rests on: ${shares.map((share) => `${share.percent} ${share.label}`).join(' · ')}`
+}

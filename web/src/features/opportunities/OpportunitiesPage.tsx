@@ -6,6 +6,7 @@ import { BadgeCheck, ChartNoAxesCombined, TriangleAlert } from 'lucide-react'
 import { opportunitiesRoute } from '../../app/router'
 import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
+import { ASSUMPTION_RANGE_NOTE } from '../../lib/assumption-range'
 import {
   serializeOpportunitySearch,
   type OpportunitySearch,
@@ -372,6 +373,7 @@ export function OpportunitiesWorkbench({
           carry, never the score.
           {search.groupBy === 'eurocode' && ' Eurocode rows rank on the units the code certainly carries; units shared between codes are shown beside them and never split.'}
         </p>
+        <p className="score-method__scope">{ASSUMPTION_RANGE_NOTE}</p>
       </section>
 
       {invalidKeys.length > 0 && (

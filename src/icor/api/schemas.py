@@ -221,6 +221,22 @@ class EurocodeVehicleResponse(ApiModel):
     shared_units: int
 
 
+class EvidenceMixResponse(ApiModel):
+    """A Eurocode row's certain units by what their cohorts rest on; they add up to its base units.
+
+    stock: counted by a national register. registrations: published new-car
+    registrations aged by the survival curve. interpolated: registrations estimated
+    between published years. forecast: registrations not published yet. unknown:
+    a source that does not record it.
+    """
+
+    stock: int
+    registrations: int
+    interpolated: int
+    forecast: int
+    unknown: int
+
+
 class EurocodeGroupResponse(ApiModel):
     """A Eurocode row's code, vehicles, and the units it may share beyond its certain ones."""
 
@@ -234,6 +250,7 @@ class EurocodeGroupResponse(ApiModel):
     shared_with: tuple[str, ...]
     shared_with_uncoded: bool
     vehicles: tuple[EurocodeVehicleResponse, ...]
+    evidence: EvidenceMixResponse
 
 
 class EurocodeCoverageResponse(ApiModel):

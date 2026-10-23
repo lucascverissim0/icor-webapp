@@ -1,7 +1,7 @@
 import { ArrowUpRight } from 'lucide-react'
 
 import { EurocodeSummary } from '../eurocodes/EurocodeBreakdown'
-import { eurocodeGroupTitle, eurocodeYears, sharedWithText, VEHICLE_LIMIT, type EurocodeGroup } from '../eurocodes/eurocode-text'
+import { eurocodeGroupTitle, eurocodeYears, evidenceShares, evidenceText, sharedWithText, VEHICLE_LIMIT, type EurocodeGroup } from '../eurocodes/eurocode-text'
 import type { components } from '../../lib/api/schema'
 import { ordinal } from '../../lib/ordinal'
 
@@ -45,6 +45,13 @@ function EurocodeVehicles({ group }: { group: EurocodeGroup }) {
       {hidden > 0 && <p className="eurocode-more">+{hidden} more {hidden === 1 ? 'vehicle' : 'vehicles'}</p>}
     </div>
   )
+}
+
+/** What the code's certain units rest on; nothing when the source does not record it. */
+function EvidenceLine({ group }: { group: EurocodeGroup }) {
+  const shares = evidenceShares(group.evidence)
+  if (shares.length === 0) return null
+  return <span className="evidence-mix">{evidenceText(shares)}</span>
 }
 
 /** ICOR's own position on a row: shown for information, never part of the score. */
@@ -99,7 +106,8 @@ export function OpportunityRanking({ rows, selectedGroup, onSelect, searchedCode
                   {row.eurocode
                     ? <EurocodeDemand baseUnits={row.demand.base_units} group={row.eurocode} />
                     : <strong className="opportunity-demand__base">{format(row.demand.base_units)} replacements</strong>}
-                  <span>{format(row.demand.downside_units)}–{format(row.demand.upside_units)} range</span>
+                  <span>{format(row.demand.downside_units)}–{format(row.demand.upside_units)} assumption range</span>
+                  {row.eurocode && <EvidenceLine group={row.eurocode} />}
                 </div>
                 <div className="opportunity-score">
                   <strong aria-describedby={descriptionId}>Score {row.score.total_points.toFixed(1)}</strong>

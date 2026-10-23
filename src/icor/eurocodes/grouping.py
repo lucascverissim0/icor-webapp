@@ -36,6 +36,28 @@ class EurocodeVehicle:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceMix:
+    """A code's certain units by what their cohorts rest on; they add up to its demand.
+
+    ``stock`` was counted by a national register, ``registrations`` are published
+    new-car registrations aged by the survival curve, ``interpolated`` are
+    registrations estimated between published years and ``forecast`` are
+    registrations not published yet. ``unknown`` comes from a source that does
+    not record it.
+    """
+
+    stock: int = 0
+    registrations: int = 0
+    interpolated: int = 0
+    forecast: int = 0
+    unknown: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.stock + self.registrations + self.interpolated + self.forecast + self.unknown
+
+
+@dataclass(frozen=True, slots=True)
 class EurocodeGroup:
     """What a Eurocode row shows beside its certain demand."""
 
@@ -51,6 +73,8 @@ class EurocodeGroup:
     shared_with: tuple[str, ...]
     shared_with_uncoded: bool
     vehicles: tuple[EurocodeVehicle, ...]
+    #: What the certain units rest on.
+    evidence: EvidenceMix
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +93,8 @@ class RankedCell:
     demand: DemandRange
     coverage_status: str
     icor_worked: bool
+    #: The cohort's evidence kind (an ``EvidenceMix`` field); None where it is not recorded.
+    evidence: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +135,7 @@ class _Accumulator:
     configurations: set[Hashable] = field(default_factory=set)
     vehicles: dict[tuple[str, str], list[int]] = field(default_factory=dict)
     contributions: dict[tuple[str, int], list[int]] = field(default_factory=dict)
+    evidence: dict[str, int] = field(default_factory=dict)
 
 
 def rank_by_eurocode(eurocodes: EurocodeMap, cells: Iterable[RankedCell]) -> EurocodeRanking:
@@ -139,6 +166,8 @@ def rank_by_eurocode(eurocodes: EurocodeMap, cells: Iterable[RankedCell]) -> Eur
                 entry.uncovered += units
             if cell.icor_worked:
                 entry.worked += units
+            kind = cell.evidence or "unknown"
+            entry.evidence[kind] = entry.evidence.get(kind, 0) + units
             entry.configurations.add(cell.configuration)
             entry.vehicles.setdefault((cell.brand, cell.model), [0, 0])[0] += units
             market = entry.contributions.setdefault((cell.geography, cell.horizon), [0, 0, 0])
@@ -158,6 +187,8 @@ def rank_by_eurocode(eurocodes: EurocodeMap, cells: Iterable[RankedCell]) -> Eur
             continue
         summary = eurocodes.summary(code)
         assert summary is not None, "an allocated code is a reviewed code"
+        evidence = EvidenceMix(**entry.evidence)
+        assert evidence.total == entry.base, "every certain unit has one evidence kind"
         groups[code] = EurocodeTotals(
             group=EurocodeGroup(
                 code=code,
@@ -178,6 +209,7 @@ def rank_by_eurocode(eurocodes: EurocodeMap, cells: Iterable[RankedCell]) -> Eur
                         key=lambda item: (-item[1][0], -item[1][1], item[0]),
                     )
                 ),
+                evidence=evidence,
             ),
             demand=DemandRange(entry.downside, entry.base, entry.upside),
             exact_units=entry.exact,

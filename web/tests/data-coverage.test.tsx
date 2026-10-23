@@ -323,7 +323,7 @@ describe('DataCoverageWorkbench', () => {
     renderCoverage(fetcherFor(available))
 
     const row = (await screen.findByRole('row', { name: /Q301/ }))
-    expect(within(row).getByTitle('Range 1,100–1,800 (P10–P90)')).toHaveTextContent('1,500')
+    expect(within(row).getByTitle('Survival-curve assumption range 1,100–1,800')).toHaveTextContent('1,500')
     expect(within(row).getByTitle('DE, FR')).toHaveTextContent('2')
     expect(within(row).getByRole('link', { name: 'Q301' })).toHaveAttribute(
       'href', '/opportunities?groupBy=eurocode&q=Q301',

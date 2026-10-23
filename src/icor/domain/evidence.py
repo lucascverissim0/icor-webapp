@@ -58,6 +58,25 @@ class ConfidenceBand(StrEnum):
 STOCK_LOWER_BOUND_FLAG = "stock-lower-bound"
 #: Reason code on a cohort built from such an observation.
 STOCK_LOWER_BOUND_REASON = "observed-stock-lower-bound"
+#: What a cohort's cars rest on, named by the first of its reason codes: a national
+#: register's count, published new-car registrations aged by the survival curve,
+#: registrations interpolated between published years, or forecast registrations.
+COHORT_EVIDENCE_KINDS = {
+    "observed-stock-anchored-cohort": "stock",
+    "observed-registration-cohort": "registrations",
+    "reconciled-registration-cohort": "registrations",
+    "estimated-registration-cohort": "interpolated",
+    "forecast-registration-cohort": "forecast",
+}
+
+
+def cohort_evidence_kind(first_reason_code: str) -> str:
+    """The evidence a cohort rests on; a code no build writes is a defect, not a guess."""
+
+    kind = COHORT_EVIDENCE_KINDS.get(first_reason_code)
+    if kind is None:
+        raise ValueError(f"unknown cohort evidence {first_reason_code!r}")
+    return kind
 #: Validation flag on a register's active-fleet observation whose labels must not
 #: teach the identity vocabulary: a register added after the vocabulary was
 #: reviewed may not change how the vehicles already reviewed fold.
