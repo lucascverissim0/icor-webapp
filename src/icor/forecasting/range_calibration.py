@@ -35,6 +35,9 @@ SIZE_EDGES: tuple[float, ...] = (5_000.0, 20_000.0)
 PRE_PROFILE_EDGE = 0.25
 #: Fewer donor codes than this in a bin and the bin falls back to all donors.
 MIN_BIN = 50
+#: A bin learned from fewer donor countries than this falls back too: one
+#: register's codes must not set a bin's range alone.
+MIN_BIN_COUNTRIES = 3
 QUANTILES = (0.10, 0.90)
 GATE_POOLED = (0.72, 0.88)
 GATE_PER_COUNTRY = 0.60
@@ -95,7 +98,12 @@ def _equal_country_weights(
     return [(item.log_ratio, 1.0 / len(items)) for items in by_country.values() for item in items]
 
 
-def ratio_table(donors: Sequence[CodeObservation], *, min_bin: int = MIN_BIN) -> dict[str, Any]:
+def ratio_table(
+    donors: Sequence[CodeObservation],
+    *,
+    min_bin: int = MIN_BIN,
+    min_countries: int = MIN_BIN_COUNTRIES,
+) -> dict[str, Any]:
     """P10/P90 log ratios per bin from these donors, and the pooled fallback."""
 
     pooled = _equal_country_weights(donors)
@@ -107,7 +115,7 @@ def ratio_table(donors: Sequence[CodeObservation], *, min_bin: int = MIN_BIN) ->
     for observation in donors:
         grouped[bin_of(observation)].append(observation)
     for key, members in grouped.items():
-        if len(members) >= min_bin:
+        if len(members) >= min_bin and len({item.country for item in members}) >= min_countries:
             weighted = _equal_country_weights(members)
             table["bins"][key] = tuple(weighted_quantile(weighted, q) for q in QUANTILES)
     return table
@@ -142,9 +150,13 @@ def coverage(
     observations: Sequence[CodeObservation],
     intervals: Mapping[tuple[str, str], tuple[float, float]],
 ) -> dict[str, Any]:
-    """Share of scored codes whose truth lies inside their held-out range."""
+    """Share of scored codes whose truth lies inside their held-out range.
 
-    by_country: dict[str, list[bool]] = defaultdict(list)
+    Every country observed is reported; one with no scored code has no coverage,
+    so the gate cannot pass without it.
+    """
+
+    by_country: dict[str, list[bool]] = {item.country: [] for item in observations}
     below: dict[str, int] = defaultdict(int)
     above: dict[str, int] = defaultdict(int)
     for item in observations:
@@ -159,7 +171,7 @@ def coverage(
     countries = {
         country: {
             "codes": len(values),
-            "coverage": sum(values) / len(values),
+            "coverage": sum(values) / len(values) if values else None,
             "truth_below_range": below[country],
             "truth_above_range": above[country],
         }
@@ -178,7 +190,7 @@ def gate(scores: Mapping[str, Any]) -> dict[str, Any]:
     failing = sorted(
         country
         for country, values in scores["countries"].items()
-        if values["coverage"] < GATE_PER_COUNTRY
+        if values["coverage"] is None or values["coverage"] < GATE_PER_COUNTRY
     )
     return {
         "pooled_range": [low, high],

@@ -103,3 +103,35 @@ def test_level_scaling_leaves_only_the_mix_error() -> None:
     scaled = relative_to_level(observations, {"AA": 0.5})
 
     assert [item.log_ratio for item in scaled] == pytest.approx([0.0, 0.0])
+
+
+def test_a_country_with_no_scored_code_fails_the_gate() -> None:
+    ratios = [math.exp((index - 49.5) / 25) for index in range(100)]
+    observations = [
+        *_observations("AA", ratios),
+        *_observations("BB", ratios),
+        *_observations("CC", ratios),
+        *_observations("DD", [1.0] * 5, predicted=500.0),
+    ]
+
+    scores = coverage(observations, held_out_intervals(observations, min_bin=10))
+
+    assert scores["countries"]["DD"] == {
+        "codes": 0,
+        "coverage": None,
+        "truth_below_range": 0,
+        "truth_above_range": 0,
+    }
+    assert gate(scores)["countries_below_minimum"] == ["DD"]
+    assert gate(scores)["passes"] is False
+
+
+def test_a_bin_one_register_fills_falls_back_to_the_pooled_range() -> None:
+    wide = _observations("AA", [0.1, 10.0] * 50, predicted=30_000.0)
+    others = [*_observations("BB", [1.0] * 50), *_observations("CC", [1.0] * 50)]
+
+    table = ratio_table([*wide, *others], min_bin=10)
+    with_one_country = ratio_table([*wide, *others], min_bin=10, min_countries=1)
+
+    assert not any(key[0] == 2 for key in table["bins"])
+    assert any(key[0] == 2 for key in with_one_country["bins"])

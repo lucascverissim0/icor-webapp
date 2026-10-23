@@ -198,3 +198,47 @@ def test_degradations_are_deterministic_and_keep_the_cells_they_should() -> None
     assert 0.10 < 1 - len(dropped) / len(cells) < 0.24
     assert all(95.0 <= units <= 105.0 for units in perturbed.values())
     assert {cell.model for cell in coarse_names(cells)} == {"Model"}
+
+
+def test_a_shared_allocation_with_one_code_is_not_certain() -> None:
+    certain, other = per_code_certain([(("Q1",), "shared", 5.0), (("Q1",), "single", 2.0)])
+
+    assert certain == {"Q1": 2.0}
+    assert other == {"shared": 5.0}
+
+
+def test_a_lost_label_takes_every_cohort_of_the_vehicle() -> None:
+    cells = {
+        Cell(f"id{vehicle}", "Make", f"Model {vehicle}", cohort): 1.0
+        for vehicle in range(200)
+        for cohort in range(2010, 2025)
+    }
+
+    kept = drop_cells(cells, 0.17, seed="s")
+    perturbed = perturb_cells(cells, 0.05, seed="s")
+
+    cohorts_kept: dict[str, int] = {}
+    for cell in kept:
+        cohorts_kept[cell.identity] = cohorts_kept.get(cell.identity, 0) + 1
+    assert set(cohorts_kept.values()) == {15}
+    assert 0.10 < 1 - len(cohorts_kept) / 200 < 0.25
+    for vehicle in range(200):
+        factors = {value for cell, value in perturbed.items() if cell.identity == f"id{vehicle}"}
+        assert len(factors) == 1
+
+
+def test_a_band_missing_between_usable_ones_takes_the_younger_neighbour() -> None:
+    layout = [("Y_LT2", 0, 1), ("Y2-5", 2, 4), ("Y5-10", 5, 9)]
+    predicted = {cohort: 100.0 for cohort in range(2014, 2025)}
+
+    result = band_level_factors(
+        {"Y_LT2": 300.0, "Y5-10": 600.0},
+        layout,
+        predicted,
+        band_year=2024,
+        profile_first_year=2010,
+    )
+
+    assert result["factor"][2023] == pytest.approx(1.5)
+    assert result["factor"][2021] == pytest.approx(1.5)  # Y2-5 is absent
+    assert result["factor"][2017] == pytest.approx(1.2)

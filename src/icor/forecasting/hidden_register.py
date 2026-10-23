@@ -252,15 +252,17 @@ def per_code_certain(
 ) -> tuple[dict[str, float], dict[str, float]]:
     """Units each Eurocode certainly carries, and every other unit under its outcome.
 
-    This is how the ranking counts a code: a registration that may carry
-    several codes is never split between them. The second mapping holds the
-    shared units (``shared``) and those no code takes, under their status.
+    This is how the ranking counts a code: only a ``single`` allocation is
+    certain, and a registration that may carry several codes is never split
+    between them. A ``shared`` allocation stays shared even with one code (an
+    uncoded sibling may be the car). The second mapping holds the shared units
+    (``shared``) and those no code takes, under their status.
     """
 
     certain: dict[str, float] = defaultdict(float)
     other: dict[str, float] = defaultdict(float)
     for codes, status, units in allocated:
-        if len(codes) == 1:
+        if status == "single" and len(codes) == 1:
             certain[codes[0]] += units
         else:
             other["shared" if codes else status] += units
@@ -299,8 +301,9 @@ def band_level_factors(
     registrations never show. Within a band every cohort is scaled by the
     official count over the estimate's count at ``band_year``. A band whose
     cohorts reach before the profile is not used, since the estimate holds only
-    part of it; its cohorts take the nearest younger usable band's factor, and
-    cohorts registered after ``band_year`` take the youngest band's.
+    part of it; its cohorts, and those of a band missing between usable ones,
+    take the nearest younger usable band's factor, and cohorts registered after
+    ``band_year`` take the youngest band's.
     """
 
     usable: list[tuple[int, int, float]] = []
@@ -324,7 +327,7 @@ def band_level_factors(
         elif cohort > usable[-1][1]:
             factors[cohort] = usable[-1][2]
         else:
-            factors[cohort] = usable[0][2]
+            factors[cohort] = min(band for band in usable if band[0] > cohort)[2]
     return {
         "bands": [
             {"first_cohort": first, "last_cohort": last, "factor": factor}
@@ -350,23 +353,31 @@ def _unit_interval(*parts: object) -> float:
     return int.from_bytes(digest[:8], "big") / 2**64
 
 
+def _vehicle(cell: Cell) -> tuple[str, str, str]:
+    """A label is lost or misread for every cohort of a vehicle at once."""
+
+    return (cell.identity, cell.make, cell.model)
+
+
 def drop_cells(
     registrations: Mapping[Cell, float], share: float, *, seed: str
 ) -> dict[Cell, float]:
     """Degradation: lose whole vehicles' registrations, as a blank model label does."""
 
     return {
-        cell: units for cell, units in registrations.items() if _unit_interval(seed, cell) >= share
+        cell: units
+        for cell, units in registrations.items()
+        if _unit_interval(seed, *_vehicle(cell)) >= share
     }
 
 
 def perturb_cells(
     registrations: Mapping[Cell, float], spread: float, *, seed: str
 ) -> dict[Cell, float]:
-    """Degradation: each cell off by up to ``spread`` either way, as two publishers disagree."""
+    """Degradation: each vehicle off by up to ``spread`` either way, as two publishers disagree."""
 
     return {
-        cell: units * (1 + spread * (2 * _unit_interval(seed, cell) - 1))
+        cell: units * (1 + spread * (2 * _unit_interval(seed, *_vehicle(cell)) - 1))
         for cell, units in registrations.items()
     }
 
