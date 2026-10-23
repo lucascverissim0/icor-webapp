@@ -92,6 +92,42 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             process.wait(timeout=5)
 
 
+_REAPER = """
+import os, signal, sys, time
+parent, group = int(sys.argv[1]), int(sys.argv[2])
+while os.getppid() == parent:
+    time.sleep(0.5)
+for sig in (signal.SIGTERM, signal.SIGKILL):
+    try:
+        os.killpg(group, sig)
+    except (ProcessLookupError, PermissionError):
+        break
+    time.sleep(5)
+"""
+
+
+def _guard(process: subprocess.Popen[bytes]) -> subprocess.Popen[bytes] | None:
+    """Stop a child's process group if this runner dies without its `finally`.
+
+    Playwright escalates to SIGKILL after its grace period and an interrupted
+    test command kills the runner the same way; either left the children, which
+    run in their own session, listening for days. macOS has no parent-death
+    signal, so a detached watcher notices the runner is gone (it is reparented)
+    and stops the group. It lives in its own session so a kill of the runner's
+    group does not take it too.
+    """
+
+    if os.name == "nt":
+        return None
+    return subprocess.Popen(
+        [sys.executable, "-I", "-c", _REAPER, str(os.getpid()), str(process.pid)],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def _install_termination_handlers() -> None:
     """Make a signal reach the `finally` that reaps the children.
 
@@ -121,6 +157,7 @@ def run(api_port: int, web_port: int) -> int:
     web_environment["ICOR_API_ORIGIN"] = f"http://127.0.0.1:{api_port}"
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     processes: list[subprocess.Popen[bytes]] = []
+    reapers: list[subprocess.Popen[bytes]] = []
     _install_termination_handlers()
     try:
         processes.append(
@@ -145,6 +182,8 @@ def run(api_port: int, web_port: int) -> int:
             )
         )
         _pump(processes[-1], "api")
+        if reaper := _guard(processes[-1]):
+            reapers.append(reaper)
         processes.append(
             subprocess.Popen(
                 [npm, "run", "dev", "--", "--host", "127.0.0.1", "--port", str(web_port)],
@@ -157,6 +196,8 @@ def run(api_port: int, web_port: int) -> int:
             )
         )
         _pump(processes[-1], "web")
+        if reaper := _guard(processes[-1]):
+            reapers.append(reaper)
         while True:
             for process in processes:
                 if (code := process.poll()) is not None:
@@ -165,8 +206,19 @@ def run(api_port: int, web_port: int) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
+        # Signal every child before waiting on any, so the whole teardown fits
+        # inside Playwright's grace period instead of one wait per child.
+        if os.name != "nt":
+            for process in processes:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGTERM)
         for process in reversed(processes):
             _stop(process)
+        for reaper in reapers:
+            with suppress(ProcessLookupError):
+                reaper.kill()
+            with suppress(subprocess.TimeoutExpired):
+                reaper.wait(timeout=5)
 
 
 def main() -> int:

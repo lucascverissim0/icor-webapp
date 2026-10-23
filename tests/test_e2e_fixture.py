@@ -104,6 +104,9 @@ def test_browser_runner_never_shares_its_own_stdio_with_the_children(
     )
     monkeypatch.setattr(run_e2e_dev, "_install_termination_handlers", lambda: None)
     monkeypatch.setattr(run_e2e_dev, "_pump", lambda process, label: None)
+    monkeypatch.setattr(run_e2e_dev, "_guard", lambda process: None)
+    # The fake pid is not ours; never signal whatever group really has it.
+    monkeypatch.setattr(run_e2e_dev.os, "killpg", lambda pid, sig: None)
 
     run_e2e_dev.run(api_port=18999, web_port=19999)
 
@@ -113,12 +116,17 @@ def test_browser_runner_never_shares_its_own_stdio_with_the_children(
         assert kwargs["stderr"] is subprocess.STDOUT
 
 
-def test_browser_runner_escalates_when_a_child_ignores_the_first_signal() -> None:
+def test_browser_runner_escalates_when_a_child_ignores_the_first_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A child that will not stop must not be left running after teardown."""
 
     import subprocess
 
     from scripts import run_e2e_dev
+
+    # The fake pid is not ours; never signal whatever group really has it.
+    monkeypatch.setattr(run_e2e_dev.os, "killpg", lambda pid, sig: None)
 
     class _StubbornProcess:
         pid = 777
@@ -143,3 +151,59 @@ def test_browser_runner_escalates_when_a_child_ignores_the_first_signal() -> Non
     run_e2e_dev._stop(process)  # type: ignore[arg-type]
 
     assert process.killed or process._waits >= 2
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX process groups")
+def test_browser_runner_children_die_when_the_runner_is_killed_outright(
+    tmp_path: Path,
+) -> None:
+    """A SIGKILLed runner never reaches its `finally`; its children must still stop.
+
+    Playwright escalates to SIGKILL when teardown outlasts its grace period, and
+    an interrupted test command kills the runner the same way. Before the reaper
+    every such run left a browser-test API listening for days.
+    """
+
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    root = Path(__file__).resolve().parents[1]
+    runner = tmp_path / "runner.py"
+    runner.write_text(
+        "import subprocess, sys, time\n"
+        "from scripts import run_e2e_dev\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],"
+        " start_new_session=True, stdout=subprocess.DEVNULL)\n"
+        "run_e2e_dev._guard(child)\n"
+        "print(child.pid, flush=True)\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    supervisor = subprocess.Popen(
+        [sys.executable, str(runner)],
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(root)},
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert supervisor.stdout is not None
+    child = int(supervisor.stdout.readline())
+    try:
+        supervisor.send_signal(signal.SIGKILL)
+        supervisor.wait(timeout=5)
+        deadline = time.monotonic() + 10
+        alive = True
+        while alive and time.monotonic() < deadline:
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                alive = False
+            else:
+                time.sleep(0.2)
+        assert not alive, "the child outlived its killed runner"
+    finally:
+        with __import__("contextlib").suppress(ProcessLookupError):
+            os.killpg(child, signal.SIGKILL)
