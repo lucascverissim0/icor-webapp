@@ -46,10 +46,10 @@ class EurocodeStatus:
     coverage: tuple[EurocodeCoverage, ...] = ()
 
 
-def measure(
-    eurocodes: EurocodeMap, connection: sqlite3.Connection, snapshot_id: str
-) -> EurocodeStatus:
-    """Allocate every forecast cell of the snapshot and count the outcomes."""
+def _ranked_keys(
+    connection: sqlite3.Connection,
+) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
+    """Each forecast vehicle's raw labels and the identity its registrations allocate under."""
 
     index = load_identity_index(connection)
     labels = {
@@ -63,6 +63,21 @@ def measure(
         vehicle_id: identity_key(index, vehicle_id, make, model)
         for vehicle_id, (make, model) in labels.items()
     }
+    return labels, keys
+
+
+def ranked_identities(connection: sqlite3.Connection) -> frozenset[str]:
+    """The identities the snapshot forecasts, as the status counts them present."""
+
+    return frozenset(_ranked_keys(connection)[1].values())
+
+
+def measure(
+    eurocodes: EurocodeMap, connection: sqlite3.Connection, snapshot_id: str
+) -> EurocodeStatus:
+    """Allocate every forecast cell of the snapshot and count the outcomes."""
+
+    labels, keys = _ranked_keys(connection)
     materialized = connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' "
         "AND name = 'opportunity_cohort_attribution'"

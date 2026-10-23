@@ -43,3 +43,27 @@ def test_a_failed_build_leaves_the_previous_map_and_no_staging(tmp_path: Path) -
 
     assert (tmp_path / "client" / "decisions.json").read_bytes() == before
     assert not list(tmp_path.glob(".client-eurocode-*"))
+
+
+def test_identities_the_client_snapshot_does_not_forecast_are_left_out(tmp_path: Path) -> None:
+    """They carry no units; kept, they only show clients a review warning."""
+
+    source = write_demo_eurocodes(tmp_path / "private")
+    private = EurocodeMap.from_directory(source)
+    identities = sorted(private.decisions.identities)
+    ranked = frozenset(identities[1:])
+
+    result = builder.build(source, tmp_path / "client", ranked=ranked)
+
+    client = EurocodeMap.from_directory(tmp_path / "client")
+    assert set(client.decisions.identities) == set(ranked)
+    assert result["unranked_identities_left_out"] == 1
+    assert client.summaries() == private.summaries()
+    for identity in ranked:
+        assert client.decisions.identities[identity] == private.decisions.identities[identity]
+    state = client.state(
+        snapshot_id=str(private.decisions.metadata.get("snapshot_id")),
+        identity_rules_sha256=str(private.decisions.metadata.get("identity_rules_sha256")),
+        present_identities=ranked,
+    )
+    assert state.orphaned_identities == 0

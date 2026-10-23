@@ -8,7 +8,9 @@ running app loads, into the git-ignored ``.local/client-eurocode``:
 - ``catalog.json``, trimmed to codes, row numbers and the source hash
   (``runtime_document``), so no catalogue description, make or rejected source
   row is copied;
-- ``decisions.json``, byte for byte, because allocation reads all of it.
+- ``decisions.json``, with every family, and every reviewed identity the client
+  snapshot forecasts. An identity it does not forecast carries no units; kept,
+  it would only show clients a "no longer exist" warning about review work.
 
 It refuses to write a map that does not serve exactly what the private one
 does, and, given the client evidence root, one that was not reviewed for the
@@ -22,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -29,6 +32,7 @@ from pathlib import Path
 from icor.application.client_snapshot import reviewed_snapshot_id
 from icor.eurocodes.catalog import from_document, runtime_document
 from icor.eurocodes.runtime import EurocodeMap
+from icor.infrastructure.snapshot_eurocodes import ranked_identities
 from icor.infrastructure.snapshot_store import SnapshotStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,15 +45,36 @@ class ClientEurocodeError(RuntimeError):
     """A client map that must not be packaged."""
 
 
-def build(source: Path, destination: Path, *, client_root: Path | None = None) -> dict[str, object]:
+def _ranked(client_root: Path, private: EurocodeMap) -> frozenset[str]:
+    manifest, ledger = SnapshotStore(client_root).open_active_snapshot()
+    if reviewed_snapshot_id(manifest, ledger.path) != private.decisions.metadata.get("snapshot_id"):
+        raise ClientEurocodeError(
+            "the Eurocode decisions were reviewed for another snapshot than the client serves"
+        )
+    connection = sqlite3.connect(f"{Path(ledger.path).resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        return ranked_identities(connection)
+    finally:
+        connection.close()
+
+
+def build(
+    source: Path,
+    destination: Path,
+    *,
+    client_root: Path | None = None,
+    ranked: frozenset[str] | None = None,
+) -> dict[str, object]:
     private = EurocodeMap.from_directory(source)
     if client_root is not None:
-        manifest, ledger = SnapshotStore(client_root).open_active_snapshot()
-        reviewed_for = private.decisions.metadata.get("snapshot_id")
-        if reviewed_snapshot_id(manifest, ledger.path) != reviewed_for:
-            raise ClientEurocodeError(
-                "the Eurocode decisions were reviewed for another snapshot than the client serves"
-            )
+        ranked = _ranked(client_root, private)
+    document = json.loads((source / "decisions.json").read_text(encoding="utf-8"))
+    if ranked is not None:
+        document["identities"] = {
+            identity: item
+            for identity, item in document["identities"].items()
+            if identity in ranked
+        }
     catalogue = from_document(json.loads((source / "catalog.json").read_text(encoding="utf-8")))
     destination.parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(dir=destination.parent, prefix=".client-eurocode-"))
@@ -57,12 +82,18 @@ def build(source: Path, destination: Path, *, client_root: Path | None = None) -
         (staged / "catalog.json").write_text(
             json.dumps(runtime_document(catalogue), sort_keys=True) + "\n", encoding="utf-8"
         )
-        shutil.copyfile(source / "decisions.json", staged / "decisions.json")
+        (staged / "decisions.json").write_text(
+            json.dumps(document, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+        )
         packaged = EurocodeMap.from_directory(staged)
         if packaged.summaries() != private.summaries():
             raise ClientEurocodeError("the trimmed map does not describe the same codes")
-        if packaged.decisions.identities.keys() != private.decisions.identities.keys():
-            raise ClientEurocodeError("the trimmed map does not review the same identities")
+        kept = packaged.decisions.identities
+        if any(kept[key] != private.decisions.identities[key] for key in kept) or (
+            ranked is not None
+            and {key for key in private.decisions.identities if key in ranked} != kept.keys()
+        ):
+            raise ClientEurocodeError("the trimmed map does not review the ranked identities alike")
         if destination.exists():
             shutil.rmtree(destination)
         staged.rename(destination)
@@ -72,6 +103,8 @@ def build(source: Path, destination: Path, *, client_root: Path | None = None) -
     return {
         "codes": len(packaged.summaries()),
         "reviewed_identities": len(packaged.decisions.identities),
+        "unranked_identities_left_out": len(private.decisions.identities)
+        - len(packaged.decisions.identities),
         "files": sorted(path.name for path in destination.iterdir()),
         "reviewed_for_client_snapshot": client_root is not None,
     }
