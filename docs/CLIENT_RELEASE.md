@@ -9,7 +9,11 @@ estimated generation as fact.
 This boundary is fail-closed. The client preview:
 
 - exposes Opportunities and Model search only;
-- permits read-only opportunity, vehicle-forecast, and evidence-freshness requests;
+- opens on the Eurocode ranking, with model years as the only other grouping; brand
+  and model groupings return 422, and the internal data-coverage audit
+  (`/data-coverage`, `/api/v1/eurocodes/data-coverage`) returns 404;
+- permits read-only opportunity, vehicle-forecast, Eurocode-status and
+  evidence-freshness requests;
 - blocks registrations, source audit, completeness, ML export, API documentation,
   coverage management, and all non-login mutations;
 - requires Argon2id credentials, signed short-lived secure cookies, login throttling,
@@ -79,8 +83,35 @@ an upload:
 
     uv run python scripts/build_evidence_snapshot.py verify --root .local/client-evidence
 
+### The Eurocode map
+
+The image also carries the reviewed Eurocode map, ICOR-private data. Build it from
+the private folder after promoting the client snapshot:
+
+    uv run python scripts/build_client_eurocodes.py --client-root .local/client-evidence
+
+It writes `.local/client-eurocode/` with exactly two files: `catalog.json`, trimmed to
+codes, row numbers and the source hash (no catalogue description, make or rejected
+source row), and `decisions.json`, keeping every family and every reviewed identity
+the client snapshot forecasts. It refuses a map that does not describe the same codes
+as the private one, or that was reviewed for another snapshot. A client snapshot is
+recognised as its reviewed full snapshot by recomputing that snapshot's id from its
+own release table (`reviewed_snapshot_id`).
+
+`.dockerignore` re-admits `.local/client-eurocode` and nothing under
+`.local/private`; the Dockerfile copies it to `/srv/icor/eurocode` and sets
+`ICOR_EUROCODE_DIR`. The container runner refuses to start without it. Note that a
+deploy uploads the build context to the host's builder and stores the map in the
+image layers in the host's registry, so deploying shares it with that host.
+
+Prove both artifacts before paying for an upload:
+
+    uv run python scripts/preflight_client_evidence.py .local/client-evidence
+    uv run python scripts/verify_client_release.py --local --username <name>
+
 The image builds the bundle itself with `VITE_ICOR_CLIENT_RELEASE=verified`, and
-fails the build if the baked snapshot is not client-scoped.
+fails the build if the baked snapshot is not client-scoped, or if the map was not
+reviewed for that snapshot and the image's identity rules.
 
 `openai` and `streamlit` are absent from the runtime, but not because of the
 `preview` extra: a PEP 621 extra is additive, so `--extra preview` installs the
@@ -238,8 +269,9 @@ requires explicit authorization.
 After signing in over HTTPS:
 
 1. Confirm the navigation contains only Opportunities and Model search.
-2. Confirm Opportunities shows “Official vehicle-year evidence” and paginates across
-   more than one make/model.
+2. Confirm Opportunities opens on the Eurocode ranking, offers only "Eurocodes" and
+   "Model years", shows no Eurocode status warning, and that Model years shows
+   “Official vehicle-year evidence” and paginates across more than one make/model.
 3. Confirm every opportunity is labelled by make, source-reported model, and
    registration year;
    no `estimated-generation-*` label is visible.
@@ -250,8 +282,8 @@ After signing in over HTTPS:
    displayed as zero. EU27 leads as the headline fleet figure; the seven national
    markets are behind the "Per-market breakdown" disclosure, which reports how many
    of them carry data.
-6. Confirm /evidence, /registrations, /completeness, /exports, /docs, and
-   /openapi.json return 404 after authentication.
+6. Confirm /evidence, /registrations, /completeness, /exports, /docs, /openapi.json,
+   /data-coverage and /api/v1/eurocodes/data-coverage return 404 after authentication.
 7. Sign out and confirm protected pages return 401.
 
 Stop or delete the preview when the review window ends. Never call this preview a
