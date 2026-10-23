@@ -185,6 +185,7 @@ test('exact coverage create, edit, and delete refetches committed ranking', asyn
   await page.getByRole('button', { name: 'Update coverage' }).click()
   await expect(page.getByText('Production coverage updated.')).toBeVisible()
   await expect(page.getByText('E2E edit confirmation')).toBeVisible()
+  expect(await scores.allTextContents()).toEqual(scoresBefore)
 
   await page.getByRole('button', { name: /Delete Aurora Mobility A1 Horizon/ }).click()
   await expect(page.getByText(/coverage figures refresh after deletion/i)).toBeVisible()
