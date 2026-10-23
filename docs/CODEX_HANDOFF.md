@@ -8260,3 +8260,232 @@ They plug in as more estimators and truths, using the same functions.
    retention × imports), fitted to Eurostat bands and carmot. Add it as an estimator in this
    harness, and promote only where the L1 gates pass.
 2. Then the remaining Phase 1 items above.
+
+## 2026-10-23 — ICOR coverage out of the score; each Eurocode says what it rests on (Claude Code)
+
+**Lucas asked (2026-10-22):**
+- show the uncertainty of each Eurocode next to its prediction;
+- give the next steps;
+- delete ICOR coverage from the score but keep it shown;
+- "make no mistakes".
+
+**Lucas's decision: staged.**
+- Step 1 now: each code's evidence mix, and today's range relabelled as an assumption.
+- Step 2 next: a measured 80% range, shipped only if held-out hidden-register coverage is 72–88%.
+- The approved plan is outside the repo: `~/.claude/plans/ok-then-i-think-floofy-leaf.md`.
+- The plan-review subagent failed (API unreachable, ENOTFOUND). Its checks were redone by hand.
+
+**Commits (branch `fix/client-release-production`; nothing pushed):**
+- `1fad681` fix(opportunities): ICOR coverage can no longer choose where a score's units come
+  from.
+- `85afc22` test(e2e): scores are also unchanged by a coverage edit.
+- `b7d094f` feat(eurocodes): each code says what its certain units rest on; ranges are labelled
+  assumptions.
+  - Its message wrongly lists the coverage-manager overflow fix. That fix is in `1fad681`.
+
+### Part A — coverage and the score (`1fad681`, `85afc22`)
+
+**Finding.** The score already ignored ICOR coverage: `DemandScoreV2` since `0b174b7`. One hidden
+coupling remained in `snapshot_opportunity_repository.py`:
+- `include_coverage` chose the units source for brand and model rows: summed attribution, or
+  `ROUND(o.p10/p50/p90)` (`_needs_model_year`).
+- It also keyed the `_universe` score-population cache.
+- No live number moved, because the worked list is always loaded and validation makes the two
+  sources equal.
+
+**Fix.**
+- `_grouped_cte` always reads cohort attribution: materialized, or inline on old/test ledgers.
+- `_universe(group_by)` is keyed on the grouping alone.
+- `_needs_model_year` and `OpportunityUniverse.needs_model_year`, which was never read, are deleted.
+- `include_coverage` now only fills the coverage and worked columns, and the Eurocode view cache
+  key.
+
+**Tests.**
+- New `test_icor_coverage_never_moves_a_score_or_a_unit`, run inline and materialized.
+  - Every grouping gives the same population, summary, row ids, scores, demand and configuration
+    counts under three coverage states: none, the worked list, and manual exact + fallback.
+  - `get()` returns the same row.
+- The brand performance test now runs on a materialized copy (`_baked`).
+- The spellings test fixture gained a cohort and an input.
+- Playwright asserts the scores are unchanged after a coverage create, edit and delete.
+
+**Real snapshot.** Checked with scratch coverage DBs only; the live `.local/production-coverage.sqlite3`
+was never written.
+- All three coverage states give identical rows in every grouping, whole market and filtered.
+- The new code matches the old running API field for field. 16 views: 4 groupings × {whole,
+  `market=GB`, `horizon=2031`, `market=DE&horizon=2028`}, 100 rows each.
+- The API's query parameters are the singular `market=` / `horizon=`.
+- The API rounds `total_points` to one decimal (`schemas.py` serializer).
+
+**Web.**
+- **Card.** Coverage status, Exact/Fallback/Uncovered and "ICOR worked" now sit in one block,
+  "ICOR · not scored", after the score.
+  - It is placed explicitly: column 4 of 5 at ≥1100 px; second row, right half at 768–1099 px.
+- **Detail page.** "Production position" says coverage is not part of the score.
+- **KPI.** "High-demand gap" becomes "High demand not covered by ICOR", with a tooltip.
+- **Delete confirmation** no longer claims the ranking refreshes.
+
+**Defects fixed alongside.**
+- Rank numbers restarted at 1 on every page. `firstRank` is now (page−1)·page_size+1, and
+  `<ol start>` is set.
+- Percentiles read "92th" or "1th". The new `web/src/lib/ordinal.ts` reads 92nd, 1st, 11th.
+- At 768–1099 px beside the navigation rail, the card needed ≈736 px and had 470–670 px, so the
+  score was cut off. It is now two columns.
+- The coverage manager's two columns (38 rem) now start at 1100 px. They overflowed at 768–999 px.
+- A stale Vitest fixture (`demand_points: 73.6`) was corrected.
+
+### Part B step 1 — evidence mix and assumption ranges (`b7d094f`)
+
+**Domain.**
+- `src/icor/domain/evidence.py` gained `COHORT_EVIDENCE_KINDS` and `cohort_evidence_kind()`. They map
+  a cohort's first reason code to its kind:
+  - `observed-stock-anchored-cohort` → stock;
+  - `observed-registration-cohort` and `reconciled-registration-cohort` → registrations;
+  - `estimated-registration-cohort` → interpolated (gap-filled between published years by
+    `_fill_internal_gaps`);
+  - `forecast-registration-cohort` → forecast.
+- An unknown code raises `unknown cohort evidence '<code>'`.
+- `snapshot_data_coverage.py` now uses the same mapping. Its private `_EVIDENCE` is gone, and it
+  now also accepts observed-registration cohorts.
+
+**Grouping.**
+- `RankedCell.evidence: str | None` (None means unknown).
+- `EvidenceMix` (stock, registrations, interpolated, forecast, unknown) on `EurocodeGroup.evidence`.
+- `rank_by_eurocode` asserts that its total equals the certain units.
+- Shared and unassigned units add to no kind.
+- The in-memory and demo path leaves `evidence` None, so every unit counts as unknown and the UI
+  shows nothing.
+
+**Snapshot.**
+- `_connect(cohort_kinds=True)` builds `temp.cohort_kind (cohort_id PK, kind INT) WITHOUT ROWID`
+  in one pass. An unknown code is stored as −1, then refused by name.
+- The temp table is built before `PRAGMA query_only`.
+- Only the `cells=True` statement (`_build_eurocode_ranking`) LEFT JOINs it, on
+  `attribution.cohort_id`.
+- The default statement is byte-identical to HEAD's. This was checked across 64
+  grouping/coverage/filter/attribution/release combinations by importing HEAD's module from a
+  scratch copy.
+- **Test fixture.** `cohort_estimate` gained `reason_codes NOT NULL DEFAULT
+  '["reconciled-registration-cohort"]'`. The positional inserts now use `_COHORT_INSERT`, which
+  names its columns.
+
+**API.** `EurocodeGroupResponse.evidence: EvidenceMixResponse`, which is required. `openapi.json`
+and `schema.ts` were regenerated.
+
+**Active snapshot `b75d917…`.**
+- **Cohorts by first code:** stock 710,523; registrations 682,038; forecast 255,187. There are no
+  interpolated or observed-registration cohorts.
+- **Stock (register) cohorts** exist in CZ, DK, EE, ES (alongside registrations), FI, LT, LU, NL
+  and SI (alongside registrations).
+- **GB rests on registrations × survival** (DfT new registrations, aged by the UK curve fitted on
+  GB's own licensed stock). The label "new-car registrations × survival" is therefore correct for
+  GB.
+- **Whole-market certain units, 14,381,101:** stock 1,292,459, registrations 8,645,376, forecast
+  4,443,266. 0 of 1,366 codes fail to add up. GB, DE and DE-2028 views also add up, and each
+  view's code total equals its single-outcome total.
+- **Eurocode view build (warm), before → after.** Within the planned ceiling of +5 s whole market
+  and +3 s filtered:
+  - whole market 13.6 → 18.4 s;
+  - GB 3.2 → 4.4 s;
+  - DE-2028 1.95 → 2.9 s.
+- **Live API after restart:** 100 of 100 Eurocode rows add up; none has unknown units.
+
+**Web.**
+- **Card.** Under the range: "Rests on: X% national registers · Y% new-car registrations ×
+  survival · Z% forecast registrations".
+  - Percentages are largest-remainder whole numbers. A kind with units but under 1% shows "<1%";
+    kinds without units are left out.
+  - The line is hidden when everything is unknown.
+  - Helpers: `evidenceShares` and `evidenceText` in `features/eurocodes/eurocode-text.ts`.
+- **Detail page.** A table "What the N certain units rest on": units, share and meaning per kind.
+- **Every range is relabelled as an assumption range:**
+  - card: "… assumption range";
+  - detail: "Assumption low" and "Assumption high", and "Assumption range" in contributions;
+  - planner: summary, row, and the sort options "Assumption range, low/high end";
+  - configuration detail;
+  - vehicle forecast: EU headline and the table header;
+  - data-coverage tooltip: "Survival-curve assumption range …".
+- **One note,** `web/src/lib/assumption-range.ts`, in the score-method panel, the detail page and
+  the vehicle forecast: "Ranges show only the survival-curve band and an assumed replacement rate
+  of 4.3% a year ±20%. They are not measured errors; backtests show real errors are larger."
+  - Checked against `replacement_hazard.py`: 0.0606 × 0.71 = 4.3026%, ±20% scenario, and no
+    country multipliers anywhere.
+- **Wrong text corrected.** The vehicle-forecast method note claimed an "age/geography hazard"; it
+  now says "one replacement rate for every age and market".
+- **Layout.**
+  - The detail page overflowed on phones in every grouping (an implicit `auto` grid track). It now
+    uses `grid-template-columns: minmax(0, 1fr)`, and wide tables scroll in their own region.
+  - Both score-method notes now span the panel.
+- **Screen check.** At 1440, 900 and 390 px (and Part A also at 1280, 1100 and 768) there is no
+  page-level horizontal overflow. Screenshots were deleted.
+
+### Verification (fresh, after `b7d094f`)
+
+| Gate | Result |
+|---|---|
+| `uv run pytest -q -p no:cacheprovider` | 1385 passed, 7 skipped, 4 xfailed |
+| ruff on the CI list | clean |
+| web `lint` | 0 problems |
+| web `tsc --noEmit` | clean |
+| Vitest | 150 passed, 20 files |
+| `npm run build` | passes |
+| `VITE_ICOR_CLIENT_RELEASE=verified` build | passes |
+| Playwright | 32 passed |
+| `openapi:check` | exit 0 |
+
+Scratch scripts are in this session's scratchpad (`partA/`, `partB/`). They are not needed again.
+
+**Independent review of `1fad681..b7d094f`** (Sonnet subagent, read-only): **no defects**.
+- It confirmed:
+  - the default statement is byte-identical across 512 combinations;
+  - coverage cannot reach score, rank, population or units;
+  - the LEFT JOIN cannot duplicate rows (primary key);
+  - parameter binding and order relative to the pragma are correct;
+  - 2M fuzzed mixes of `evidenceShares` always sum to 100;
+  - the note's numbers match `replacement_hazard.py`;
+  - the grid placements are correct.
+- It re-ran pytest 1385, Vitest 150 and the OpenAPI regeneration (identical).
+- **Notes, by design:**
+  - An estimate without `opportunity_input` rows now drops out of brand and model rows. Snapshot
+    validation already rejects such snapshots.
+  - One unknown reason code anywhere fails every Eurocode view, not just one.
+  - The e2e score check right after the coverage edit can run before the refetch, so it is weak
+    there; the create and delete checks wait for the refetch.
+
+### Known, not fixed
+
+- At exactly 1100–1200 px the five-column card is tight: the ICOR chips stack, but nothing is cut.
+- `report_eurocode_data.py` still crashes on a relative `--out-dir` (see 2026-10-22).
+
+### Running processes
+
+- **Planner service,** restarted 2026-10-23 09:43 UTC on the working tree with commit `b7d094f`
+  code. API :8000 (pid 65044) and web :5173 (pid 65045), detached, on `snapshot-b75d917…`.
+- **CEPiK crawl** (pids 78564/78567): 86/176 slices, intermittent HTTP 404 and incomplete-JSON
+  retries. It is resumable.
+
+### Next actions
+
+1. **Part B step 2, the measured 80% range per Eurocode.**
+   - The harness writes per-(code, country) truth and prediction, certain units only, all
+     register cohorts, horizon 2028. The output is private JSON.
+   - Add a per-code registration-forecast backtest (≤2023 → 2024–25).
+   - Error model: leave-one-country-out empirical log-ratio quantiles by predicted size band,
+     pre-profile life share and evidence kind.
+     - The registrations-kind upper bound is capped at Eurostat official/model.
+     - The stock kind keeps its survival band.
+     - The replacement rate stays an assumption.
+   - **Gate:** pooled P10–P90 coverage 72–88% on codes ≥1k units, and ≥60% in each held-out
+     country. Otherwise the assumption range stays, and the failure is reported.
+   - Delivery: a snapshot-keyed private calibration file.
+2. **Mission 4 Phase 4:** per-country net retention, which fixes the old-car gap and the DE
+   young-band overshoot. Recalibrate step 2 after it.
+3. **The remaining Phase 1 harness items:** degradation profiles, temporal holdouts, baselines
+   (ii)/(iii), and the extra truths ES, IT MIT and PL.
+4. **PL register** when the crawl ends.
+5. **Replacement rate:** ICOR's replacement history by Eurocode × country (Lucas to ask).
+6. **Lucas's open decisions:**
+   - push the 80 local commits (`origin/fix/client-release-production..HEAD`);
+   - a private backup of `.local/private/eurocode/`;
+   - whether the client release may carry the Eurocode map;
+   - revoke and rotate the OpenAI key.
