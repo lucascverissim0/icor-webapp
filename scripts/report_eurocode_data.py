@@ -203,6 +203,12 @@ def _write_html(report: dict, path: Path) -> None:
     )
 
 
+def _written_label(stem: Path) -> str:
+    """Name the written files relative to the repository, whatever --out-dir was."""
+
+    return f"{stem.resolve().relative_to(ROOT)}.{{json,csv,html}}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -379,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
                     else ""
                 )
             )
-    print(f"written: {stem.relative_to(ROOT)}.{{json,csv,html}}")
+    print(f"written: {_written_label(stem)}")
     return 0
 
 
