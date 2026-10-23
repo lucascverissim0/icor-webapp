@@ -151,7 +151,10 @@ def test_the_committed_anchor_excludes_gb_and_keeps_only_markets_it_predicted_be
     model = load_age_anchored_survival_model()
 
     assert document["base_method"] == load_net_retained_survival_model().method
-    assert "GB" not in document["markets"] and "GB" not in document["rejected_markets"]
+    for excluded in ("GB", "HR"):
+        assert excluded in document["excluded_markets"]
+        assert excluded not in document["markets"]
+        assert excluded not in document["rejected_markets"]
     assert set(model.anchors) == set(document["markets"])
     for market in document["markets"].values():
         assert market["backtest"]["anchored_error"] < market["backtest"]["unanchored_error"]

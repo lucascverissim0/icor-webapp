@@ -6,8 +6,9 @@ Reads the same pinned `road_eqs_carage` and `road_eqr_carmot` copies as
 convention, unflagged bands, registrations that hold no used imports), and fits
 `icor.forecasting.age_anchor` on the net-retained survival model the snapshot
 build uses. A market is kept only when its anchors fitted to 2022 predict
-2023-2025 better than none. GB is excluded: the curve was measured there, and
-Eurostat's UK counts another territory. Prints counts only.
+2023-2025 better than none. Excluded, with the reason written into the artifact:
+GB, where the curve was measured, and markets whose own registrations already
+hold used imports, which the anchor would add a second time. Prints counts only.
 
 usage: calibrate_age_anchor.py [--stock FILE] [--registrations FILE] [--output FILE]
 """
@@ -33,7 +34,6 @@ from icor.forecasting.survival import (  # noqa: E402
 )
 from scripts.calibrate_net_retention import (  # noqa: E402
     BACKTEST_UNTIL,
-    EXCLUDED,
     FIT_UNTIL,
     _newest,
     _sha256,
@@ -41,6 +41,13 @@ from scripts.calibrate_net_retention import (  # noqa: E402
 )
 
 METHOD = "eurostat-age-anchor-v1"
+#: The anchor is official cars over Eurostat's new cars aged by the curve, so it
+#: transfers only to a market whose registrations in the snapshot are new cars too.
+EXCLUDED = {
+    "GB": "the survival curve was measured on GB",
+    "HR": "the snapshot's HR registrations exceed Eurostat's new cars by 16-35% from 2021"
+    " (used imports first registered there); the anchor would count them twice",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     markets: dict[str, dict] = {}
     rejected: dict[str, dict] = {}
     for geography, items in market_years(stock_document, registration_document).items():
+        if geography in EXCLUDED:
+            continue
         shares = [
             float(model.interval(scale, age_years=age, geography=geography).p50 / scale)
             for age in range(support)
@@ -100,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     document = {
         "method": METHOD,
         "base_method": model.method,
-        "excluded_markets": sorted(EXCLUDED),
+        "excluded_markets": dict(sorted(EXCLUDED.items())),
         "tolerance": age_anchor.TOLERANCE,
         "fit_until": FIT_UNTIL,
         "inputs": {

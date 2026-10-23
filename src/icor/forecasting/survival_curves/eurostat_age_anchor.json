@@ -1,8 +1,9 @@
 {
  "base_method": "uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1",
- "excluded_markets": [
-  "GB"
- ],
+ "excluded_markets": {
+  "GB": "the survival curve was measured on GB",
+  "HR": "the snapshot's HR registrations exceed Eurostat's new cars by 16-35% from 2021 (used imports first registered there); the anchor would count them twice"
+ },
  "fit_until": 2025,
  "inputs": {
   "base_curve": {
@@ -312,65 +313,6 @@
     "Y_LT2": 1.0702
    },
    "convention": "2y",
-   "fitted_year": 2025
-  },
-  "HR": {
-   "anchors": [
-    "1.1937",
-    "1.1937",
-    "1.1937",
-    "1.7210",
-    "1.7210",
-    "1.7210",
-    "2.0323",
-    "2.0323",
-    "2.0323",
-    "2.0323",
-    "2.0323",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822",
-    "3.4822"
-   ],
-   "backtest": {
-    "anchored_error": 0.1434,
-    "cells": 8,
-    "fit_until": 2022,
-    "unanchored_error": 0.4129
-   },
-   "bands": {
-    "Y10-20": 3.4822,
-    "Y2-5": 1.721,
-    "Y5-10": 2.0323,
-    "Y_LT2": 1.1937
-   },
-   "convention": "3y",
    "fitted_year": 2025
   },
   "IT": {
