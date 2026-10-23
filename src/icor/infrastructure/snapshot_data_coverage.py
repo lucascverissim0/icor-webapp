@@ -22,7 +22,11 @@ from icor.domain.evidence import STOCK_LOWER_BOUND_REASON, cohort_evidence_kind
 from icor.eurocodes.data_coverage import CountryComparison, FleetCell, FleetRange, OfficialStock
 from icor.eurocodes.runtime import identity_key
 from icor.evidence.eurostat_new_registrations import NewRegistrations, includes_used_imports
-from icor.forecasting.survival import CalibratedCohortSurvivalModel, NetRetainedSurvivalModel
+from icor.forecasting.survival import (
+    AgeAnchoredSurvivalModel,
+    CalibratedCohortSurvivalModel,
+    NetRetainedSurvivalModel,
+)
 from icor.infrastructure.snapshot_identity import load_identity_index
 
 STORED_HORIZON = 2028
@@ -46,7 +50,7 @@ class FleetRead:
 
 
 def _fleet(
-    survival: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel,
+    survival: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel | AgeAnchoredSurvivalModel,
     stored: Decimal,
     *,
     geography: str,
@@ -72,10 +76,12 @@ def _fleet(
         return FleetRange(interval.p10, interval.p50, interval.p90)
     if year < stock_year:
         return FleetRange(stored, stored, stored)
-    at_stock = survival.interval(
+    # Planning ages a register's cars without any per-market age anchor.
+    ageing = getattr(survival, "unanchored", survival)
+    at_stock = ageing.interval(
         _SCALE, age_years=max(stock_year - cohort_year, 0), geography=geography
     )
-    at_year = survival.interval(_SCALE, age_years=age, geography=geography)
+    at_year = ageing.interval(_SCALE, age_years=age, geography=geography)
     if min(at_stock.p10, at_stock.p50, at_stock.p90) <= 0:
         return None
     return FleetRange(
@@ -124,7 +130,7 @@ def _observed_sources(connection: sqlite3.Connection) -> dict[str, frozenset[str
 
 def read_fleet(
     connection: sqlite3.Connection,
-    survival: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel,
+    survival: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel | AgeAnchoredSurvivalModel,
     *,
     year: int,
     comparison_years: Mapping[str, Collection[int]],

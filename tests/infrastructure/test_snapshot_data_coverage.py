@@ -13,7 +13,11 @@ from decimal import Decimal
 import pytest
 
 from icor.application.generation_planning import GenerationPlanningService
-from icor.forecasting.survival import load_promoted_survival_model
+from icor.forecasting.survival import (
+    AgeAnchoredSurvivalModel,
+    load_net_retained_survival_model,
+    load_promoted_survival_model,
+)
 from icor.infrastructure.snapshot_data_coverage import read_fleet
 
 SURVIVAL = load_promoted_survival_model()
@@ -34,20 +38,20 @@ CREATE TABLE source_release (release_id TEXT, source_id TEXT);
 """
 
 
-def _registration_fleet(registrations: str, age: int) -> tuple[str, str, str]:
-    interval = SURVIVAL.interval(Decimal(registrations), age_years=age)
+def _registration_fleet(registrations: str, age: int, survival=SURVIVAL, geography=None):
+    interval = survival.interval(Decimal(registrations), age_years=age, geography=geography)
     return str(interval.p10), str(interval.p50), str(interval.p90)
 
 
-def _register_fleet(stock: str, *, age: int, stock_age: int) -> tuple[str, str, str]:
-    planner = GenerationPlanningService(survival=SURVIVAL)
+def _register_fleet(stock: str, *, age: int, stock_age: int, survival=SURVIVAL):
+    planner = GenerationPlanningService(survival=survival)
     interval = planner._conditional_fleet(
         Decimal(stock), age_years=age, stock_age_years=stock_age, geography="NL"
     )
     return str(interval.p10), str(interval.p50), str(interval.p90)
 
 
-def _snapshot(*, tamper: bool = False) -> sqlite3.Connection:
+def _snapshot(*, tamper: bool = False, survival=SURVIVAL) -> sqlite3.Connection:
     connection = sqlite3.connect(":memory:")
     connection.executescript(_SCHEMA)
     connection.executemany(
@@ -55,9 +59,9 @@ def _snapshot(*, tamper: bool = False) -> sqlite3.Connection:
         [("v1", "AURORA MOBILITY", "A1 HORIZON"), ("v2", "MERIDIAN MOTORS", "M5 VECTOR")],
     )
     connection.executemany("INSERT INTO opportunity_estimate VALUES (?)", [("v1",), ("v2",)])
-    registration = _registration_fleet("1000", 2028 - 2020)
-    register = _register_fleet("400", age=2028 - 2005, stock_age=2026 - 2005)
-    forecast = _registration_fleet("300", 2028 - 2027)
+    registration = _registration_fleet("1000", 2028 - 2020, survival, "DE")
+    register = _register_fleet("400", age=2028 - 2005, stock_age=2026 - 2005, survival=survival)
+    forecast = _registration_fleet("300", 2028 - 2027, survival, "DE")
     if tamper:
         registration = (registration[0], str(Decimal(registration[1]) + 1), registration[2])
     rows = [
@@ -114,6 +118,30 @@ def test_fleet_at_another_year_follows_the_curve_the_snapshot_was_built_with():
         "DE": {2020: frozenset({"registrations"})},
         "NL": {2005: frozenset({"stock"})},
     }
+
+
+def test_an_age_anchored_snapshot_is_read_as_planning_built_it():
+    # Changing between the register's age (21) and the horizon's (23), so ageing with
+    # the anchor would differ.
+    anchors = tuple(Decimal("1.5") if age < 22 else Decimal("1.1") for age in range(41))
+    survival = AgeAnchoredSurvivalModel(
+        load_net_retained_survival_model(), {"DE": anchors, "NL": anchors}, method="test-v1"
+    )
+
+    read = read_fleet(
+        _snapshot(survival=survival), survival, year=2026, comparison_years={"NL": [2028]}
+    )
+
+    assert read.verified_cohorts == 3
+    cells = {(cell.geography, cell.cohort_year): cell for cell in read.cells}
+    assert (
+        cells["DE", 2020].fleet.p50
+        == survival.interval(Decimal(1000), age_years=6, geography="DE").p50
+    )
+    # A register's cars are aged without the anchor, as planning ages them.
+    assert read.comparison["NL"][2028][2005] == Decimal(
+        _register_fleet("400", age=2028 - 2005, stock_age=2026 - 2005, survival=survival)[1]
+    )
 
 
 def test_a_snapshot_built_with_another_curve_is_refused():
