@@ -48,6 +48,7 @@ jobs:
           scripts/build_client_snapshot.py
           scripts/preflight_client_evidence.py
           scripts/verify_client_release.py
+          scripts/backup_private_data.py scripts/report_eurocode_data.py
       - run: uv run pytest
 
   planner-web:
