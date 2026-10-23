@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Measure how wrong each Eurocode's estimate is, and whether a measured 80% range holds.
 
-Mission 4 Part B step 2, harness v2. The eight complete national registers (NL, FI,
+Mission 4 Part B step 2, harness v3. The eight complete national registers (NL, FI,
 LU, LT, EE, CZ, DK, SI) are hidden one at a time and estimated the way a country
-without a register is: its EEA new registrations from 2010 times the survival
-curve, at the register's own date (ageing truth and estimate to a later horizon
-by the same curve adds nothing). Each code is counted as the ranking counts it,
-on the units it certainly carries. The estimate is scored three ways:
+without a register is: its EEA new registrations from 2010 times the app's
+survival model for that market, at the register's own date (ageing truth and
+estimate to a later horizon by the same curve adds nothing). The market's own
+Eurostat inputs (net retention, age anchor) are used, as the app would use them
+without the register: they are band totals every market publishes, and the
+per-code truth stays hidden. Each code is counted as the ranking counts it, on
+the units it certainly carries. The estimate is scored three ways:
 
-- ``raw``: the estimate itself;
-- ``anchored``: each cohort scaled to the country's official cars by age band
-  (Eurostat ``road_eqs_carage``), which a register-less country also has, so it
-  is a real estimator; what remains is the error in the mix of codes;
+- ``raw``: the app's estimate itself;
+- ``anchored``: the bare curve's cohorts scaled to the country's official cars
+  by age band at the register's own date (Eurostat ``road_eqs_carage``); what
+  remains is the error in the mix of codes;
 - ``oracle_level``: the country's true level, an upper bound for any anchor.
 
 A range for a code is learned from the other countries' codes only (leave one
@@ -23,8 +26,9 @@ app shows; ``anchored`` passing says what would make a range hold, not that the
 app's figures have one. Also measured, never gated:
 
 - baseline (iii), the other registers' mix of codes scaled to the estimate's total;
-- the same gate with the hidden profile degraded (lost vehicles, publisher
-  mismatch, first-word model names), ranges still learned undegraded;
+- the same gate with the hidden profile degraded (whole vehicles lost,
+  publisher mismatch per vehicle, first-word model names), ranges still learned
+  undegraded;
 - Spain, one-sided: DGT's unmasked stock is a lower bound per code, so a code
   whose lower bound exceeds its P90 is certainly outside its range;
 - the stock kind: GB's 2019 stock aged to 2025 with the curve against GB's 2025
@@ -96,7 +100,10 @@ from icor.forecasting.range_calibration import (  # noqa: E402
     weighted_quantile,
 )
 from icor.forecasting.registration_forecast import RegistrationForecaster  # noqa: E402
-from icor.forecasting.survival import load_survival_model_for  # noqa: E402
+from icor.forecasting.survival import (  # noqa: E402
+    load_age_anchored_survival_model,
+    load_survival_model_for,
+)
 from icor.infrastructure.snapshot_identity import load_identity_index  # noqa: E402
 from scripts.backtest_estimated_layer import (  # noqa: E402
     PROFILE_FIRST_YEAR,
@@ -113,15 +120,15 @@ FORMAT = "icor-range-calibration"
 VERSION = 1
 
 
-def _survival_shares(model: Any) -> Callable[[int], Interval]:
-    """The base curve with no market's net retention, so LU's own fit never scores LU."""
+def _survival_shares(model: Any, geography: str | None) -> Callable[[int], Interval]:
+    """The model's surviving share by age in a market; None is the bare curve."""
 
     scale = Decimal(1_000_000)
     cache: dict[int, Interval] = {}
 
     def shares(age: int) -> Interval:
         if age not in cache:
-            band = model.interval(scale, age_years=max(age, 0), geography=None)
+            band = model.interval(scale, age_years=max(age, 0), geography=geography)
             cache[age] = (float(band.p10 / scale), float(band.p50 / scale), float(band.p90 / scale))
         return cache[age]
 
@@ -129,9 +136,14 @@ def _survival_shares(model: Any) -> Callable[[int], Interval]:
 
 
 def _table(table: Mapping[str, Any]) -> dict[str, Any]:
+    """P10/P90 as ratios of truth to estimate (a log of zero would not be JSON)."""
+
+    def ratios(value: tuple[float, float]) -> list[float]:
+        return [math.exp(bound) for bound in value]
+
     return {
-        "pooled": list(table["pooled"]),
-        "bins": {f"{key[0]}:{key[1]}": list(value) for key, value in table["bins"].items()},
+        "pooled": ratios(table["pooled"]),
+        "bins": {f"{key[0]}:{key[1]}": ratios(value) for key, value in table["bins"].items()},
     }
 
 
@@ -200,8 +212,9 @@ def _anchor(
     shares: Callable[[int], Interval],
 ) -> dict[str, Any]:
     stock, convention = _stock_for(official, geography, year)
-    if stock is None:
-        return {"available": False, "factor": {}}
+    if stock is None or convention in (None, eurostat_age_conventions.UNCLEAR):
+        # An unclear convention cannot say which cohorts a band holds.
+        return {"available": False, "factor": {}, "convention": convention}
     band_year = stock.band_year
     predicted = {
         cohort: units * shares(band_year - cohort)[1]
@@ -398,10 +411,11 @@ def _spain(
     dgt_ids: Mapping[tuple[str, str], str],
     eurocodes: EurocodeMap,
     shares: Callable[[int], Interval],
-    official: tuple[dict, dict, dict, dict],
     table: Mapping[str, Any],
     life: Callable[[str], float],
 ) -> dict[str, Any]:
+    """The app's ES estimate and applied ranges against DGT's lower bound per code."""
+
     year = 2025
     lower: dict[Cell, float] = defaultdict(float)
     masked = total = 0.0
@@ -424,12 +438,8 @@ def _spain(
         if PROFILE_FIRST_YEAR <= int(cohort) < year:
             identity = identity_key(index, vehicle_id, make, model)
             registrations[Cell(identity, make, model, int(cohort))] += units
-    anchor = _anchor(official, "ES", year, _all_registrations(connection, "ES"), shares)
     estimate = registrations_times_survival(registrations, shares, year=year)
-    mid = {
-        cell: values[1] * anchor["factor"].get(cell.cohort, 1.0)
-        for cell, values in estimate.items()
-    }
+    mid = {cell: values[1] for cell, values in estimate.items()}
     truth, _ = _allocate(eurocodes, "ES", lower)
     predicted, _ = _allocate(eurocodes, "ES", mid)
     scored = [
@@ -439,7 +449,6 @@ def _spain(
     return {
         "truth": "DGT parque 2025, unmasked 2010-2024 cohorts: a lower bound per code",
         "masked_share_2010_2024": masked / total if total else None,
-        "anchored": anchor["available"],
         "codes_scored": len(scored),
         "lower_bound_above_p90": len(above),
         "share_certainly_above_range": len(above) / len(scored) if scored else None,
@@ -452,6 +461,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=ROOT / ".local" / "evidence")
     parser.add_argument("--eurocode-dir", type=Path, default=ROOT / ".local/private/eurocode")
     parser.add_argument("--out-dir", type=Path, default=ROOT / ".local/private/backtests")
+    parser.add_argument(
+        "--age-anchor",
+        type=Path,
+        help="measure the snapshot's survival model with this age anchor artifact instead "
+        "(a what-if: no range status is written)",
+    )
     arguments = parser.parse_args(argv)
 
     snapshot_id, path = _ledger(arguments.root, None)
@@ -459,7 +474,15 @@ def main(argv: list[str] | None = None) -> int:
     methods = connection.execute("SELECT DISTINCT survival_method FROM cohort_estimate").fetchall()
     if len(methods) != 1:
         raise SystemExit(f"expected one survival method, found {len(methods)}")
-    shares = _survival_shares(load_survival_model_for(methods[0][0]))
+    survival_model = load_survival_model_for(methods[0][0])
+    if arguments.age_anchor is not None:
+        survival_model = load_age_anchored_survival_model(
+            arguments.age_anchor, unanchored=survival_model
+        )
+    shares = _survival_shares(survival_model, None)
+    app_shares = {
+        geography: _survival_shares(survival_model, geography) for geography in (*TRUTHS, "ES")
+    }
     stock = _observations(connection, TRUTHS, "active_fleet")
     registrations = _observations(connection, (*TRUTHS, "ES"), "new_registrations")
 
@@ -532,11 +555,19 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         def estimate(
-            profile: Mapping[Cell, float], anchor: dict = anchor, year: int = year
+            profile: Mapping[Cell, float],
+            anchor: dict = anchor,
+            year: int = year,
+            geography: str = geography,
         ) -> tuple[dict[Cell, Interval], dict[Cell, float]]:
-            cells = registrations_times_survival(profile, shares, year=year)
+            cells = registrations_times_survival(profile, app_shares[geography], year=year)
             cells = {c: v for c, v in cells.items() if c.cohort < year}
-            anchored = {c: v[1] * anchor["factor"].get(c.cohort, 1.0) for c, v in cells.items()}
+            bare = registrations_times_survival(profile, shares, year=year)
+            anchored = {
+                c: v[1] * anchor["factor"].get(c.cohort, 1.0)
+                for c, v in bare.items()
+                if c.cohort < year
+            }
             return cells, anchored
 
         cells, anchored_cells = estimate(hidden[geography])
@@ -568,8 +599,8 @@ def main(argv: list[str] | None = None) -> int:
             ("publisher_mismatch_5pct", perturb_cells(hidden[geography], 0.05, seed=geography)),
             ("first_word_model_names", coarse_names(hidden[geography])),
         ):
-            _cells, degraded_anchored = estimate(profile)
-            codes, _ = _allocate(eurocodes, geography, degraded_anchored)
+            degraded_cells, _anchored = estimate(profile)
+            codes, _ = _allocate(eurocodes, geography, _quantile(degraded_cells, 1))
             degraded[name][geography] = _records(geography, truth, codes, life)
         countries[geography] = {
             "register_date": dates[geography],
@@ -619,20 +650,17 @@ def main(argv: list[str] | None = None) -> int:
     results = {name: _gate_block(items) for name, items in variants.items()}
     for name in results:
         results[name]["log_ratio"] = _log_ratio_quantiles(variants[name])
-    degradation = {
-        name: _degraded_coverage(variants["anchored"], by) for name, by in degraded.items()
-    }
-    anchored_table = ratio_table(
-        [item for item in variants["anchored"] if item.predicted >= MIN_PREDICTED]
+    degradation = {name: _degraded_coverage(variants["raw"], by) for name, by in degraded.items()}
+    applied_table = ratio_table(
+        [item for item in variants["raw"] if item.predicted >= MIN_PREDICTED]
     )
     spain = _spain(
         connection,
         index,
         dgt_ids,
         eurocodes,
-        shares,
-        official,
-        anchored_table,
+        app_shares["ES"],
+        applied_table,
         lambda code: (
             pre_profile_share(
                 summaries[code].first_year,
@@ -654,14 +682,15 @@ def main(argv: list[str] | None = None) -> int:
     passed = results[applied]["gate"]["passes"]
     report = {
         "snapshot_id": snapshot_id,
-        "survival_method": methods[0][0],
+        "survival_method": survival_model.method,
+        "snapshot_survival_method": methods[0][0],
         "estimator": "EEA new registrations from 2010 x survival, at each register's date",
         "truths": list(TRUTHS),
         "min_predicted": MIN_PREDICTED,
         "quantiles": list(QUANTILES),
         "countries": countries,
         "fleet_kind": results,
-        "degradation_anchored": degradation,
+        "degradation": degradation,
         "spain_one_sided": spain,
         "stock_kind_gb": uk,
         "forecast_kind": forecast,
@@ -682,7 +711,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     arguments.out_dir.mkdir(parents=True, exist_ok=True)
     out = arguments.out_dir.resolve() / f"code-ranges-{snapshot_id}.json"
-    out.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    out.write_text(
+        json.dumps(report, indent=1, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8"
+    )
     records = arguments.out_dir.resolve() / f"code-ranges-{snapshot_id}-records.json"
     records.write_text(
         json.dumps(
@@ -725,16 +756,24 @@ def main(argv: list[str] | None = None) -> int:
             for name in ("anchored", "oracle_level")
         },
     }
-    calibration = arguments.eurocode_dir.resolve() / "calibration"
-    calibration.mkdir(exist_ok=True)
-    (calibration / f"range-calibration-{snapshot_id}.json").write_text(
-        json.dumps(status, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+    status["alternatives"]["anchored"]["countries_without_anchor"] = sorted(
+        geography for geography, values in countries.items() if not values["anchor"]["available"]
     )
+    if arguments.age_anchor is None:
+        calibration = arguments.eurocode_dir.resolve() / "calibration"
+        calibration.mkdir(exist_ok=True)
+        (calibration / f"range-calibration-{snapshot_id}.json").write_text(
+            json.dumps(status, indent=1, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
 
     print(f"{snapshot_id}: per-code fleet at each register's date; codes predicted >= 1,000")
     for name, block in results.items():
         values = block["coverage"]
-        per = " ".join(f"{c} {v['coverage']:.2f}" for c, v in values["countries"].items())
+        per = " ".join(
+            f"{c} {'-' if v['coverage'] is None else format(v['coverage'], '.2f')}"
+            for c, v in values["countries"].items()
+        )
         print(
             f"{name:13s} pooled {values['pooled']:.3f} on {values['codes']} codes | {per} | "
             f"gate {'PASS' if block['gate']['passes'] else 'FAIL'}"
@@ -745,7 +784,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"gb stock: wape {uk['wape_large']} band coverage {uk['survival_band_coverage']}")
     for step, block in forecast["steps"].items():
         print(f"forecast step {step}: pooled {block['coverage']['pooled']:.3f}")
-    print(f"written: {out.name}, {records.name}; app range status {status['status']}")
+    state = status["status"] if arguments.age_anchor is None else "not written (what-if)"
+    print(survival_model.method)
+    print(f"written: {out.name}, {records.name}; app range status {state}")
     return 0
 
 

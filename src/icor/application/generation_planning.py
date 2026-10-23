@@ -38,6 +38,7 @@ from icor.forecasting.reconciliation import (
 from icor.forecasting.registration_forecast import RegistrationForecaster
 from icor.forecasting.replacement_hazard import ReplacementHazardModel
 from icor.forecasting.survival import (
+    AGE_ANCHOR_REASON,
     NET_RETENTION_REASON,
     CohortSurvivalModel,
     SurvivalInterval,
@@ -110,6 +111,9 @@ class GenerationPlanningService:
         # Injectable so a calibrated retention curve can replace the assumed one
         # without editing this service. Its .method flows into every cohort record.
         self.survival = survival or CohortSurvivalModel()
+        # Cars a register observed are already the market's own, so ageing them, or
+        # weighing them against registrations, never takes a per-market age anchor.
+        self.ageing = getattr(self.survival, "unanchored", self.survival)
         # National new-car totals (market, year) that a provisional year is checked against.
         self.official_registrations = dict(official_registrations or {})
         self.hazard = ReplacementHazardModel()
@@ -512,10 +516,15 @@ class GenerationPlanningService:
                             annual.registrations, age_years=age, geography=geography
                         )
                         retained = self.survival.retention(geography, age_years=age) < 1
+                        anchored = (
+                            self.survival is not self.ageing
+                            and self.survival.anchor(geography, age_years=age) != 1
+                        )
                         cohort_codes = (
                             f"{annual.status}-registration-cohort",
                             self.survival.reason_code(geography),
                             *((NET_RETENTION_REASON,) if retained else ()),
+                            *((AGE_ANCHOR_REASON,) if anchored else ()),
                             *annual.extra_reason_codes,
                             *history_codes,
                         )
@@ -640,10 +649,10 @@ class GenerationPlanningService:
 
         scale = Decimal(1_000_000)
         try:
-            at_stock = self.survival.interval(
+            at_stock = self.ageing.interval(
                 scale, age_years=max(stock_age_years, 0), geography=geography
             )
-            at_horizon = self.survival.interval(scale, age_years=age_years, geography=geography)
+            at_horizon = self.ageing.interval(scale, age_years=age_years, geography=geography)
         except ValueError:
             return None
         if min(at_stock.p10, at_stock.p50, at_stock.p90) <= 0:
@@ -710,7 +719,7 @@ class GenerationPlanningService:
                 for key in series_keys:
                     annual = series[key].get(year)
                     if annual is not None:
-                        surviving[vehicle(key[1])] += self.survival.interval(
+                        surviving[vehicle(key[1])] += self.ageing.interval(
                             annual.registrations,
                             age_years=stock_dates[geography].year - year,
                             geography=geography,

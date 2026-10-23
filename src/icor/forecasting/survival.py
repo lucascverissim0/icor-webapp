@@ -17,6 +17,8 @@ _QUANTUM = Decimal("0.0001")
 _ONE = Decimal(1)
 #: A cohort whose cars the market's net retention lowered below the curve.
 NET_RETENTION_REASON = "eurostat-net-retention-calibrated"
+#: A cohort scaled to its market's official cars of its age (`icor.forecasting.age_anchor`).
+AGE_ANCHOR_REASON = "eurostat-age-anchored"
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,9 +280,94 @@ def load_net_retained_survival_model(
     )
 
 
+class AgeAnchoredSurvivalModel:
+    """A survival model scaled per market to the official cars of each age.
+
+    Registrations aged by the curve are multiplied by the market's anchor at the
+    cohort's age (`icor.forecasting.age_anchor`), which may exceed one where used
+    imports arrive. Cars observed on a register are already the market's own,
+    so ageing them must not take the anchor: ``unanchored`` is the model that
+    ages them, and ``retention`` stays the underlying model's.
+    """
+
+    def __init__(
+        self,
+        unanchored: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel,
+        anchors: Mapping[str, tuple[Decimal, ...]],
+        *,
+        method: str,
+    ) -> None:
+        if not method.strip():
+            raise ValueError("the age anchor method is required")
+        for geography, curve in anchors.items():
+            if not curve or any(value <= 0 for value in curve):
+                raise ValueError(f"{geography}: age anchors must be positive")
+        self.unanchored = unanchored
+        self.band = unanchored.band
+        self.calibrated_geography = unanchored.calibrated_geography
+        self.anchors = dict(anchors)
+        self.method = f"{unanchored.method}+{method}"
+        self.assumption_ids = (
+            *unanchored.assumption_ids,
+            f"survival-{method}-markets-{'-'.join(sorted(anchors)).lower() or 'none'}",
+        )
+
+    def anchor(self, geography: str, *, age_years: int) -> Decimal:
+        curve = self.anchors.get(geography)
+        if curve is None:
+            return _ONE
+        return curve[min(age_years, len(curve) - 1)]
+
+    def retention(self, geography: str, *, age_years: int) -> Decimal:
+        return self.unanchored.retention(geography, age_years=age_years)
+
+    def remaining(self, registrations: Decimal, *, age_years: int) -> Decimal:
+        return self.unanchored.remaining(registrations, age_years=age_years)
+
+    def interval(
+        self, registrations: Decimal, *, age_years: int, geography: str | None = None
+    ) -> SurvivalInterval:
+        interval = self.unanchored.interval(registrations, age_years=age_years, geography=geography)
+        factor = _ONE if geography is None else self.anchor(geography, age_years=age_years)
+        if factor == _ONE:
+            return interval
+        return SurvivalInterval(
+            (interval.p10 * factor).quantize(_QUANTUM),
+            (interval.p50 * factor).quantize(_QUANTUM),
+            (interval.p90 * factor).quantize(_QUANTUM),
+        )
+
+    def reason_code(self, geography: str) -> str:
+        return self.unanchored.reason_code(geography)
+
+
+AGE_ANCHOR_PATH = PROMOTED_CURVE_PATH.parent / "eurostat_age_anchor.json"
+
+
+def load_age_anchored_survival_model(
+    path: Path | None = None,
+    *,
+    unanchored: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel | None = None,
+) -> AgeAnchoredSurvivalModel:
+    """The net-retained curve with the committed, reviewed age anchor artifact."""
+
+    payload = json.loads((path or AGE_ANCHOR_PATH).read_text(encoding="utf-8"))
+    model = unanchored or load_net_retained_survival_model()
+    if payload["base_method"] != model.method:
+        raise ValueError("the age anchor was calibrated on another survival model")
+    return AgeAnchoredSurvivalModel(
+        model,
+        {
+            geography: tuple(Decimal(value) for value in market["anchors"])
+            for geography, market in payload["markets"].items()
+        },
+        method=payload["method"],
+    )
+
+
 def load_survival_model_for(
     method: str,
-) -> CalibratedCohortSurvivalModel | NetRetainedSurvivalModel:
+) -> CalibratedCohortSurvivalModel | NetRetainedSurvivalModel | AgeAnchoredSurvivalModel:
     """The committed model a snapshot recorded as its survival method, so it can be verified."""
 
     base = load_promoted_survival_model()
@@ -289,4 +376,8 @@ def load_survival_model_for(
     retained = load_net_retained_survival_model(base=base)
     if method == retained.method:
         return retained
+    if AGE_ANCHOR_PATH.is_file():
+        anchored = load_age_anchored_survival_model(unanchored=retained)
+        if method == anchored.method:
+            return anchored
     raise ValueError(f"no committed survival model has method {method!r}")
