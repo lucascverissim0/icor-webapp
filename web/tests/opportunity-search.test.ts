@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  defaultGrouping,
+  DEFAULT_GROUPING,
+  groupingsFor,
   parseOpportunitySearch,
   serializeOpportunitySearch,
 } from '../src/lib/opportunity-search'
@@ -15,13 +16,23 @@ describe('opportunity URL state', () => {
     expect(parsed.invalidKeys).toEqual(['groupBy'])
   })
 
-  it('defaults to Eurocodes, and to model years in the verified client release', () => {
-    expect(defaultGrouping(false)).toBe('eurocode')
-    expect(defaultGrouping(true)).toBe('model_year')
+  it('defaults to Eurocodes, in the verified client release too', () => {
+    expect(DEFAULT_GROUPING).toBe('eurocode')
     const plain = parseOpportunitySearch({})
     expect(plain.value.groupBy).toBe('eurocode')
     expect(plain.invalidKeys).toEqual([])
-    expect(parseOpportunitySearch({}, defaultGrouping(true)).value.groupBy).toBe('model_year')
+  })
+
+  it('keeps a client URL to the two groupings the client release serves', () => {
+    const client = groupingsFor(true)
+    expect(client).toEqual(['eurocode', 'model_year'])
+    for (const internal of ['brand', 'model']) {
+      const parsed = parseOpportunitySearch({ groupBy: internal }, DEFAULT_GROUPING, client)
+      expect(parsed.value.groupBy).toBe('eurocode')
+      expect(parsed.invalidKeys).toEqual(['groupBy'])
+    }
+    expect(parseOpportunitySearch({ groupBy: 'model_year' }, 'eurocode', client).value.groupBy).toBe('model_year')
+    expect(parseOpportunitySearch({ groupBy: 'brand' }, 'eurocode', groupingsFor(false)).value.groupBy).toBe('brand')
   })
 
   it('accepts eurocode as a grouping and keeps an explicit model-year one', () => {

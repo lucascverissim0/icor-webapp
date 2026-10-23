@@ -18,7 +18,7 @@ import {
 
 
 describe('OpportunitiesWorkbench', () => {
-  it('removes grouping and coverage mutations from the verified client release', async () => {
+  it('offers the verified client release Eurocodes and model years only, and no coverage mutations', async () => {
     const client = new PlannerApiClient(successFetcher())
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
@@ -36,7 +36,11 @@ describe('OpportunitiesWorkbench', () => {
     expect(await screen.findByText('2,150 replacements')).toBeVisible()
     expect(screen.getByText('Official vehicle-year evidence')).toBeVisible()
     expect(screen.getByText('Generation A')).toBeVisible()
-    expect(screen.queryByText('Summarize ranking by')).not.toBeInTheDocument()
+    const grouping = screen.getByRole('group', { name: 'Opportunity grouping' })
+    expect(within(grouping).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Eurocodes',
+      'Model years',
+    ])
     expect(screen.queryByText('Manage ICOR worked-model coverage')).not.toBeInTheDocument()
   })
 

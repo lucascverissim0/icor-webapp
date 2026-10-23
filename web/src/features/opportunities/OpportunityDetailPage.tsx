@@ -145,6 +145,8 @@ export function OpportunityDetailView({
   const fleet = useQuery({
     queryKey: queryKeys.opportunityFleet(groupId, query),
     queryFn: ({ signal }) => apiClient.opportunityFleet(groupId, query, signal),
+    // A Eurocode has no fleet by configuration; the page never shows one for it.
+    enabled: search.groupBy !== 'eurocode',
   })
   const back = backHref(search)
 

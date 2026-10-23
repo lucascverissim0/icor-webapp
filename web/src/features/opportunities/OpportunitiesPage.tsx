@@ -8,6 +8,7 @@ import { queryKeys } from '../../app/query-client'
 import { ApiProblem, PlannerApiClient, plannerApi, type OpportunitiesQuery } from '../../lib/api/client'
 import { ASSUMPTION_RANGE_NOTE } from '../../lib/assumption-range'
 import {
+  groupingsFor,
   serializeOpportunitySearch,
   type OpportunitySearch,
   type OpportunitySort,
@@ -336,9 +337,9 @@ export function OpportunitiesWorkbench({
       <header className="opportunities-hero">
         <div>
           <p className="eyebrow">Windshield replacement forecast</p>
-          <h2>{clientRelease ? 'Prioritized vehicle-year opportunities' : 'Prioritized model and generation opportunities'}</h2>
+          <h2>{clientRelease ? 'Prioritized Eurocode and vehicle-year opportunities' : 'Prioritized model and generation opportunities'}</h2>
           <p>{clientRelease
-            ? 'This client release covers every forecastable official-source make/model label and registration cohort year. Ranked generation names use reviewed manufacturer production windows; forecasts remain planning estimates.'
+            ? 'This client release ranks windscreen Eurocodes, and beneath them every forecastable official-source make/model label and registration cohort year. Ranked generation names use reviewed manufacturer production windows; forecasts remain planning estimates.'
             : 'Start with the vehicle opportunities forecast for upcoming years. The score is forecast demand alone; ICOR experience is shown beside it.'}</p>
         </div>
         <span className="status-pill">{clientRelease ? 'Official vehicle-year evidence' : 'Validated snapshot'}</span>
@@ -380,7 +381,7 @@ export function OpportunitiesWorkbench({
         <p className="url-notice" role="status">Adjusted URL filters: {invalidKeys.join(', ')}</p>
       )}
 
-      {!clientRelease && <div>
+      <div>
         <p className="grouping-label">Summarize ranking by</p>
         <div aria-label="Opportunity grouping" className="grouping-control" role="group">
         {([
@@ -388,7 +389,7 @@ export function OpportunitiesWorkbench({
           ['model_year', 'Model years'],
           ['model', 'Models'],
           ['brand', 'Brands'],
-        ] as const).map(([value, label]) => (
+        ] as const).filter(([value]) => groupingsFor(clientRelease).includes(value)).map(([value, label]) => (
           <button
             aria-pressed={search.groupBy === value}
             key={value}
@@ -401,7 +402,7 @@ export function OpportunitiesWorkbench({
           </button>
         ))}
         </div>
-      </div>}
+      </div>
 
       <RankingFilters
         availableHorizons={[...(ranking.data?.available_horizons ?? [])]}

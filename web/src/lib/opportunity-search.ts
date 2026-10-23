@@ -31,13 +31,18 @@ export interface ParsedOpportunitySearch {
 }
 
 const GROUPINGS: readonly OpportunityGroupBy[] = ['eurocode', 'model_year', 'model', 'brand']
+// The server refuses brand and model groupings in the verified client release.
+const CLIENT_GROUPINGS: readonly OpportunityGroupBy[] = ['eurocode', 'model_year']
 
-/** Eurocodes lead the ranking; the verified client release serves model years only. */
-export function defaultGrouping(clientRelease: boolean): OpportunityGroupBy {
-  return clientRelease ? 'model_year' : 'eurocode'
+/** The groupings a build may request: the verified client release serves two. */
+export function groupingsFor(clientRelease: boolean): readonly OpportunityGroupBy[] {
+  return clientRelease ? CLIENT_GROUPINGS : GROUPINGS
 }
 
-const DEFAULT_GROUPING = defaultGrouping(import.meta.env.VITE_ICOR_CLIENT_RELEASE === 'verified')
+/** Eurocodes lead the ranking, in the verified client release too. */
+export const DEFAULT_GROUPING: OpportunityGroupBy = 'eurocode'
+
+const ALLOWED_GROUPINGS = groupingsFor(import.meta.env.VITE_ICOR_CLIENT_RELEASE === 'verified')
 
 function rawValues(value: unknown): unknown[] {
   if (value === undefined || value === null) return []
@@ -47,9 +52,10 @@ function rawValues(value: unknown): unknown[] {
 export function parseOpportunitySearch(
   raw: Record<string, unknown>,
   fallbackGroupBy: OpportunityGroupBy = DEFAULT_GROUPING,
+  groupings: readonly OpportunityGroupBy[] = ALLOWED_GROUPINGS,
 ): ParsedOpportunitySearch {
   const invalid = new Set<string>()
-  const groupBy = GROUPINGS.includes(raw.groupBy as OpportunityGroupBy)
+  const groupBy = groupings.includes(raw.groupBy as OpportunityGroupBy)
     ? (raw.groupBy as OpportunityGroupBy)
     : fallbackGroupBy
   if (raw.groupBy !== undefined && groupBy !== raw.groupBy) invalid.add('groupBy')
