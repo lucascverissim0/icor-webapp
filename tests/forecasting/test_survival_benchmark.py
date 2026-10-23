@@ -41,3 +41,13 @@ def test_registration_loader_rejects_suppressed_values(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="non-numeric UK registration value"):
         _load_registrations(path)
+
+
+def test_the_report_names_the_promoted_curve_instead_of_a_stale_decision() -> None:
+    """The curve was promoted on 2026-09-22; the report still said 'challenger only'."""
+
+    from icor.forecasting.survival import load_promoted_survival_model
+    from scripts.benchmark_survival_calibration import _role
+
+    assert load_promoted_survival_model().method in _role()
+    assert "challenger" not in _role()

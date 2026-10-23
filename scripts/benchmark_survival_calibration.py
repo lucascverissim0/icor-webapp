@@ -12,7 +12,7 @@ from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
 
-from icor.forecasting.survival import CohortSurvivalModel
+from icor.forecasting.survival import CohortSurvivalModel, load_promoted_survival_model
 from icor.forecasting.survival_calibration import (
     CohortStock,
     RegistrationCohort,
@@ -46,15 +46,11 @@ def _sha256(path: Path) -> str:
 
 
 def _load_registrations(path: Path) -> tuple[RegistrationCohort, ...]:
-    totals = {
-        year: Decimal(0) for year in range(_FIRST_COMPLETE_YEAR, _LAST_FINAL_YEAR + 1)
-    }
+    totals = {year: Decimal(0) for year in range(_FIRST_COMPLETE_YEAR, _LAST_FINAL_YEAR + 1)}
     with path.open(encoding="cp1252", newline="") as stream:
         reader = csv.DictReader(stream)
         required = {"BodyType"} | {
-            f"{year} Q{quarter}"
-            for year in totals
-            for quarter in range(1, 5)
+            f"{year} Q{quarter}" for year in totals for quarter in range(1, 5)
         }
         missing = required.difference(reader.fieldnames or ())
         if missing:
@@ -74,9 +70,7 @@ def _load_registrations(path: Path) -> tuple[RegistrationCohort, ...]:
                             f"non-numeric UK registration value at row {row_number}"
                         ) from error
                     if not value.is_finite() or value < 0 or value != value.to_integral():
-                        raise ValueError(
-                            f"invalid UK registration value at row {row_number}"
-                        )
+                        raise ValueError(f"invalid UK registration value at row {row_number}")
                     totals[year] += value
     if car_rows == 0 or any(value <= 0 for value in totals.values()):
         raise ValueError("UK registrations CSV has incomplete Cars coverage")
@@ -107,6 +101,15 @@ def _load_stocks(database: Path) -> tuple[CohortStock, ...]:
     return stocks
 
 
+def _role() -> str:
+    """What this run is for, named from the committed curve so it cannot go stale."""
+
+    return (
+        f"re-validates the method of the promoted survival curve "
+        f"{load_promoted_survival_model().method}; it does not gate promotion"
+    )
+
+
 def _metric(value: Decimal) -> str:
     return str(value.quantize(_QUANTUM))
 
@@ -130,9 +133,7 @@ def main() -> int:
     baseline_signed_error = Decimal(0)
     denominator = Decimal(0)
     points = 0
-    by_age: dict[int, list[Decimal]] = defaultdict(
-        lambda: [Decimal(0), Decimal(0), Decimal(0)]
-    )
+    by_age: dict[int, list[Decimal]] = defaultdict(lambda: [Decimal(0), Decimal(0), Decimal(0)])
     evaluated_cohorts: list[int] = []
     for cohort_year in sorted(stock_by_cohort):
         curve = calibrate_licensed_stock_curve(
@@ -176,14 +177,10 @@ def main() -> int:
         "candidate_wape": _metric(candidate_wape),
         "constant_retention_wape": _metric(baseline_wape),
         "relative_error_reduction_percent": str(
-            ((Decimal(1) - candidate_wape / baseline_wape) * Decimal(100)).quantize(
-                Decimal("0.01")
-            )
+            ((Decimal(1) - candidate_wape / baseline_wape) * Decimal(100)).quantize(Decimal("0.01"))
         ),
         "candidate_weighted_bias": _metric(candidate_signed_error / denominator),
-        "constant_retention_weighted_bias": _metric(
-            baseline_signed_error / denominator
-        ),
+        "constant_retention_weighted_bias": _metric(baseline_signed_error / denominator),
         "by_age": {
             str(age): {
                 "candidate_wape": _metric(values[0] / values[2]),
@@ -211,7 +208,7 @@ def main() -> int:
             "affected by imports, exports, relicensing, scrappage and record revisions; "
             "generation-level accuracy and transfer to other countries are unproven"
         ),
-        "promotion_decision": "research_challenger_only",
+        "role": _role(),
     }
     print(json.dumps(report, sort_keys=True))
     return 0
