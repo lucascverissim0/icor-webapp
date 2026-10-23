@@ -45,6 +45,14 @@ def _stub_api(scope: str = FULL_SCOPE) -> FastAPI:
     def example() -> dict[str, bool]:
         return {"ready": True}
 
+    @app.get("/api/v1/eurocodes/status")
+    def eurocode_status() -> dict[str, bool]:
+        return {"loaded": True}
+
+    @app.get("/api/v1/eurocodes/data-coverage")
+    def data_coverage() -> dict[str, bool]:
+        return {"internal": True}
+
     return app
 
 
@@ -242,6 +250,11 @@ def test_client_release_denies_internal_surfaces_and_unknown_apis(
         assert client.get("/registrations").status_code == 404
         assert client.get("/opportunities-internal").status_code == 404
         assert client.get("/api/example").status_code == 404
+        # Eurocodes ship to clients; the audit of their source gaps does not.
+        assert client.get("/api/v1/eurocodes/status").json() == {"loaded": True}
+        assert client.get("/api/v1/eurocodes/data-coverage").status_code == 404
+        assert client.get("/data-coverage").status_code == 404
+        assert client.post("/api/v1/eurocodes/status").status_code == 404
 
 
 @pytest.mark.parametrize(

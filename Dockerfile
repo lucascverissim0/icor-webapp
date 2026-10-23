@@ -57,11 +57,17 @@ COPY --chown=icor:icor            scripts/run_container_preview.py  /app/scripts
 # `data/` cannot be excluded wholesale: the API reads this catalogue at start-up
 # with no fallback.
 COPY --chown=icor:icor            data/icor_supported_models.txt    /app/data/
+# Identity folding reads these rules at start-up; without them the boot-time
+# ranking warm-up raises before the app can serve.
+COPY --chown=icor:icor            data/vehicle_identity.json        /app/data/
 COPY --from=web --chown=icor:icor /client-release                   /app/client-release
 # The pruned, client-scoped snapshot. Baked rather than mounted: it is immutable,
 # read-only at runtime, and pinning it to the image digest means code and data
 # roll back together.
 COPY --chown=icor:icor            .local/client-evidence            /srv/icor/evidence
+# The reviewed Eurocode map, trimmed by scripts/build_client_eurocodes.py to the
+# two files the app loads: no catalogue description, workbook or report.
+COPY --chown=icor:icor            .local/client-eurocode            /srv/icor/eurocode
 
 # The fail-closed runner requires a coverage database to exist. Create an empty
 # one at build time rather than teaching the runner a container exception.
@@ -87,17 +93,24 @@ RUN PYTHONPATH=/app/src ICOR_EVIDENCE_ACTIVE_ROOT=/srv/icor/evidence \
 from pathlib import Path; \
 from icor.infrastructure.snapshot_store import SnapshotStore, write_verified_marker; \
 root = Path('/srv/icor/evidence'); \
-manifest, _ = SnapshotStore(root).open_active_snapshot(); \
+manifest, ledger = SnapshotStore(root).open_active_snapshot(); \
 assert manifest.scope == 'client-release', manifest.scope; \
+from icor.application.client_snapshot import reviewed_snapshot_id; \
+from icor.eurocodes.runtime import EurocodeMap; \
+from icor.evidence.vehicle_identity import identity_rules_sha256; \
+reviewed = EurocodeMap.from_directory(Path('/srv/icor/eurocode')).decisions.metadata; \
+assert reviewed.get('snapshot_id') == reviewed_snapshot_id(manifest, ledger.path), 'Eurocodes reviewed for another snapshot'; \
+assert reviewed.get('identity_rules_sha256') == identity_rules_sha256(), 'Eurocodes reviewed under other identity rules'; \
 marker = write_verified_marker(root); \
 print('baked', manifest.snapshot_id, marker.name)" \
- && chown -R icor:icor /srv/icor/evidence
+ && chown -R icor:icor /srv/icor/evidence /srv/icor/eurocode
 
 ENV ICOR_PREVIEW_HOST_MODE=container \
     ICOR_CLIENT_RELEASE_MODE=verified \
     ICOR_PREVIEW_ASSET_ROOT=/app/client-release \
     ICOR_EVIDENCE_ACTIVE_ROOT=/srv/icor/evidence \
     ICOR_COVERAGE_DB=/var/lib/icor/production-coverage.sqlite3 \
+    ICOR_EUROCODE_DIR=/srv/icor/eurocode \
     ICOR_SNAPSHOT_TRUST_BAKED=1 \
     ICOR_PREVIEW_PORT=8080 \
     SQLITE_TMPDIR=/tmp

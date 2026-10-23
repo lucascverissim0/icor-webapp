@@ -53,12 +53,19 @@ def test_the_dockerignore_denies_history_secrets_and_the_legacy_app() -> None:
     # context would have uploaded. Deny everything and re-admit exactly one
     # path, so a new directory under .local cannot join a context silently.
     assert ".local/**" in patterns
-    assert "!.local/client-evidence/" in patterns
-    assert "!.local/client-evidence/**" in patterns
+    readmitted = {pattern for pattern in patterns if pattern.startswith("!.local/")}
+    assert readmitted == {
+        "!.local/client-evidence/",
+        "!.local/client-evidence/**",
+        "!.local/client-eurocode/",
+        "!.local/client-eurocode/**",
+    }, readmitted
     assert not any(
-        pattern.startswith(".local/") and pattern != ".local/**"
-        for pattern in patterns
+        pattern.startswith(".local/") and pattern != ".local/**" for pattern in patterns
     ), patterns
+    # The private folder holds the workbook, review batches and reports that
+    # name real codes; nothing under it may ever be re-admitted.
+    assert not any(".local/private" in pattern for pattern in patterns), patterns
     # Local agent state carries a live loopback session key.
     assert ".superpowers/" in patterns
 
@@ -88,9 +95,7 @@ def test_the_runtime_image_does_not_install_the_openai_client() -> None:
 
     manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     base = _requirement_names(manifest["project"]["dependencies"])
-    preview = _requirement_names(
-        manifest["project"]["optional-dependencies"]["preview"]
-    )
+    preview = _requirement_names(manifest["project"]["optional-dependencies"]["preview"])
     legacy = _requirement_names(manifest["dependency-groups"]["legacy"])
 
     for forbidden in ("openai", "streamlit", "streamlit-authenticator"):
@@ -138,9 +143,7 @@ def test_fly_serves_https_only_and_does_not_scale_to_zero() -> None:
 
 
 def test_the_container_entrypoint_validates_before_serving() -> None:
-    entrypoint = (ROOT / "scripts" / "run_container_preview.py").read_text(
-        encoding="utf-8"
-    )
+    entrypoint = (ROOT / "scripts" / "run_container_preview.py").read_text(encoding="utf-8")
 
     assert "validate_runner" in entrypoint
     assert "os.execv" in entrypoint
@@ -154,6 +157,7 @@ def test_the_container_entrypoint_validates_before_serving() -> None:
         "ICOR_PREVIEW_ASSET_ROOT",
         "ICOR_EVIDENCE_ACTIVE_ROOT",
         "ICOR_COVERAGE_DB",
+        "ICOR_EUROCODE_DIR",
     ),
 )
 def test_the_image_declares_every_runtime_variable_the_runner_requires(
@@ -188,3 +192,31 @@ def test_the_entrypoint_finds_the_server_on_this_platform(
 
     (tmp_path / "uvicorn").write_bytes(b"")
     assert module._server_executable("uvicorn") == tmp_path / "uvicorn"
+
+
+def test_every_repository_data_file_the_app_opens_is_copied_into_the_image() -> None:
+    """The image once omitted the identity rules, so its boot warm-up would raise."""
+
+    opened = set()
+    for path in (ROOT / "src").rglob("*.py"):
+        opened.update(re.findall(r'"data" / "([^"]+)"', path.read_text(encoding="utf-8")))
+    copied = set(re.findall(r"^COPY\s+(?:--\S+\s+)*data/(\S+)\s", _dockerfile(), re.MULTILINE))
+
+    assert {"icor_supported_models.txt", "vehicle_identity.json"} <= opened
+    assert opened <= copied, opened - copied
+
+
+def test_the_image_carries_the_trimmed_client_map_and_checks_its_review_at_build() -> None:
+    dockerfile = _dockerfile()
+
+    assert re.search(
+        r"^COPY\s+(--\S+\s+)*\.local/client-eurocode\s+/srv/icor/eurocode$",
+        dockerfile,
+        re.MULTILINE,
+    )
+    assert "ICOR_EUROCODE_DIR=/srv/icor/eurocode" in dockerfile
+    assert "reviewed_snapshot_id(manifest, ledger.path)" in dockerfile
+    assert "identity_rules_sha256()" in dockerfile
+    assert ".local/private" not in "\n".join(
+        line for line in dockerfile.splitlines() if line.strip().startswith("COPY")
+    )

@@ -25,6 +25,7 @@ HOST_MODE_VARIABLE = "ICOR_PREVIEW_HOST_MODE"
 PUBLIC_ORIGIN_VARIABLE = "ICOR_PREVIEW_PUBLIC_ORIGIN"
 TRUSTED_PROXIES_VARIABLE = "ICOR_PREVIEW_TRUSTED_PROXIES"
 PORT_VARIABLE = "ICOR_PREVIEW_PORT"
+EUROCODE_DIR_VARIABLE = "ICOR_EUROCODE_DIR"
 DEFAULT_CONTAINER_PORT = 8080
 _SUPPORTED_HOST_MODES = frozenset({CODESPACES_MODE, CONTAINER_MODE})
 
@@ -103,7 +104,7 @@ def validate_runner(
     snapshot_root: Path,
     coverage_db: Path,
 ) -> PreviewSettings:
-    host_mode(environment)
+    mode = host_mode(environment)
     settings = PreviewSettings.from_environment(environment)
     export_token = environment.get("ICOR_EXPORT_TOKEN", "")
     if len(export_token) < 32:
@@ -114,6 +115,12 @@ def validate_runner(
         raise RunnerError("active preview snapshot is unavailable")
     if not coverage_db.is_file():
         raise RunnerError("coverage database is unavailable")
+    if mode == CONTAINER_MODE:
+        # The client release opens on its Eurocode ranking; without the map
+        # that view would refuse every visitor, so do not start at all.
+        eurocode_dir = Path(environment.get(EUROCODE_DIR_VARIABLE, "").strip() or "/nonexistent")
+        if not all((eurocode_dir / name).is_file() for name in ("catalog.json", "decisions.json")):
+            raise RunnerError("the client release's Eurocode map is unavailable")
     return settings
 
 

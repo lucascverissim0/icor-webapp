@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from icor.api.app import create_app
+from icor.eurocodes.demo import demo_eurocodes
 from icor.infrastructure.demo_planner_repository import DemoPlannerRepository
 from icor.infrastructure.sqlite_coverage_repository import SQLiteCoverageRepository
 
@@ -100,6 +101,53 @@ def test_client_release_rejects_groupings_without_generation_identity(
 
     assert response.status_code == 422
     assert response.json()["code"] == "client_release_scope"
+
+
+@pytest.mark.parametrize("grouping", ["brand", "model"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/opportunities",
+        "/api/v1/opportunities/x",
+        "/api/v1/opportunities/x/fleet",
+        "/api/v1/opportunities/x/contributions",
+        "/api/v1/opportunities/x/configurations",
+    ],
+)
+def test_client_release_keeps_brand_and_model_groupings_internal_everywhere(
+    tmp_path: Path, path: str, grouping: str
+) -> None:
+    app = create_app(
+        repository=DemoPlannerRepository.from_path(FIXTURE),
+        coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        client_release=True,
+        eurocodes=demo_eurocodes(),
+    )
+    with TestClient(app) as release_client:
+        response = release_client.get(f"{path}?group_by={grouping}")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "client_release_scope"
+
+
+def test_client_release_serves_the_eurocode_ranking_and_its_detail(tmp_path: Path) -> None:
+    app = create_app(
+        repository=DemoPlannerRepository.from_path(FIXTURE),
+        coverage_repository=SQLiteCoverageRepository(tmp_path / "coverage.sqlite3"),
+        client_release=True,
+        eurocodes=demo_eurocodes(),
+    )
+    with TestClient(app) as release_client:
+        ranking = release_client.get("/api/v1/opportunities?group_by=eurocode")
+        assert ranking.status_code == 200, ranking.text
+        items = ranking.json()["items"]
+        assert items
+        group_id = items[0]["group_id"]
+        for suffix in ("", "/contributions"):
+            response = release_client.get(
+                f"/api/v1/opportunities/{group_id}{suffix}?group_by=eurocode"
+            )
+            assert response.status_code == 200, (suffix, response.text)
 
 
 def test_create_exact_coverage_then_ranking_reflects_committed_state(

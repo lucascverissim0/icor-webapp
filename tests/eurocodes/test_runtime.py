@@ -173,3 +173,21 @@ def test_the_identities_that_may_carry_a_code_include_variant_routes() -> None:
     assert eurocodes.identities_carrying("Q301") == {"zephyr|arrow", "zephyr|alpha", "zephyr|beta"}
     assert eurocodes.identities_carrying("Q101") == {"zephyr|arrow"}
     assert eurocodes.identities_carrying("Q999") == frozenset()
+
+
+def test_the_runtime_catalogue_serves_the_same_map_and_carries_no_catalogue_text() -> None:
+    import json
+
+    from icor.eurocodes.catalog import from_document, runtime_document
+
+    trimmed = runtime_document(CATALOGUE)
+    loaded = EurocodeMap.from_documents(from_document(json.loads(json.dumps(trimmed))), _document())
+    original = EurocodeMap.from_documents(CATALOGUE, _document())
+
+    assert loaded.summaries() == original.summaries()
+    assert loaded.is_catalogue_code("Q999")
+    assert loaded.allocate("zephyr|arrow", 2013, "GB") == original.allocate(
+        "zephyr|arrow", 2013, "GB"
+    )
+    for text in ("ARROW", "HAULER", "ZEPHYR"):
+        assert text not in json.dumps(trimmed)

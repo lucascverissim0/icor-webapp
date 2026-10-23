@@ -23,6 +23,7 @@ from icor.api.planner import router as planner_router
 from icor.api.registrations import router as registration_router
 from icor.api.schemas import FieldError, ProblemResponse
 from icor.api.vehicle_forecasts import router as vehicle_forecast_router
+from icor.application.client_snapshot import reviewed_snapshot_id
 from icor.application.completeness import CompletenessQueryService
 from icor.application.coverage import CoverageRepository, ProductionCoverageService
 from icor.application.evidence_review import EvidenceReviewService
@@ -206,13 +207,16 @@ def create_app(
         if client_release:
             # Grouping the whole snapshot is what makes a score comparable
             # across filters, and it takes seconds. The client release serves
-            # one grouping level, so build that population at boot rather than
-            # charging the first visitor for it; the host's health check has a
-            # grace period, a visitor has none.
-            opportunity_repository.warm(OpportunityGroupBy.MODEL_YEAR)
-            LOGGER.info(
-                "Ranked market population ready group_by=%s", OpportunityGroupBy.MODEL_YEAR
-            )
+            # Eurocodes first and model years beneath them, so build those
+            # populations at boot rather than charging the first visitor for
+            # them; the host's health check has a grace period, a visitor has none.
+            for grouping in (
+                (OpportunityGroupBy.EUROCODE, OpportunityGroupBy.MODEL_YEAR)
+                if eurocodes is not None
+                else (OpportunityGroupBy.MODEL_YEAR,)
+            ):
+                opportunity_repository.warm(grouping)
+                LOGGER.info("Ranked market population ready group_by=%s", grouping)
         elif eurocodes is not None:
             # The Eurocode ranking is the interface's first view, and allocating
             # every forecast cell takes seconds; build it while the app starts.
@@ -257,7 +261,10 @@ def create_app(
     )
     if eurocodes is not None and snapshot_manifest is not None and snapshot_ledger is not None:
         snapshot_status = SnapshotEurocodeStatus(
-            eurocodes, snapshot_ledger.path, snapshot_manifest.snapshot_id
+            eurocodes,
+            snapshot_ledger.path,
+            # A client snapshot is its reviewed full snapshot, pruned.
+            reviewed_snapshot_id(snapshot_manifest, snapshot_ledger.path),
         )
         # Measuring coverage reads every forecast cell; start it now so the
         # first visitor does not wait for it.

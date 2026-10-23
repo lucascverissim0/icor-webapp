@@ -36,7 +36,13 @@ BLOCKED_PATHS = (
     "/exports",
     "/docs",
     "/openapi.json",
+    # The audit of each Eurocode's source gaps is internal; the codes are not.
+    "/data-coverage",
+    "/api/v1/eurocodes/data-coverage",
 )
+
+# The Eurocode status is measured in the background after start-up.
+STATUS_WAIT_SECONDS = 300
 
 
 FORM_TYPE = "application/x-www-form-urlencoded"
@@ -64,12 +70,8 @@ class _UrllibTransport:
             _NoRedirect(),
         )
 
-    def open(
-        self, path: str, method: str, data: bytes | None
-    ) -> tuple[int, dict[str, str], bytes]:
-        request = urllib.request.Request(
-            f"{self.base_url}{path}", data=data, method=method
-        )
+    def open(self, path: str, method: str, data: bytes | None) -> tuple[int, dict[str, str], bytes]:
+        request = urllib.request.Request(f"{self.base_url}{path}", data=data, method=method)
         if data is not None:
             request.add_header("Content-Type", FORM_TYPE)
         try:
@@ -103,9 +105,7 @@ class _AsgiTransport:
     def __exit__(self, *exc: Any) -> None:
         self._client.__exit__(*exc)
 
-    def open(
-        self, path: str, method: str, data: bytes | None
-    ) -> tuple[int, dict[str, str], bytes]:
+    def open(self, path: str, method: str, data: bytes | None) -> tuple[int, dict[str, str], bytes]:
         response = self._client.request(
             method,
             path,
@@ -146,9 +146,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def _check_transport(checker: Checker) -> None:
     """Gate 5: HTTPS only, and the security headers that make it stick."""
 
-    checker.record(
-        "gate5:url-is-https", checker.base_url.startswith("https://"), checker.base_url
-    )
+    checker.record("gate5:url-is-https", checker.base_url.startswith("https://"), checker.base_url)
     status, headers, _ = checker.request("/auth/login")
     checker.record(
         "gate5:hsts-present",
@@ -184,9 +182,7 @@ def _check_unauthenticated(checker: Checker) -> None:
 
 
 def _sign_in(checker: Checker, username: str, password: str) -> bool:
-    payload = urllib.parse.urlencode(
-        {"username": username, "password": password}
-    ).encode()
+    payload = urllib.parse.urlencode({"username": username, "password": password}).encode()
     status, _, _ = checker.request("/auth/login", method="POST", data=payload)
     return checker.record("sign-in", status in {303, 302}, str(status))
 
@@ -211,9 +207,7 @@ def _check_smoke(checker: Checker) -> None:
     else:
         checker.record("gate7:uncertainty-method-exposed", False, str(status))
 
-    status, page = checker.json(
-        "/api/v1/opportunities?group_by=model_year&page_size=25"
-    )
+    status, page = checker.json("/api/v1/opportunities?group_by=model_year&page_size=25")
     if status == 200 and isinstance(page, dict):
         items = page.get("items") or []
         checker.record("smoke2:paginates", int(page.get("pages", 0)) > 1, str(page.get("pages")))
@@ -230,10 +224,98 @@ def _check_smoke(checker: Checker) -> None:
     # Gate 4: a mode assertion no other configuration can fake.
     status, _ = checker.json("/api/v1/opportunities?group_by=brand")
     checker.record("gate4:client-release-scope-enforced", status == 422, str(status))
+    status, _ = checker.json("/api/v1/opportunities?group_by=model")
+    checker.record("gate4:model-grouping-stays-internal", status == 422, str(status))
+
+    _check_eurocodes(checker)
 
     for path in BLOCKED_PATHS:
         code, _, _ = checker.request(path)
         checker.record(f"smoke6:blocked{path}", code == 404, str(code))
+
+
+def _check_eurocodes(checker: Checker) -> None:
+    """The client release opens on Eurocodes; prove they are served and current.
+
+    Details are counts and statuses only: this verdict is pasted into the
+    handoff, and real codes are ICOR's private data.
+    """
+
+    import time
+
+    deadline = time.monotonic() + STATUS_WAIT_SECONDS
+    status, state = checker.json("/api/v1/eurocodes/status")
+    while (
+        status == 200
+        and isinstance(state, dict)
+        and state.get("loaded")
+        and not state.get("coverage")
+        and time.monotonic() < deadline
+    ):
+        time.sleep(2)
+        status, state = checker.json("/api/v1/eurocodes/status")
+    state = state if isinstance(state, dict) else {}
+    checker.record("eurocodes:loaded", status == 200 and state.get("loaded") is True, str(status))
+    warnings = state.get("warnings") or []
+    checker.record(
+        "eurocodes:reviewed-for-this-snapshot", not warnings, f"{len(warnings)} warnings"
+    )
+    checker.record(
+        "eurocodes:coverage-measured",
+        bool(state.get("coverage")),
+        str(len(state.get("coverage") or ())),
+    )
+
+    status, ranking = checker.json("/api/v1/opportunities?group_by=eurocode&page_size=25")
+    items = ranking.get("items") if status == 200 and isinstance(ranking, dict) else None
+    checker.record("eurocodes:ranking-served", bool(items), str(status))
+    if not items:
+        return
+    checker.record(
+        "eurocodes:every-row-is-a-code",
+        all(isinstance(item.get("eurocode"), dict) for item in items),
+        f"{len(items)} rows",
+    )
+    totals = ranking.get("eurocode_totals") or {}
+    outcomes = sum(
+        int(totals.get(key, 0))
+        for key in (
+            "single_units",
+            "shared_units",
+            "outside_units",
+            "unassignable_units",
+            "unreviewed_units",
+        )
+    )
+    model_status, model_years = checker.json(
+        "/api/v1/opportunities?group_by=model_year&page_size=1"
+    )
+    market = (
+        int(model_years["summary"]["base_units"])
+        if model_status == 200 and isinstance(model_years, dict)
+        else -1
+    )
+    checker.record(
+        "eurocodes:outcomes-cover-the-market",
+        outcomes == market,
+        f"difference {outcomes - market} units",
+    )
+    code = items[0]["eurocode"]["code"]
+    search_status, found = checker.json(
+        f"/api/v1/opportunities?group_by=eurocode&q={urllib.parse.quote(code)}"
+    )
+    checker.record(
+        "eurocodes:search-by-code",
+        search_status == 200
+        and isinstance(found, dict)
+        and any(
+            (item.get("eurocode") or {}).get("code") == code for item in found.get("items") or ()
+        ),
+        str(search_status),
+    )
+    group_id = urllib.parse.quote(items[0]["group_id"], safe="")
+    detail_status, _ = checker.json(f"/api/v1/opportunities/{group_id}?group_by=eurocode")
+    checker.record("eurocodes:detail-served", detail_status == 200, str(detail_status))
 
 
 def _check_sign_out(checker: Checker) -> None:
@@ -269,11 +351,12 @@ def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
     asset_root = ROOT / ".local" / "client-release"
     snapshot_root = ROOT / ".local" / "client-evidence"
     coverage_db = Path(
-        os.environ.get(
-            "ICOR_COVERAGE_DB", str(ROOT / ".local" / "production-coverage.sqlite3")
-        )
+        os.environ.get("ICOR_COVERAGE_DB", str(ROOT / ".local" / "production-coverage.sqlite3"))
     )
 
+    eurocode_dir = Path(
+        os.environ.get("ICOR_EUROCODE_DIR", str(ROOT / ".local" / "client-eurocode"))
+    )
     password = secrets.token_urlsafe(32)
     environment = {
         **os.environ,
@@ -286,6 +369,8 @@ def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
         "ICOR_PREVIEW_USERS": json.dumps({username: PasswordHasher().hash(password)}),
         "ICOR_PREVIEW_SESSION_SECRET": session_secret(),
         "ICOR_EXPORT_TOKEN": session_secret(),
+        # What the image declares; `create_app` reads it from the process.
+        "ICOR_EUROCODE_DIR": str(eurocode_dir),
     }
     settings = validate_runner(
         environment,
@@ -294,6 +379,7 @@ def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
         coverage_db=coverage_db,
     )
     os.environ["ICOR_COVERAGE_DB"] = str(coverage_db)
+    os.environ["ICOR_EUROCODE_DIR"] = str(eurocode_dir)
 
     started = time.monotonic()
     app = create_preview_app(
@@ -311,6 +397,7 @@ def _local_app(username: str) -> tuple[Any, str, dict[str, Any]]:
         "snapshot_root": str(snapshot_root),
         "snapshot_id": getattr(manifest, "snapshot_id", None),
         "snapshot_scope": getattr(manifest, "scope", None),
+        "eurocode_dir": str(eurocode_dir),
         "public_origin_declared": environment["ICOR_PREVIEW_PUBLIC_ORIGIN"],
         "trust_baked_snapshot": False,
         "boot_seconds": boot_seconds,
@@ -326,17 +413,13 @@ def _run(checker: Checker, username: str, password: str) -> None:
         _check_sign_out(checker)
 
 
-def _verdict(
-    checker: Checker, mode: str, target: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def _verdict(checker: Checker, mode: str, target: dict[str, Any] | None = None) -> dict[str, Any]:
     local = mode == "local"
     results = checker.results
     for item in results:
         # An in-process scope declares https; it does not negotiate it. Every
         # other check ran against real middleware and is observed.
-        item["evidence"] = (
-            "asserted" if local and item["check"] in LOCAL_DEFERRED else "observed"
-        )
+        item["evidence"] = "asserted" if local and item["check"] in LOCAL_DEFERRED else "observed"
     failed = [item for item in results if not item["passed"]]
     verdict: dict[str, Any] = {
         "url": checker.base_url,

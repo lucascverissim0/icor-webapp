@@ -45,6 +45,11 @@ web/test-results/
 .local/**
 !.local/client-evidence/
 !.local/client-evidence/**
+# The trimmed client Eurocode map (two files). Never negate anything under
+# .local/private: a directory negation there would admit the source workbook,
+# the review batches and every report naming real codes.
+!.local/client-eurocode/
+!.local/client-eurocode/**
 
 # Local agent state, which includes a live loopback session key under
 # .superpowers/*/state/server-info.

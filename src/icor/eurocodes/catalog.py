@@ -604,6 +604,44 @@ def to_document(catalogue: Catalogue) -> dict[str, Any]:
     }
 
 
+def runtime_document(catalogue: Catalogue) -> dict[str, Any]:
+    """The catalogue as the running app needs it: which rows carry which code.
+
+    Loading a map reads only codes, their row numbers and the source hash the
+    decisions were reviewed against. A deployed image carries this document, so
+    no description, make or rejected source row leaves the private folder.
+    """
+
+    return {
+        "format": DOCUMENT_FORMAT,
+        "version": DOCUMENT_VERSION,
+        "source": {"sha256": catalogue.source_sha256, "rows": catalogue.source_rows},
+        "rows": [
+            {
+                "row": row.row,
+                "code": row.code,
+                "brand": "",
+                "makes": [],
+                "description": "",
+                "sop": None,
+                "eop": None,
+                "start": None,
+                "end": None,
+                "drive": None,
+                "bodies": [],
+                "scope": "",
+                "years": [],
+                "flags": [],
+            }
+            for row in sorted(catalogue.rows, key=lambda row: row.row)
+        ],
+        "rejected": [
+            {"row": row.row, "reason": "", "values": []}
+            for row in sorted(catalogue.rejected, key=lambda row: row.row)
+        ],
+    }
+
+
 def from_document(document: Mapping[str, Any]) -> Catalogue:
     if document.get("format") != DOCUMENT_FORMAT or document.get("version") != DOCUMENT_VERSION:
         raise ValueError("not an ICOR Eurocode catalogue document")

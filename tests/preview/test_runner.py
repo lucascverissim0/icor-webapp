@@ -12,8 +12,7 @@ def _valid_environment() -> dict[str, str]:
     return {
         "CODESPACES": "true",
         "ICOR_PREVIEW_USERS": (
-            '{"Lucas":"$argon2id$v=19$m=65536,t=3,p=4$'
-            'c2FsdHNhbHRzYWx0c2FsdA$YWJjZA"}'
+            '{"Lucas":"$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2FsdA$YWJjZA"}'
         ),
         "ICOR_PREVIEW_SESSION_SECRET": "c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M",
         "ICOR_EXPORT_TOKEN": "e" * 32,
@@ -102,10 +101,7 @@ def test_devcontainer_never_autostarts_or_publishes_preview() -> None:
             "ghcr.io/devcontainers/features/sshd@sha256:"
             "f5251b8e4325f68f7280973c6cd65daff414449c66f240621502d4e8e74eb7ee"
         ),
-        "integrity": (
-            "sha256:"
-            "f5251b8e4325f68f7280973c6cd65daff414449c66f240621502d4e8e74eb7ee"
-        ),
+        "integrity": ("sha256:f5251b8e4325f68f7280973c6cd65daff414449c66f240621502d4e8e74eb7ee"),
     }
     assert "public" not in serialized
     for forbidden in ("password", "argon2", "session_secret", "icor_preview_users", "cors", "xsrf"):
@@ -256,3 +252,29 @@ def test_container_port_defaults_only_when_unset() -> None:
 
     assert container_port({}) == DEFAULT_CONTAINER_PORT
     assert container_port({"ICOR_PREVIEW_PORT": "9000"}) == 9000
+
+
+def test_container_mode_refuses_to_serve_without_its_eurocode_map(tmp_path: Path) -> None:
+    """Eurocodes are the client release's first view; without the map it would 422."""
+
+    from icor.eurocodes.demo import write_demo_eurocodes
+    from icor.preview.runner import RunnerError, validate_runner
+
+    assets = tmp_path / "dist"
+    assets.mkdir()
+    (assets / "index.html").write_text("app", encoding="utf-8")
+    snapshot = tmp_path / "evidence"
+    snapshot.mkdir()
+    (snapshot / "active.json").write_text("{}", encoding="utf-8")
+    coverage = tmp_path / "coverage.sqlite3"
+    coverage.touch()
+    roots = {"asset_root": assets, "snapshot_root": snapshot, "coverage_db": coverage}
+    environment = _container_environment()
+
+    with pytest.raises(RunnerError, match="Eurocode"):
+        validate_runner(environment, **roots)
+    with pytest.raises(RunnerError, match="Eurocode"):
+        validate_runner({**environment, "ICOR_EUROCODE_DIR": str(tmp_path / "none")}, **roots)
+
+    folder = write_demo_eurocodes(tmp_path / "eurocode")
+    validate_runner({**environment, "ICOR_EUROCODE_DIR": str(folder)}, **roots)

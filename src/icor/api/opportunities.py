@@ -75,15 +75,34 @@ def _query(
     )
 
 
-def _problem(
-    request: Request, *, status_code: int, code: str, message: str
-) -> JSONResponse:
+def _problem(request: Request, *, status_code: int, code: str, message: str) -> JSONResponse:
     body = ProblemResponse(
         code=code,
         message=message,
         correlation_id=request.state.correlation_id,
     )
     return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"))
+
+
+# What the verified client release serves: Eurocodes, its first view, and the
+# source model years they rest on. Brand and model groupings stay internal.
+CLIENT_RELEASE_GROUPINGS = frozenset({OpportunityGroupBy.EUROCODE, OpportunityGroupBy.MODEL_YEAR})
+
+
+def _outside_client_scope(request: Request, group_by: OpportunityGroupBy) -> JSONResponse | None:
+    if (
+        getattr(request.app.state, "client_release", False)
+        and group_by not in CLIENT_RELEASE_GROUPINGS
+    ):
+        return _problem(
+            request,
+            status_code=422,
+            code="client_release_scope",
+            message=(
+                "The verified client release supports Eurocode and model-year opportunities only."
+            ),
+        )
+    return None
 
 
 @router.get(
@@ -106,22 +125,12 @@ def opportunities(
     sort: OpportunitySort = OpportunitySort.SCORE,
     icor_worked: bool | None = None,
 ) -> OpportunityPageResponse | JSONResponse:
-    if (
-        getattr(request.app.state, "client_release", False)
-        and group_by is not OpportunityGroupBy.MODEL_YEAR
-    ):
-        return _problem(
-            request,
-            status_code=422,
-            code="client_release_scope",
-            message="The verified client release supports model-year opportunities only.",
-        )
+    if (refused := _outside_client_scope(request, group_by)) is not None:
+        return refused
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
-    result = service.list(
-        _query(group_by, market, horizon, page, page_size, q, sort, icor_worked)
-    )
+    result = service.list(_query(group_by, market, horizon, page, page_size, q, sort, icor_worked))
     return OpportunityPageResponse.model_validate(result)
 
 
@@ -137,16 +146,8 @@ def opportunity_detail(
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
 ) -> OpportunityRowResponse | JSONResponse:
-    if (
-        getattr(request.app.state, "client_release", False)
-        and group_by is not OpportunityGroupBy.MODEL_YEAR
-    ):
-        return _problem(
-            request,
-            status_code=422,
-            code="client_release_scope",
-            message="The verified client release supports model-year opportunities only.",
-        )
+    if (refused := _outside_client_scope(request, group_by)) is not None:
+        return refused
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
@@ -173,16 +174,8 @@ def opportunity_fleet(
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
 ) -> list[OpportunityFleetEstimateResponse] | JSONResponse:
-    if (
-        getattr(request.app.state, "client_release", False)
-        and group_by is not OpportunityGroupBy.MODEL_YEAR
-    ):
-        return _problem(
-            request,
-            status_code=422,
-            code="client_release_scope",
-            message="The verified client release supports model-year opportunities only.",
-        )
+    if (refused := _outside_client_scope(request, group_by)) is not None:
+        return refused
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
@@ -209,16 +202,8 @@ def opportunity_contributions(
     market: Annotated[list[str] | None, Query()] = None,
     horizon: Annotated[list[int] | None, Query()] = None,
 ) -> list[OpportunityContributionResponse] | JSONResponse:
-    if (
-        getattr(request.app.state, "client_release", False)
-        and group_by is not OpportunityGroupBy.MODEL_YEAR
-    ):
-        return _problem(
-            request,
-            status_code=422,
-            code="client_release_scope",
-            message="The verified client release supports model-year opportunities only.",
-        )
+    if (refused := _outside_client_scope(request, group_by)) is not None:
+        return refused
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
@@ -247,22 +232,12 @@ def opportunity_configurations(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> list[OpportunityDrillDownResponse] | JSONResponse:
-    if (
-        getattr(request.app.state, "client_release", False)
-        and group_by is not OpportunityGroupBy.MODEL_YEAR
-    ):
-        return _problem(
-            request,
-            status_code=422,
-            code="client_release_scope",
-            message="The verified client release supports model-year opportunities only.",
-        )
+    if (refused := _outside_client_scope(request, group_by)) is not None:
+        return refused
     service = _opportunity_service(request)
     if service is None:
         return _snapshot_unavailable(request)
-    rows = service.drill_down(
-        group_id, _query(group_by, market, horizon), page, page_size
-    )
+    rows = service.drill_down(group_id, _query(group_by, market, horizon), page, page_size)
     if not rows:
         return _problem(
             request,
@@ -284,10 +259,7 @@ def production_coverage(
     service = _coverage_service(request)
     if service is None:
         return _snapshot_unavailable(request)
-    return [
-        ProductionCoverageResponse.model_validate(row)
-        for row in service.list_all()
-    ]
+    return [ProductionCoverageResponse.model_validate(row) for row in service.list_all()]
 
 
 def _command(payload: ProductionCoverageRequest) -> CreateCoverageCommand:

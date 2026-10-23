@@ -93,9 +93,7 @@ def test_a_manifest_written_before_scope_existed_still_loads_as_full(
     )
     payload = canonical_json_bytes(manifest).decode("utf-8")
     assert '"scope"' in payload
-    legacy = payload.replace(f'"scope":"{FULL_SCOPE}",', "").replace(
-        f',"scope":"{FULL_SCOPE}"', ""
-    )
+    legacy = payload.replace(f'"scope":"{FULL_SCOPE}",', "").replace(f',"scope":"{FULL_SCOPE}"', "")
     path = tmp_path / "snapshot.json"
     path.write_text(legacy, encoding="utf-8")
 
@@ -144,9 +142,7 @@ def test_pruning_keeps_every_table_present(tmp_path: Path) -> None:
     with sqlite3.connect(path) as connection:
         present = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
 
     for table in (*PRUNED_TABLES, *REQUIRED_TABLES):
@@ -161,3 +157,52 @@ def test_a_pruned_snapshot_missing_served_rows_is_refused(tmp_path: Path) -> Non
 
     with pytest.raises(ClientSnapshotError, match="served tables are empty"):
         assert_client_scope_is_servable(path)
+
+
+def _release_table(path: Path, sha256: str = "a" * 64) -> Path:
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE source_release (release_id TEXT PRIMARY KEY, sha256 TEXT)")
+    connection.execute("INSERT INTO source_release VALUES ('eea-2024', ?)", (sha256,))
+    connection.commit()
+    connection.close()
+    return path
+
+
+def _manifest(scope: str) -> SnapshotManifest:
+    return SnapshotManifest(
+        snapshot_id=_identity(scope),
+        status=SnapshotStatus.ACTIVE,
+        built_at=BUILD_AS_OF,
+        deterministic_seed=20260922,
+        release_ids=("eea-2024",),
+        versions=_versions(),
+        database_sha256="b" * 64,
+        observation_count=1,
+        published_value_count=0,
+        warnings=(),
+        scope=scope,
+    )
+
+
+def test_a_client_snapshot_answers_with_the_full_snapshot_it_was_derived_from(
+    tmp_path: Path,
+) -> None:
+    """Eurocode decisions are reviewed on the full snapshot; the client copy is that
+    snapshot pruned, so it must be recognised as reviewed rather than warn."""
+
+    from icor.application.client_snapshot import reviewed_snapshot_id
+
+    database = _release_table(tmp_path / "evidence.sqlite3")
+
+    assert reviewed_snapshot_id(_manifest(CLIENT_RELEASE_SCOPE), database) == _identity(FULL_SCOPE)
+    assert reviewed_snapshot_id(_manifest(FULL_SCOPE), database) == _identity(FULL_SCOPE)
+
+
+def test_a_client_snapshot_with_other_releases_is_not_mistaken_for_the_reviewed_one(
+    tmp_path: Path,
+) -> None:
+    from icor.application.client_snapshot import reviewed_snapshot_id
+
+    database = _release_table(tmp_path / "evidence.sqlite3", sha256="c" * 64)
+
+    assert reviewed_snapshot_id(_manifest(CLIENT_RELEASE_SCOPE), database) != _identity(FULL_SCOPE)

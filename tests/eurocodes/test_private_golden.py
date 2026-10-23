@@ -62,3 +62,31 @@ def test_every_golden_case_allocates_as_verified(eurocodes: EurocodeMap, cases: 
                 f"expected {expected}, got {actual} ({case['why']})"
             )
     assert not mismatches, "\n".join(mismatches)
+
+
+def test_the_runtime_catalogue_loads_the_same_map_without_catalogue_text(
+    eurocodes: EurocodeMap, cases: list[dict]
+) -> None:
+    """The deployed image carries the trimmed catalogue; it must change nothing served."""
+
+    from icor.eurocodes.catalog import from_document, runtime_document
+
+    full = from_document(json.loads(CATALOGUE.read_text(encoding="utf-8")))
+    trimmed = runtime_document(full)
+    loaded = EurocodeMap.from_documents(
+        from_document(json.loads(json.dumps(trimmed))),
+        json.loads(DECISIONS.read_text(encoding="utf-8")),
+    )
+
+    assert loaded.summaries() == eurocodes.summaries()
+    assert loaded.catalogue_sha256 == eurocodes.catalogue_sha256
+    for case in cases:
+        arguments = (case["identity"], case["year"], case["geography"])
+        assert loaded.allocate(*arguments, raw_model=case["raw_model"]) == eurocodes.allocate(
+            *arguments, raw_model=case["raw_model"]
+        )
+    text = json.dumps(trimmed)
+    # A two-to-four character description can occur inside a code or a number.
+    assert not any(len(row.description) > 4 and row.description in text for row in full.rows)
+    assert all(not item["description"] and not item["makes"] for item in trimmed["rows"])
+    assert all(not item["values"] for item in trimmed["rejected"])

@@ -64,15 +64,47 @@ def _failures(root: Path) -> list[str]:
         extra = {p.name for p in directory.iterdir()} - SNAPSHOT_FILES
         if extra:
             problems.append(
-                f"{directory.name} holds files the store refuses: "
-                f"{', '.join(sorted(extra))}"
+                f"{directory.name} holds files the store refuses: {', '.join(sorted(extra))}"
             )
+    return problems
+
+
+def _eurocode_failures(directory: Path, manifest: object, database: Path) -> list[str]:
+    """The image's build-time Eurocode assertions, plus what the folder may hold."""
+
+    from icor.application.client_snapshot import reviewed_snapshot_id
+    from icor.eurocodes.runtime import EurocodeMap
+    from icor.evidence.vehicle_identity import identity_rules_sha256
+
+    if not directory.is_dir():
+        return ["the client Eurocode map is missing; run scripts/build_client_eurocodes.py"]
+    names = sorted(path.name for path in directory.iterdir())
+    if names != ["catalog.json", "decisions.json"]:
+        return [f"the client Eurocode folder must hold exactly the two map files, not {names}"]
+    catalogue = json.loads((directory / "catalog.json").read_text(encoding="utf-8"))
+    if any(row.get("description") or row.get("makes") for row in catalogue.get("rows", ())):
+        return ["the client catalogue is not trimmed; it would carry catalogue text"]
+    try:
+        metadata = EurocodeMap.from_directory(directory).decisions.metadata
+    except (OSError, ValueError, KeyError) as error:
+        return [f"the client Eurocode map does not load ({type(error).__name__})"]
+    problems = []
+    if metadata.get("snapshot_id") != reviewed_snapshot_id(manifest, database):  # type: ignore[arg-type]
+        problems.append("the Eurocode decisions were reviewed for another snapshot")
+    if metadata.get("identity_rules_sha256") != identity_rules_sha256():
+        problems.append("the Eurocode decisions were reviewed under other identity rules")
     return problems
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, help="the evidence root the image bakes")
+    parser.add_argument(
+        "--eurocode-dir",
+        type=Path,
+        default=REPO / ".local" / "client-eurocode",
+        help="the trimmed Eurocode map the image bakes beside it",
+    )
     arguments = parser.parse_args()
     root = arguments.root.resolve()
 
@@ -93,11 +125,17 @@ def main() -> int:
         "database_bytes": database.stat().st_size,
         "observation_count": manifest.observation_count,
     }
+    problems = []
     if not report["ready"]:
-        report["problems"] = [
+        problems.append(
             f"scope is {manifest.scope!r}; the image asserts "
             f"{CLIENT_RELEASE_SCOPE!r} and would fail the build"
-        ]
+        )
+    problems += _eurocode_failures(arguments.eurocode_dir.resolve(), manifest, database)
+    report["eurocode_dir"] = str(arguments.eurocode_dir.resolve())
+    if problems:
+        report["ready"] = False
+        report["problems"] = problems
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ready"] else 1
 

@@ -113,4 +113,8 @@ class ClientReleaseMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if path == "/api/v1/registrations/summary":
             return await call_next(request)
+        # Whether the Eurocode map is loaded and current. The data-coverage
+        # report beside it names source gaps and stays internal.
+        if path == "/api/v1/eurocodes/status":
+            return await call_next(request)
         return JSONResponse({"detail": "Not Found"}, status_code=404)

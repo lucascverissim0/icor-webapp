@@ -23,10 +23,16 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from icor.domain.snapshots import CLIENT_RELEASE_SCOPE, SnapshotManifest, SnapshotStatus
+from icor.domain.snapshots import (
+    CLIENT_RELEASE_SCOPE,
+    FULL_SCOPE,
+    SnapshotManifest,
+    SnapshotStatus,
+)
 from icor.evidence.serialization import canonical_json_bytes, sha256_file
 from icor.evidence.validation import SnapshotValidator
 from icor.infrastructure.sqlite_evidence_repository import SQLiteEvidenceRepository
@@ -86,9 +92,7 @@ def assert_client_scope_is_servable(database_path: Path) -> None:
     try:
         present = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
         missing = [table for table in (*PRUNED_TABLES, *REQUIRED_TABLES) if table not in present]
         if missing:
@@ -107,6 +111,38 @@ def assert_client_scope_is_servable(database_path: Path) -> None:
             )
     finally:
         connection.close()
+
+
+def _identity(manifest: SnapshotManifest, release_hashes: Mapping[str, str], scope: str) -> str:
+    from icor.application.snapshot_build import snapshot_id_for
+
+    return snapshot_id_for(
+        build_as_of=manifest.built_at,
+        deterministic_seed=manifest.deterministic_seed,
+        versions=manifest.versions,
+        release_artifact_hashes=tuple(
+            (release_id, release_hashes[release_id]) for release_id in manifest.release_ids
+        ),
+        scope=scope,
+    )
+
+
+def reviewed_snapshot_id(manifest: SnapshotManifest, database_path: Path) -> str:
+    """The snapshot id Eurocode review decisions and calibrations are keyed by.
+
+    They are made on the full snapshot. A client snapshot is that snapshot with
+    unserved rows removed, so it answers with the full snapshot's id, recomputed
+    from its own release table rather than trusted from any recorded field.
+    """
+
+    if manifest.scope != CLIENT_RELEASE_SCOPE:
+        return manifest.snapshot_id
+    connection = sqlite3.connect(f"{database_path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        hashes = dict(connection.execute("SELECT release_id, sha256 FROM source_release"))
+    finally:
+        connection.close()
+    return _identity(manifest, hashes, FULL_SCOPE)
 
 
 def derive_client_snapshot(
@@ -145,21 +181,14 @@ def derive_client_snapshot(
 
     repository = SQLiteEvidenceRepository(database_path)
 
-    from icor.application.snapshot_build import snapshot_id_for
-
     # Promotion recomputes identity from `source_release` in the database, so
     # the hashes must come from exactly there and nowhere else.
-    releases_by_id = {item.release_id: item for item in repository.list_releases()}
-    snapshot_id = snapshot_id_for(
-        build_as_of=manifest.built_at,
-        deterministic_seed=manifest.deterministic_seed,
-        versions=manifest.versions,
-        release_artifact_hashes=tuple(
-            (release_id, releases_by_id[release_id].sha256)
-            for release_id in manifest.release_ids
-        ),
-        scope=CLIENT_RELEASE_SCOPE,
-    )
+    hashes = {item.release_id: item.sha256 for item in repository.list_releases()}
+    if _identity(manifest, hashes, FULL_SCOPE) != manifest.snapshot_id:
+        # A client snapshot is later recognised as its source by recomputing
+        # this id (`reviewed_snapshot_id`); one that cannot be must not ship.
+        raise ClientSnapshotError("the source snapshot id cannot be recomputed from its releases")
+    snapshot_id = _identity(manifest, hashes, CLIENT_RELEASE_SCOPE)
     derived = replace(
         manifest,
         snapshot_id=snapshot_id,
