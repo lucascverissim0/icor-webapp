@@ -8762,3 +8762,108 @@ not touched.
 **Next:**
 - Lucas: restart the other ICOR Claude session so it picks up the hook.
 - Commit when Lucas asks. Stage `.claude/settings.json` alone: `.claude/scheduled_tasks.lock` is session state and stays out.
+
+## 2026-10-23 (night) — Phase 4: Eurostat age anchor in the app; review fixes; client tooling hardened (Claude Code)
+
+**Lucas's decisions this session:**
+- "We need to have an app that runs for the end of the week-end tops. Make no mistakes."
+- Target: **deploy with Phase 4 included.**
+- Phase 4 may change published numbers only if gated.
+- The range gate failed on LT, so Lucas chose **"Anchored estimates, no measured range"**: the anchor ships for point estimates, and the labelled assumption ranges stay.
+- **Deploying is still Lucas's action.** It needs flyctl, a Fly login, the three secrets via `fly secrets import` and the OpenAI key revoked. Then an explicit go.
+
+**Sonnet review of `da4d87a..48d4d59`:** no high-severity issue; confidentiality held. Fixed:
+- In `fdfb63b`, the harness now matches the app:
+  - `per_code_certain` counts only `single` allocations, as the ranking does;
+  - lost labels and publisher mismatch apply per vehicle, not per cohort;
+  - a band missing between usable ones takes its younger neighbour;
+  - a country with no scored code fails the gate;
+  - a bin needs at least 3 donor countries (`MIN_BIN_COUNTRIES`).
+- In `594c20b` (by a Sonnet agent, reviewed):
+  - `src/icor/eurocodes/client_map.py` re-serialises the client `decisions.json` from the fields the loader reads, dropping `why`, `review` and `rounds`; the preflight refuses foreign keys;
+  - `build_client_eurocodes.py` refuses a destination inside, containing or equal to the source or `.local/private`, and swaps atomically;
+  - `backup_private_data.py` compares the committed tree with the manifest before pushing;
+  - `verify_client_release.py --local` always loads `.local/client-eurocode` (or `--eurocode-dir`).
+- Not changed, recorded:
+  - the client `/eurocodes/status` returns the private workbook's sha256; a hash reveals no content;
+  - the client map ships family and code `label`s by design, since the ranking shows them; 85 of 2,545 match catalogue wording.
+
+**Harness v3** (`scripts/backtest_code_ranges.py`):
+- `raw` is now the app's own model per market, including that market's net retention and age anchor. Before, it used the bare curve.
+- The band-anchored alternative still anchors the bare curve.
+- `--age-anchor FILE` runs a what-if and writes no status.
+- Tables are stored as ratios (`allow_nan=False`); `countries_without_anchor` is recorded.
+
+**Age anchor** (`b41870b`):
+- Files: `src/icor/forecasting/age_anchor.py`, `AgeAnchoredSurvivalModel` and `load_age_anchored_survival_model` in `survival.py`, and `scripts/calibrate_age_anchor.py`, whose artifact is `survival_curves/eurostat_age_anchor.json`.
+- **Method:**
+  - per band, Eurostat `road_eqs_carage` official cars ÷ (Eurostat new cars × the net-retained curve), from the newest clean year up to 2025;
+  - within 3% means 1; ages outside the usable bands take the nearest band;
+  - it may exceed 1 (used imports).
+- **Kept** only where anchors fitted to 2022 predict every 2023–25 band better than none, with the same per-cell rule as net retention. The rule was fixed before seeing results; a median-of-3 variant was measured and was worse, so it was not adopted.
+- **Applied** to registration cohorts only. Register-observed cars, and the register-vs-registrations lower-bound choice, use `unanchored` (`GenerationPlanningService.ageing`). Reason code `eurostat-age-anchored`. Method `uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1+eurostat-age-anchor-v1`.
+- **HR excluded** (`5cac178`):
+  - the snapshot's HR registrations exceed Eurostat's new cars by 16–35% from 2021 (used imports); every other anchored market is within about 10%;
+  - anchoring HR took its youngest band to 131% of official, and 2–5 years from 67% to 114%;
+  - the reason is in the artifact's `excluded_markets`. **HR's registrations double-count imports even unanchored** (110% at <2 y): an open data defect.
+- **Anchored markets (11):** AT, CY, DE, ES, FI, IT, LI, LV, NL, PT, RO. Rejected by the time test include CZ, DK, EE, LT, LU, SI, FR, IE, PL and others.
+- **Out-of-time band error** (mean |model/official−1|, fit ≤2022, tested 2023–25):
+  - DE .085→.042, IT .099→.010, NL .233→.034, PT .199→.017, FI .186→.029, ES .028→.016, AT .067→.029;
+  - LT rejected: .288→.346, as its import mix shifts.
+
+**Hidden-register gate with the app's anchored model** (8 registers, codes ≥1,000):
+- pooled **77.0%** (74.6% before), with CZ .69, DK .69, EE .81, FI .95, **LT .49**, LU .95, NL .78, SI .77;
+- **FAIL on LT**, so no measured range ships, and the status document says `failed`;
+- per-code WAPE: FI .47→.39 and NL .46→.36; the others are unchanged (not anchored);
+- degraded: lost vehicles .734, mismatch .767, first-word names .769;
+- Spain: 3.1% certainly above P90;
+- the band-anchored alternative passes (78.1%), the oracle level fails (LT .47).
+
+**`b71b1de`:** `snapshot_data_coverage._fleet` ages register cohorts without the anchor, as planning does. Without this, an anchored snapshot is refused "as built with another curve". A discriminating test was added; it failed before the fix.
+
+**Snapshots:**
+- `snapshot-f855028c8a5da55154b2` (anchored, HR included) was built, promoted and marked verified. It is **still active but superseded by `5cac178`**: the HR-excluded rebuild was interrupted by a shutdown and must be redone.
+- At f855028, against b75d917: AT ×1.067, CY ×2.19, DE ×0.979, ES ×1.027, IT ×1.107, LV ×1.30, PT ×1.32, RO ×1.51, HR ×1.95 (now excluded). Every other market is unchanged, and the row counts are identical.
+- `b75d917` and its candidate copy were deleted, along with its private backtest and calibration files.
+
+**Eurocode review round `snapshot-f855028`** (private `review/rounds/snapshot-f855028/`):
+- `prepare --only-undecided` selected 5 identities (about 1,000 units, 2028), needed because anchored demand grew;
+- two blind Sonnet reviewers agreed on 4 of 5, with unit agreement .8219;
+- the one difference (a single identity's years from 2003) was adjudicated to reviewer A, following where the catalogue files those rows;
+- three new families and existing families copied unchanged;
+- merged: 817 families, 1,746 identities, reviewed share of 2028 demand 0.99; backup `decisions.before-snapshot-f855028.json`.
+
+**Process note:** another session added MAC-COOL (`tools/heavy.sh`, a PreToolUse hook and an AGENTS.md section), uncommitted and not mine. Heavy jobs now run as `tools/heavy.sh …`. The hook also refuses any command that merely names a heavy script, including ruff or an edit, so use the Edit tool or a glob.
+
+### CHECKPOINT at shutdown (2026-10-23, night) — resume here
+The exact resume steps are in Lucas's plan `~/.claude/plans/pasted-content-id-22c6-ok-proceed-twinkling-book.md`. In short:
+
+**State:**
+- **Active snapshot `f855028` is superseded.** Rebuild with `tools/heavy.sh bash .local/run_build.sh ~/ICOR <log>`, after deleting any partial `.local/evidence/candidates/*` and a stale `/tmp/epsa-heavy.lock` (check its pid is dead first).
+- **Client artifacts are stale:**
+  - `.local/client-evidence` `dac0529` was derived from f855028;
+  - `.local/client-eurocode` and `.local/client-release` predate it.
+  - Redo them after the rebuild.
+- **Private `decisions.json`** is stamped to f855028. Re-stamp it with a new round:
+  - `prepare --only-undecided`;
+  - if nothing is selected, re-merge `review/rounds/snapshot-f855028/decided/mixed-01.json`.
+- **Private backup** is behind (last pushed before the review round).
+- **Planner service** is stopped. The CEPiK crawl stopped with the shutdown and is resumable.
+- **Uncommitted MAC-COOL files belong to another session:** `AGENTS.md`, `ci.yml`, `playwright.config.ts`, `tools/`, `.claude/settings.json`, `tests/tools/`. Do not stage them.
+
+**Order:**
+1. rebuild, compare, promote, verify, mark-verified;
+2. `backtest_code_ranges`;
+3. re-stamp the review;
+4. regenerate the report;
+5. derive, promote and verify the client snapshot, build the client map, preflight, `verify_client_release --local` (`failed: 0`), and the verified bundle;
+6. full gates via `tools/heavy.sh`;
+7. handoff, leak scan, push;
+8. backup and `--verify`;
+9. restart the planner service.
+
+**Deploy only after Lucas:**
+- revokes the OpenAI key;
+- installs flyctl and logs in;
+- sets the 3 secrets via `fly secrets import`;
+- says go.
