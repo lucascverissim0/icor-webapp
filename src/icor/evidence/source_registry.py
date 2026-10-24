@@ -42,7 +42,8 @@ OFFICIAL_SOURCE_VERSIONS = SnapshotVersions(
     confidence_method="source-evidence-v1",
     estimation_method="register-years-archive-stock-anchored-cohorts-v6",
     survival_method=(
-        "uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1+eurostat-age-anchor-v1"
+        "uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1"
+        "+eurostat-age-anchor-v1-fa4840774888"
     ),
     hazard_method="france-insurance-windshield-hazard-v2",
     forecast_method="validated-recency-damped-ensemble-v2",

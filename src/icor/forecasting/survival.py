@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 
 from icor.forecasting.survival_calibration import (
@@ -296,6 +297,7 @@ class AgeAnchoredSurvivalModel:
         anchors: Mapping[str, tuple[Decimal, ...]],
         *,
         method: str,
+        artifact_digest: str | None = None,
     ) -> None:
         if not method.strip():
             raise ValueError("the age anchor method is required")
@@ -306,7 +308,9 @@ class AgeAnchoredSurvivalModel:
         self.band = unanchored.band
         self.calibrated_geography = unanchored.calibrated_geography
         self.anchors = dict(anchors)
-        self.method = f"{unanchored.method}+{method}"
+        self.method = f"{unanchored.method}+{method}" + (
+            f"-{artifact_digest}" if artifact_digest else ""
+        )
         self.assumption_ids = (
             *unanchored.assumption_ids,
             f"survival-{method}-markets-{'-'.join(sorted(anchors)).lower() or 'none'}",
@@ -349,9 +353,14 @@ def load_age_anchored_survival_model(
     *,
     unanchored: CalibratedCohortSurvivalModel | NetRetainedSurvivalModel | None = None,
 ) -> AgeAnchoredSurvivalModel:
-    """The net-retained curve with the committed, reviewed age anchor artifact."""
+    """The net-retained curve with the committed, reviewed age anchor artifact.
 
-    payload = json.loads((path or AGE_ANCHOR_PATH).read_text(encoding="utf-8"))
+    The method ends with the artifact's digest: a snapshot id derives from the
+    method names, so an edited anchor must not keep the name of the one before.
+    """
+
+    raw = (path or AGE_ANCHOR_PATH).read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
     model = unanchored or load_net_retained_survival_model()
     if payload["base_method"] != model.method:
         raise ValueError("the age anchor was calibrated on another survival model")
@@ -362,6 +371,7 @@ def load_age_anchored_survival_model(
             for geography, market in payload["markets"].items()
         },
         method=payload["method"],
+        artifact_digest=sha256(raw).hexdigest()[:12],
     )
 
 

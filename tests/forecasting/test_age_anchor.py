@@ -161,3 +161,19 @@ def test_the_committed_anchor_excludes_gb_and_keeps_only_markets_it_predicted_be
     assert load_survival_model_for(model.method).method == model.method
     for item in model.assumption_ids:
         assert fullmatch(_IDENTIFIER, item), item
+
+
+def test_the_anchored_method_names_the_exact_anchor_artifact(tmp_path) -> None:
+    # A snapshot id derives from the method names, so an edited anchor file must
+    # change the method, or two different ledgers would share one snapshot id.
+    committed = load_age_anchored_survival_model()
+    document = json.loads(AGE_ANCHOR_PATH.read_text(encoding="utf-8"))
+    edited = dict(document, markets=dict(document["markets"]))
+    edited["markets"].pop(next(iter(edited["markets"])))
+    path = tmp_path / "anchor.json"
+    path.write_text(json.dumps(edited), encoding="utf-8")
+
+    changed = load_age_anchored_survival_model(path)
+
+    assert changed.method != committed.method
+    assert committed.method.startswith(changed.unanchored.method + "+eurostat-age-anchor-v1-")

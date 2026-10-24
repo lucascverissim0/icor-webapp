@@ -63,7 +63,8 @@ def test_official_source_snapshot_versions_do_not_claim_unimplemented_methods() 
     )
     assert (
         OFFICIAL_SOURCE_VERSIONS.survival_method
-        == "uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1+eurostat-age-anchor-v1"
+        == "uk-dft-licensed-stock-band-v1+eurostat-net-retention-v1"
+        "+eurostat-age-anchor-v1-fa4840774888"
         == load_age_anchored_survival_model().method
     )
     assert (
