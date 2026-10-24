@@ -8822,7 +8822,7 @@ not touched.
 **`b71b1de`:** `snapshot_data_coverage._fleet` ages register cohorts without the anchor, as planning does. Without this, an anchored snapshot is refused "as built with another curve". A discriminating test was added; it failed before the fix.
 
 **Snapshots:**
-- `snapshot-f855028c8a5da55154b2` (anchored, HR included) was built, promoted and marked verified. It is **still active but superseded by `5cac178`**: the HR-excluded rebuild was interrupted by a shutdown and must be redone.
+- `snapshot-f855028c8a5da55154b2` (anchored, HR included) was built, promoted and marked verified. It was replaced on 2026-10-24 by `snapshot-6a5957833f328e0e63f9` (HR excluded) and deleted; see the next section.
 - At f855028, against b75d917: AT ×1.067, CY ×2.19, DE ×0.979, ES ×1.027, IT ×1.107, LV ×1.30, PT ×1.32, RO ×1.51, HR ×1.95 (now excluded). Every other market is unchanged, and the row counts are identical.
 - `b75d917` and its candidate copy were deleted, along with its private backtest and calibration files.
 
@@ -8867,3 +8867,56 @@ The exact resume steps are in Lucas's plan `~/.claude/plans/pasted-content-id-22
 - installs flyctl and logs in;
 - sets the 3 secrets via `fly secrets import`;
 - says go.
+
+## 2026-10-24 — HR-excluded snapshot live, client release rebuilt, gates green (Claude Code)
+
+**Defect found and fixed (`6335900`).** The HR-excluded rebuild minted `snapshot-f855028c8a5da55154b2`
+again with a different database (sha 5d1de… vs 18c95…). The snapshot id derives from the method
+names (`snapshot_identity` in `src/icor/application/snapshot_build.py`), and editing
+`eurostat_age_anchor.json` kept the method name. Lucas chose "hash the anchor file":
+- `load_age_anchored_survival_model` passes `artifact_digest` (sha256 prefix of the file bytes);
+  the method is now `…+eurostat-age-anchor-v1-fa4840774888`, pinned in `OFFICIAL_SOURCE_VERSIONS`.
+- Assumption ids keep the bare method (the digest pushed one past the 80-char identifier limit).
+- Test `test_the_anchored_method_names_the_exact_anchor_artifact` failed before, passes after.
+- **Residual risk:** `uk_licensed_stock.json` and `eurostat_net_retention.json` are not digested
+  (their method names feed the next layer's `base_method` check). Any edit to them must bump
+  their method name by hand, or the same id collision recurs.
+- Code can no longer verify snapshots built before `6335900` (fail-closed); none remain.
+
+**Snapshot `snapshot-6a5957833f328e0e63f9`** (db sha 77076cb6…), promoted, verified, mark-verified.
+- Versus f855028, per-market 2028 P50 fleet: HR 1,402,066 → 720,204 (×0.514 = 1/1.95, back to
+  unanchored); all 29 other markets identical; every table's row count identical.
+- f855028 snapshot, its candidate, backtests, calibration and report deleted.
+
+**Measured:** `backtest_code_ranges` unchanged from yesterday: raw pooled 0.770, LT 0.49, gate FAIL,
+app range status `failed` (no measured range ships, as decided). Anchored alternative 0.781 PASS.
+
+**Review re-stamp:** round `snapshot-6a59578`, `prepare --only-undecided` selected 0 identities
+(share 0.99003); merged `snapshot-f855028/decided/mixed-01.json`; only `metadata.snapshot_id` and
+`rounds` changed (817 families, 1,746 identities).
+
+**Report** `data-coverage-snapshot-6a5957833f328e0e63f9.*`: only HR's bands differ from f855028;
+HR <2 y 1.101, 2–5 y 0.665 of official; anchored markets' young bands 0.94–1.01; fleet total
+206.00M → 205.50M.
+
+**Client release:**
+- `.local/client-evidence` = `snapshot-8af33b9d4e3f6a2b7ba3` (dac0529 deleted), verify `verified`.
+  It also holds a 1-byte `.promotion.lock` from 2026-10-23; preflight accepts it.
+- `.local/client-eurocode` rebuilt: 1,743 reviewed identities, 3 unranked left out.
+- Preflight `ready: true`; `verify_client_release --local --username client-reviewer`:
+  33 passed, 0 failed, boot 37.7 s, max RSS 679 MB (`/usr/bin/time -l`).
+- `.local/client-release` rebuilt with `VITE_ICOR_CLIENT_RELEASE=verified` (528 KB; hash differs
+  from a plain build, so the flag took).
+
+**Gates (fresh):**
+- `uv lock --check` ok; CI ruff list "All checks passed!"; typecheck, lint, `openapi:check` ok.
+- `npm audit --audit-level=high` failed on 6 dev-only advisories (happy-dom, vite, brace-expansion,
+  source-map-js, undici, zod via eslint-plugin-react-hooks). Fixed in `483c6e7`
+  (`npm audit fix` + happy-dom ^21.0.4); 2 moderate `@vitest/mocker` remain, below the gate.
+- Via `tools/heavy.sh`: pytest 1563 passed, 6 skipped, 4 xfailed; Vitest 151/151; build ok;
+  Playwright 32/32; no e2e orphans.
+
+**Deploy still needs Lucas:** revoke the old OpenAI key, `brew install flyctl`, `fly auth login`,
+`fly secrets import` (3 secrets), then an explicit go. Then `fly deploy --remote-only` and the
+smoke steps in `docs/CLIENT_RELEASE.md`.
+
