@@ -8920,3 +8920,9 @@ HR <2 y 1.101, 2–5 y 0.665 of official; anchored markets' young bands 0.94–1
 `fly secrets import` (3 secrets), then an explicit go. Then `fly deploy --remote-only` and the
 smoke steps in `docs/CLIENT_RELEASE.md`.
 
+
+**Push, backup, service (2026-10-24):** pushed `d30621b..276bbd4` fast-forward after a clean leak scan
+(0 catalogue descriptions/codes, 0 credential patterns in 190 added lines); HEAD = origin.
+`backup_private_data.py` pushed 457 files, `--verify` matches (manifest 79fe4580…). Planner service
+running (api :8000 pid 55967, web :5173 pid 55968; stop with `scripts/planner_service.py stop`);
+`/api/v1/eurocodes/status` reports decisions for `snapshot-6a5957833f328e0e63f9`.
